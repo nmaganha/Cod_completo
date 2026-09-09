@@ -1,0 +1,169 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyChainedComparisonsInspection" enabled="true" level="WEAK WARNING" enabled_by_default="true">
+      <option name="ignoreConstantInTheMiddle" value="true" />
+    </inspection_tool>
+    <inspection_tool class="PyInterpreterInspection" enabled="false" level="TYPO" enabled_by_default="false" />
+    <inspection_tool class="PyPep8Inspection" enabled="true" level="WEAK WARNING" enabled_by_default="true">
+      <option name="ignoredErrors">
+        <list>
+          <option value="E302" />
+          <option value="E305" />
+          <option value="E501" />
+          <option value="E203" />
+          <option value="E114" />
+          <option value="E231" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyPep8NamingInspection" enabled="true" level="WEAK WARNING" enabled_by_default="true">
+      <option name="ignoredErrors">
+        <list>
+          <option value="N806" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyUnresolvedReferencesInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredIdentifiers">
+        <list>
+          <option value="cchave.pandas" />
+          <option value="main.entry_inicio" />
+          <option value="main.combobox_localidade" />
+          <option value="main.entry_instalacao" />
+          <option value="main.entry_equipamento" />
+          <option value="main.text_descricao" />
+          <option value="main.text_observacao" />
+          <option value="main.combobox_ativo" />
+          <option value="main.info_relev" />
+          <option value="main.entry_tagalarme" />
+          <option value="main.combobox_resp" />
+          <option value="main.entry_operador" />
+          <option value="main.alar_sinal" />
+          <option value="main.combobox_estacao" />
+          <option value="main.entry_complemento" />
+          <option value="main.anom_telem" />
+          <option value="main.entry_termino" />
+          <option value="main.combobox_unidade" />
+          <option value="main.entry_potencia" />
+          <option value="main.text_informacao" />
+          <option value="main.combobox_ons" />
+          <option value="main.comp_disp" />
+          <option value="main.combobox_mcontrole" />
+          <option value="main.combobox_mrede" />
+          <option value="main.text_motivo" />
+          <option value="main.comut_malha" />
+          <option value="main.combobox_motivo" />
+          <option value="main.cont_balsa" />
+          <option value="main.desc_parc" />
+          <option value="main.falh_comm" />
+          <option value="main.combobox_local" />
+          <option value="main.falh_sdsc" />
+          <option value="main.pert_equip" />
+          <option value="main.falha_saca" />
+          <option value="main.entry_protocolo" />
+          <option value="main.falh_saca" />
+          <option value="main.info_ons" />
+          <option value="main.trans_paqu" />
+          <option value="main.habil_ece" />
+          <option value="tuple.place" />
+          <option value="tuple.delete" />
+          <option value="tuple.get" />
+          <option value="main.abertura" />
+          <option value="main.entry_usuario" />
+          <option value="main.entry_senha" />
+          <option value="main.login_window" />
+          <option value="main.root" />
+          <option value="main.meuMenu" />
+          <option value="main.criar_tela_login" />
+          <option value="main.combo_grupo_localidade" />
+          <option value="main.cmd_click7" />
+          <option value="main.where_clauses" />
+          <option value="main.localidade" />
+          <option value="main.verificar_admin" />
+          <option value="main.cmd_click_cadastrar_usuario" />
+          <option value="main.Combobox" />
+          <option value="main.selecionar_data" />
+          <option value="main.combo_tagavato_filtro" />
+          <option value="main.filtro_avato" />
+          <option value="main.invalidar_registro" />
+          <option value="main.valor_exibicao" />
+          <option value="main.colunas" />
+          <option value="main.nome_tabela" />
+          <option value="main.titulo" />
+          <option value="main.entry_intalacao" />
+          <option value="main.Florianópolis" />
+          <option value="main.combo_intalacoes" />
+          <option value="main.entry_telefone_responsavel" />
+          <option value="main.Label" />
+          <option value="main.combobox_instalacao" />
+          <option value="main.instalacao" />
+          <option value="main.var_cb1" />
+          <option value="main.var_cb2" />
+          <option value="main.var_cb3" />
+          <option value="main.var_cb4" />
+          <option value="main.var_cb5" />
+          <option value="main.var_cb6" />
+          <option value="main.var_cb7" />
+          <option value="main.var_cb8" />
+          <option value="main.var_cb9" />
+          <option value="main.var_cb10" />
+          <option value="main.var_cb11" />
+          <option value="main.var_cb12" />
+          <option value="main.var_cb13" />
+          <option value="main.var_cb14" />
+          <option value="main.var_cb15" />
+          <option value="main.var_cb16" />
+          <option value="main.var_cb17" />
+          <option value="main.var_cb1p" />
+          <option value="main.var_cb2p" />
+          <option value="main.var_cb3p" />
+          <option value="main.var_cb4p" />
+          <option value="main.var_cb5p" />
+          <option value="main.var_cb6p" />
+          <option value="main.var_cb7p" />
+          <option value="main.var_cb8p" />
+          <option value="main.q1_percentage" />
+          <option value="main.q2_percentage" />
+          <option value="main.q3_percentage" />
+          <option value="main.q4_percentage" />
+          <option value="main.result_label" />
+          <option value="main.entries" />
+          <option value="main.cmd_click18" />
+          <option value="str.delete" />
+          <option value="str.get" />
+          <option value="main.nam_m" />
+          <option value="main.nam_a" />
+          <option value="main.tmp_int" />
+          <option value="main.timedelta" />
+          <option value="main.calcular_linhas_por_hora" />
+          <option value="main.tmp_man" />
+          <option value="main.key" />
+          <option value="main.valores_iniciais" />
+          <option value="main.hb" />
+          <option value="main.q_turb" />
+          <option value="main.data_hora" />
+          <option value="main.geracao_total" />
+          <option value="main.i" />
+          <option value="main.novo_nam" />
+          <option value="main.prev" />
+          <option value="main.nova_hora" />
+          <option value="main.q_vert" />
+          <option value="main.q_defl" />
+          <option value="main.obter_valor" />
+          <option value="main.res" />
+          <option value="main.tempo_acumulado" />
+          <option value="main.data_termino" />
+          <option value="main.data_inicio" />
+          <option value="main.resetar_dados" />
+          <option value="main.alternar_visualizacao" />
+          <option value="main.produtibi" />
+          <option value="main.delta_cs1_real" />
+          <option value="main.delta_cs2_real" />
+          <option value="main.delta_cs3_real" />
+          <option value="str.place" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>
