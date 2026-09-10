@@ -1,5 +1,4 @@
-# Código atualizado em 09-09-26 – 17:00 (Melhorado inclusão e correção das manobras
-# no click22)
+# Código atualizado em 09-09-26 – 20:55 (Inclusão do Click_23)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -8516,7 +8515,7 @@ PASTA_BASE = os.path.dirname(os.path.abspath(__file__))
 QUESTOES_CSV = os.path.join(PASTA_BASE, "banco_questoes_click23.csv")
 RESULTADOS_CSV = os.path.join(PASTA_BASE, "resultados_click23.csv")
 
-COLUNAS_QUESTOES = ["disciplina", "pergunta", "opcao_a", "opcao_b", "opcao_c", "opcao_d", "resposta_correta"]
+COLUNAS_QUESTOES = ["assunto", "pergunta", "opcao_a", "opcao_b", "opcao_c", "opcao_d", "resposta_correta"]
 COLUNAS_RESULTADOS = ["nome", "data_hora", "acertos", "total", "percentual"]
 
 # Quantidades de questões que o usuário pode escolher para responder
@@ -8585,7 +8584,7 @@ def criar_grafico_resultado(parent, percentual_usuario, percentual_media, meta=7
 
     barras = ax.bar(categorias, valores, color=cores, width=0.5)
     ax.axhline(y=meta, color="red", linestyle="--", linewidth=1.5)
-    ax.text(1.35, meta + 2, f"Avaliação Meta ({meta:.0f}%)", color="red", fontsize=9, ha="right")
+    ax.text(1.35, meta + 2, f"Meta ({meta:.0f}%)", color="red", fontsize=9, ha="right")
 
     for barra, valor in zip(barras, valores):
         ax.text(barra.get_x() + barra.get_width() / 2, valor + 2, f"{valor:.1f}%",
@@ -8653,7 +8652,7 @@ def cmd_click23():
 
     def tela_quantidade():
         limpar_conteudo()
-        rodape_label.config(text=f"Jogador: {estado['nome']}")
+        rodape_label.config(text=f"Treinando: {estado['nome']}")
 
         Label(conteudo_frame, text=f"Olá, {estado['nome']}! Escolha quantas questões deseja responder:",
               bg="#F0F0F0", font=("Arial", 12, "bold"), wraplength=800).place(x=30, y=40)
@@ -8691,7 +8690,7 @@ def cmd_click23():
 
         total = estado["total_perguntas"]
         rodape_label.config(
-            text=f"Jogador: {estado['nome']}    |    Pergunta {idx + 1} de {total}    |    Disciplina: {pergunta['disciplina']}")
+            text=f"Treinando: {estado['nome']}    |    Pergunta {idx + 1} de {total}    |    Assunto: {pergunta['assunto']}")
 
         Label(conteudo_frame, text=f"Questão {idx + 1}: {pergunta['pergunta']}", bg="#F0F0F0",
               font=("Arial", 12, "bold"), wraplength=800, justify="left").place(x=30, y=25, width=800)

@@ -3,3 +3,5 @@ pip install pandas fpdf2 tkcalendar openpyxl
 com o click21 verificar caminho de repositorio dos arquivos pdf
 click21 implementado em 10/0/2026
 click22 implementado em 10/05/2026 - para que funcione foi necessario o pip install requests
+click23 pip install matiplotlib + from matplotlib.figure import Figure  # exclusivo para o click23 +
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # exclusivo para o click23
