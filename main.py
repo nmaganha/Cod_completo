@@ -1,4 +1,4 @@
-# Código atualizado em 09-09-26 – 20:55 (Inclusão do Click_23)
+# Código atualizado em 12-09-26 – 17,12 (Inclusão do Click_23)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -8515,17 +8515,28 @@ PASTA_BASE = os.path.dirname(os.path.abspath(__file__))
 QUESTOES_CSV = os.path.join(PASTA_BASE, "banco_questoes_click23.csv")
 RESULTADOS_CSV = os.path.join(PASTA_BASE, "resultados_click23.csv")
 
-COLUNAS_QUESTOES = ["assunto", "pergunta", "opcao_a", "opcao_b", "opcao_c", "opcao_d", "resposta_correta"]
-COLUNAS_RESULTADOS = ["nome", "data_hora", "acertos", "total", "percentual"]
+SEPARADOR_CSV_QUESTOES = ";"
 
-# Quantidades de questões que o usuário pode escolher para responder
+COLUNAS_QUESTOES = ["assunto", "localidade", "pergunta", "opcao_a", "opcao_b", "opcao_c", "opcao_d",
+                     "resposta_correta"]
+COLUNAS_RESULTADOS = ["nome", "data_hora_inicio", "data_hora_fim", "tempo_execucao",
+                       "assunto_selecionado", "acertos", "total", "percentual"]
+
+# Quantidades de questões que o treinando pode escolher para responder
 OPCOES_QUANTIDADE_QUESTOES = [10, 20, 30, 40]
+
+# Localidades aceitas na coluna "localidade" do banco de questões e no filtro da tela.
+# Uma questão marcada como "TODAS" é considerada válida para qualquer localidade selecionada.
+OPCOES_LOCALIDADE = ["TODAS", "MGP", "SJO", "QUE", "LAV", "FGO", "VIE", "PTM", "JDT"]
+
+# Usuários autorizados a ver o botão "Relatório dos treinandos"
+USUARIOS_RELATORIO = ["nmaganha", "jbarros"]
 
 
 def obter_nome_usuario_logado():
     """Extrai o nome puro do usuário a partir do current_user da sessão de login
-    (formato 'usuario em dd/mm/aaaa - HH:Mmh'), para identificar o participante
-    do questionário sem precisar de seleção manual."""
+    (formato 'usuario em dd/mm/aaaa - HH:Mmh'), para identificar o treinando
+    sem precisar de seleção manual."""
     if not current_user:
         return None
     return current_user.split(" em ")[0].strip()
@@ -8535,27 +8546,68 @@ def garantir_banco_questoes():
     """Verifica se o arquivo CSV do banco de questões existe.
 
     As questões não ficam no código: elas vêm de um arquivo CSV externo
-    (banco_questoes_click23.csv), que pode ser mantido com centenas de
-    linhas (ex.: 400 questões) sem qualquer alteração neste programa.
+    (banco_questoes_click23.csv, separado por ';'), que pode ser mantido com
+    centenas de linhas (ex.: 400 questões) sem qualquer alteração neste programa.
     """
     if not os.path.exists(QUESTOES_CSV):
         raise FileNotFoundError(
             f"Banco de questões não encontrado: {QUESTOES_CSV}\n"
-            f"Crie o arquivo CSV com as colunas: {', '.join(COLUNAS_QUESTOES)}"
+            f"Crie o arquivo CSV (separado por ';') com as colunas: {', '.join(COLUNAS_QUESTOES)}"
         )
 
 
 def carregar_questoes():
-    """Lê o banco de questões do CSV e retorna uma lista de dicionários."""
-    df = pd.read_csv(QUESTOES_CSV, encoding="utf-8-sig")
+    """Lê o banco de questões do CSV (separado por ';') e retorna uma lista de dicionários."""
+    df = pd.read_csv(QUESTOES_CSV, sep=SEPARADOR_CSV_QUESTOES, encoding="utf-8-sig")
     return df.to_dict(orient="records")
 
 
-def salvar_resultado(nome, data_hora, acertos, total, percentual):
-    """Grava o resultado do participante no histórico em CSV."""
+def filtrar_questoes(banco, localidade_selecionada, assunto_selecionado):
+    """Filtra as questões pela localidade e pelo assunto escolhidos.
+
+    'TODAS' em qualquer um dos filtros significa ausência de filtro naquele campo.
+    Uma questão cadastrada como localidade 'TODAS' atende a qualquer localidade
+    específica selecionada (funciona como curinga)."""
+    resultado = []
+    for questao in banco:
+        localidade_questao = str(questao.get("localidade", "")).strip().upper()
+        assunto_questao = str(questao.get("assunto", "")).strip()
+
+        loc_ok = (localidade_selecionada == "TODAS" or localidade_questao == localidade_selecionada
+                  or localidade_questao == "TODAS")
+        assunto_ok = (assunto_selecionado == "TODAS" or assunto_questao == assunto_selecionado)
+
+        if loc_ok and assunto_ok:
+            resultado.append(questao)
+    return resultado
+
+
+def migrar_resultados_se_necessario():
+    """Se o arquivo de resultados existir com um esquema de colunas antigo (de uma versão
+    anterior do Click_23), faz backup dele e inicia um novo arquivo com o esquema atual,
+    evitando misturar linhas com layouts diferentes."""
+    if not os.path.exists(RESULTADOS_CSV):
+        return
+    try:
+        colunas_atuais = pd.read_csv(RESULTADOS_CSV, encoding="utf-8-sig", nrows=0).columns.tolist()
+    except Exception:
+        colunas_atuais = []
+
+    if colunas_atuais != COLUNAS_RESULTADOS:
+        selo = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup = os.path.join(PASTA_BASE, f"resultados_click23_backup_{selo}.csv")
+        os.replace(RESULTADOS_CSV, backup)
+
+
+def salvar_resultado(nome, data_hora_inicio, data_hora_fim, tempo_execucao, assunto_selecionado,
+                      acertos, total, percentual):
+    """Grava o resultado do treinando no histórico em CSV."""
     novo = pd.DataFrame([{
         "nome": nome,
-        "data_hora": data_hora,
+        "data_hora_inicio": data_hora_inicio,
+        "data_hora_fim": data_hora_fim,
+        "tempo_execucao": tempo_execucao,
+        "assunto_selecionado": assunto_selecionado,
         "acertos": acertos,
         "total": total,
         "percentual": round(percentual, 1)
@@ -8574,7 +8626,7 @@ def calcular_media_geral():
 
 
 def criar_grafico_resultado(parent, percentual_usuario, percentual_media, meta=70):
-    """Cria o gráfico comparativo (nota do usuário x média geral x meta) embutido no Tkinter."""
+    """Cria o gráfico comparativo (nota do treinando x média geral x meta) embutido no Tkinter."""
     fig = Figure(figsize=(6.5, 3.3), dpi=100)
     ax = fig.add_subplot(111)
 
@@ -8584,7 +8636,7 @@ def criar_grafico_resultado(parent, percentual_usuario, percentual_media, meta=7
 
     barras = ax.bar(categorias, valores, color=cores, width=0.5)
     ax.axhline(y=meta, color="red", linestyle="--", linewidth=1.5)
-    ax.text(1.35, meta + 2, f"Meta ({meta:.0f}%)", color="red", fontsize=9, ha="right")
+    ax.text(0.55, meta + 2, f"Meta ({meta:.0f}%)", color="red", fontsize=9, ha="right")
 
     for barra, valor in zip(barras, valores):
         ax.text(barra.get_x() + barra.get_width() / 2, valor + 2, f"{valor:.1f}%",
@@ -8621,6 +8673,10 @@ def cmd_click23():
         messagebox.showerror("Banco de questões ausente", str(erro))
         return
 
+    migrar_resultados_se_necessario()
+
+    pode_ver_relatorio = nome_logado.strip().lower() in [u.lower() for u in USUARIOS_RELATORIO]
+
     quiz_win = Toplevel(root)
     quiz_win.title('COG - AUTO-AVALIAÇÃO')
     quiz_win.geometry('900x600')
@@ -8643,6 +8699,8 @@ def cmd_click23():
         "indice": 0,
         "acertos": 0,
         "total_perguntas": 10,
+        "assunto_selecionado": "TODAS",
+        "inicio": None,
         "resposta_var": None
     }
 
@@ -8650,38 +8708,137 @@ def cmd_click23():
         for widget in conteudo_frame.winfo_children():
             widget.destroy()
 
-    def tela_quantidade():
+    def gerar_relatorio_treinandos():
+        if not os.path.exists(RESULTADOS_CSV):
+            messagebox.showwarning("Aviso", "Ainda não há resultados registrados.", parent=quiz_win)
+            return
+
+        df = pd.read_csv(RESULTADOS_CSV, encoding="utf-8-sig")
+        if df.empty:
+            messagebox.showwarning("Aviso", "Ainda não há resultados registrados.", parent=quiz_win)
+            return
+
+        try:
+            data_hora_atual = datetime.now().strftime("%d/%m/%Y às %H:%M")
+
+            colunas_header = ["Usuário", "Início", "Término", "Tempo", "Assunto", "Qtd.", "Acertos", "%"]
+            larguras_header = [35, 32, 32, 24, 54, 15, 20, 18]
+
+            class PDFTreinandos(FPDF):
+                def header(self):
+                    self.set_font("helvetica", 'B', 14)
+                    self.cell(0, 10, "Relatório dos Treinandos - Auto-Avaliação (Click_23)", 0,
+                              new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
+                    self.set_font("helvetica", 'I', 10)
+                    self.cell(0, 6, f"Gerado em: {data_hora_atual}", 0,
+                              new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
+                    self.ln(5)
+                    self.set_font("helvetica", 'B', 9)
+                    for col, larg in zip(colunas_header, larguras_header):
+                        self.cell(larg, 8, col, border=1, align='C')
+                    self.ln()
+
+            pdf = PDFTreinandos(orientation='L', unit='mm', format='A4')
+            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.add_page()
+
+            pdf.set_font("helvetica", size=8)
+            for _, linha in df.iterrows():
+                if pdf.get_y() > 180:
+                    pdf.add_page()
+
+                valores = [
+                    str(linha.get("nome", "-")),
+                    str(linha.get("data_hora_inicio", "-")),
+                    str(linha.get("data_hora_fim", "-")),
+                    str(linha.get("tempo_execucao", "-")),
+                    str(linha.get("assunto_selecionado", "-")),
+                    str(linha.get("total", "-")),
+                    str(linha.get("acertos", "-")),
+                    f"{float(linha.get('percentual', 0)):.1f}%"
+                ]
+                for valor, larg in zip(valores, larguras_header):
+                    pdf.cell(larg, 7, valor, border=1, align='C')
+                pdf.ln()
+
+            nome_arquivo = os.path.join(PASTA_BASE, "relatorio_treinandos_click23.pdf")
+            pdf.output(nome_arquivo)
+            os.startfile(nome_arquivo)
+            messagebox.showinfo("Sucesso", "Relatório dos treinandos gerado com sucesso!", parent=quiz_win)
+        except Exception as erro:
+            messagebox.showerror("Erro", f"Falha ao gerar o relatório: {erro}", parent=quiz_win)
+
+    def tela_configuracao():
         limpar_conteudo()
         rodape_label.config(text=f"Treinando: {estado['nome']}")
 
-        Label(conteudo_frame, text=f"Olá, {estado['nome']}! Escolha quantas questões deseja responder:",
-              bg="#F0F0F0", font=("Arial", 12, "bold"), wraplength=800).place(x=30, y=40)
+        Label(conteudo_frame, text=f"Olá, {estado['nome']}! Escolha o formato das questões que deseja responder:",
+              bg="#F0F0F0", font=("Arial", 12, "bold"), wraplength=800).place(x=30, y=30)
 
+        banco_atual = carregar_questoes()
+        opcoes_assunto = ["TODAS"] + sorted({str(q["assunto"]).strip() for q in banco_atual})
+
+        # Coluna 1 - Número de questões
+        Label(conteudo_frame, text="Número de questões", bg="#F0F0F0",
+              font=("Arial", 11, "bold")).place(x=40, y=90)
         quantidade_var = IntVar(value=OPCOES_QUANTIDADE_QUESTOES[0])
-        y_pos = 90
-        for qtd in OPCOES_QUANTIDADE_QUESTOES:
-            Radiobutton(conteudo_frame, text=f"{qtd} questões", variable=quantidade_var, value=qtd,
-                        bg="#F0F0F0", font=("Arial", 11)).place(x=50, y=y_pos, width=200, height=28)
-            y_pos += 40
+        ttk.Combobox(conteudo_frame, textvariable=quantidade_var, values=OPCOES_QUANTIDADE_QUESTOES,
+                     state="readonly", justify='center', font=("Arial", 11), width=15
+                     ).place(x=40, y=120, height=28)
+
+        # Coluna 2 - Localidade
+        Label(conteudo_frame, text="Localidade", bg="#F0F0F0",
+              font=("Arial", 11, "bold")).place(x=320, y=90)
+        localidade_var = StringVar(value="TODAS")
+        ttk.Combobox(conteudo_frame, textvariable=localidade_var, values=OPCOES_LOCALIDADE,
+                     state="readonly", justify='center', font=("Arial", 11), width=15
+                     ).place(x=320, y=120, height=28)
+
+        # Coluna 3 - Assunto
+        Label(conteudo_frame, text="Assunto", bg="#F0F0F0",
+              font=("Arial", 11, "bold")).place(x=560, y=90)
+        assunto_var = StringVar(value="TODAS")
+        ttk.Combobox(conteudo_frame, textvariable=assunto_var, values=opcoes_assunto,
+                     state="readonly", justify='center', font=("Arial", 11), width=22
+                     ).place(x=560, y=120, height=28)
 
         def iniciar():
-            quantidade = quantidade_var.get()
+            quantidade = int(quantidade_var.get())
+            localidade_sel = localidade_var.get()
+            assunto_sel = assunto_var.get()
+
             banco = carregar_questoes()
-            if len(banco) < quantidade:
+            disponiveis = filtrar_questoes(banco, localidade_sel, assunto_sel)
+
+            if len(disponiveis) < quantidade:
                 messagebox.showerror(
-                    "Erro",
-                    f"O banco de questões precisa ter pelo menos {quantidade} perguntas (há {len(banco)}).",
+                    "Questões insuficientes",
+                    f"Não existem questões suficientes para montar o questionário no formato selecionado:\n\n"
+                    f"Questões: {quantidade}  |  Localidade: {localidade_sel}  |  Assunto: {assunto_sel}\n\n"
+                    f"Há apenas {len(disponiveis)} questão(ões) disponível(is) para essa combinação.\n\n"
+                    f"Tente reduzir o número de questões, alterar a localidade ou o assunto, "
+                    f"ou selecionar TODAS em uma ou ambas as opções.",
                     parent=quiz_win)
                 return
 
             estado["total_perguntas"] = quantidade
-            estado["perguntas"] = random.sample(banco, quantidade)
+            estado["assunto_selecionado"] = assunto_sel
+            estado["perguntas"] = random.sample(disponiveis, quantidade)
             estado["indice"] = 0
             estado["acertos"] = 0
+            estado["inicio"] = datetime.now()
             mostrar_pergunta()
 
+        largura_botao = 220
+        x_centralizado = 30 + (800 - largura_botao) // 2
+
         Button(conteudo_frame, text="Iniciar Questionário", command=iniciar, bg="#024593", fg="white",
-               font=("Arial", 11, "bold")).place(x=50, y=y_pos + 10, width=200, height=32)
+               font=("Arial", 11, "bold")).place(x=x_centralizado, y=350, width=largura_botao, height=35)
+
+        if pode_ver_relatorio:
+            Button(conteudo_frame, text="Relatório dos treinandos", command=gerar_relatorio_treinandos,
+                   bg="#555555", fg="white", font=("Arial", 11, "bold")
+                   ).place(x=x_centralizado, y=400, width=largura_botao, height=35)
 
     def mostrar_pergunta():
         limpar_conteudo()
@@ -8739,9 +8896,22 @@ def cmd_click23():
         acertos = estado["acertos"]
         total = estado["total_perguntas"]
         percentual = (acertos / total) * 100
-        agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-        salvar_resultado(estado["nome"], agora, acertos, total, percentual)
+        inicio = estado["inicio"]
+        fim = datetime.now()
+        duracao_seg = int((fim - inicio).total_seconds())
+        horas, resto_seg = divmod(duracao_seg, 3600)
+        minutos, segundos = divmod(resto_seg, 60)
+        tempo_execucao = f"{horas:02d}:{minutos:02d}:{segundos:02d}"
+
+        salvar_resultado(
+            estado["nome"],
+            inicio.strftime("%d/%m/%Y %H:%M:%S"),
+            fim.strftime("%d/%m/%Y %H:%M:%S"),
+            tempo_execucao,
+            estado["assunto_selecionado"],
+            acertos, total, percentual
+        )
         percentual_media = calcular_media_geral()
 
         limpar_conteudo()
@@ -8758,12 +8928,12 @@ def cmd_click23():
         grafico = criar_grafico_resultado(conteudo_frame, percentual, percentual_media)
         grafico.get_tk_widget().place(x=30, y=90, width=800, height=290)
 
-        Button(conteudo_frame, text="Responder Novamente", command=tela_quantidade,
+        Button(conteudo_frame, text="Responder Novamente", command=tela_configuracao,
                bg="#024593", fg="white", font=("Arial", 11, "bold")).place(x=30, y=400, width=200, height=35)
         Button(conteudo_frame, text="Fechar", command=quiz_win.destroy,
                bg="#FF0000", fg="white", font=("Arial", 11, "bold")).place(x=250, y=400, width=120, height=35)
 
-    tela_quantidade()
+    tela_configuracao()
 
 # =======cascate PRIMEIRA PARTE termina aqui
 

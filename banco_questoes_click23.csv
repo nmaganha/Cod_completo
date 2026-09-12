@@ -1,66 +1,45 @@
-﻿assunto,pergunta,opcao_a,opcao_b,opcao_c,opcao_d,resposta_correta
-Matemática,Quanto é 7 x 8?,54,56,58,64,B
-Matemática,Qual é a raiz quadrada de 144?,10,11,12,14,C
-Matemática,Quanto é 15% de 200?,20,25,30,35,C
-Matemática,Qual o resultado de 9² - 5²?,56,60,64,81,A
-Português,Qual a classe gramatical da palavra 'rapidamente'?,Substantivo,Advérbio,Adjetivo,Pronome,B
-Português,Assinale o plural correto de 'cidadão':,Cidadães,Cidadões,Cidadãos,Cidadão's,C
-Português,Qual figura de linguagem está em 'Chove pedras de gelo'?,Metáfora,Hipérbole,Eufemismo,Ironia,B
-Português,"'Ele chegou, porém não avisou.' A conjunção destacada é:",Aditiva,Adversativa,Conclusiva,Explicativa,B
-História,Em que ano foi proclamada a Independência do Brasil?,1808,1822,1889,1500,B
-História,Quem foi o primeiro presidente do Brasil?,Dom Pedro II,Getúlio Vargas,Deodoro da Fonseca,Juscelino Kubitschek,C
-História,A Revolução Francesa teve início em:,1789,1776,1804,1815,A
-História,Qual evento marcou o fim da Segunda Guerra Mundial?,Queda do Muro de Berlim,Rendição do Japão,Revolução Russa,Tratado de Versalhes,B
-Geografia,Qual é o maior país do mundo em extensão territorial?,China,Estados Unidos,Rússia,Canadá,C
-Geografia,Qual é o rio mais extenso do mundo?,Nilo,Amazonas,Yangtzé,Mississippi,B
-Geografia,Quantos estados possui a Região Norte do Brasil?,5,6,7,9,C
-Geografia,Qual é a capital da Austrália?,Sydney,Melbourne,Camberra,Perth,C
-Ciências,Qual é o principal gás responsável pelo efeito estufa?,Oxigênio,Nitrogênio,Gás Carbônico,Hidrogênio,C
-Ciências,"Quantos ossos tem, aproximadamente, o corpo humano adulto?",156,186,206,226,C
-Ciências,Qual órgão é responsável por bombear o sangue no corpo?,Pulmão,Fígado,Coração,Rim,C
-Ciências,Qual é a unidade básica da vida?,Átomo,Célula,Molécula,Tecido,B
-Informática,O que significa a sigla 'CPU'?,Central Process Unit,Central Processing Unit,Computer Personal Unit,Central Program Unit,B
-Informática,Qual desses é um sistema operacional?,Excel,Chrome,Linux,Word,C
-Informática,O que é 'RAM' em um computador?,Memória de armazenamento permanente,Memória volátil de curto prazo,Um tipo de processador,Uma linguagem de programação,B
-Informática,Qual extensão é usada para arquivos do Excel?,.docx,.pptx,.xlsx,.pdf,C
-Atualidades,Qual é a moeda oficial da União Europeia?,Dólar,Euro,Libra,Franco,B
-Atualidades,Em que continente fica o Egito?,Ásia,Europa,África,Oceania,C
-Atualidades,Qual é o maior oceano do planeta?,Atlântico,Índico,Ártico,Pacífico,D
-Atualidades,Quantos jogadores compõem um time de futebol em campo?,9,10,11,12,C
-Comunicados,Qual é a faixa dos índices de saturação de oxigênio que torna o ambiente hostil para os peixes provocando a sua saída deste local?,De 50 a 100 % de saturação de oxigênio.,De 105 a 110 % de saturação de oxigênio.,De 115 a 120 % de saturação de oxigênio.,Maior que 120 % de saturação de oxigênio,B
-Comunicados,O primeiro contato com a defesa civil da cidade de Ferreira Gomes informando sobre a Vazão Defluente prevista ou praticada na UHE FGO é de?,2700 m3/s.,3000 m3/s.,3200 m3/s.,3500 m3/s.,A
-Comunicados,Qual é o valor da Vazão Defluente na UHE FGO onde se observa os primeiros pontos de alagamentos na cidade de Ferreira Gomes?,2700 m3/s.,3000 m3/s.,3200 m3/s.,3500 m3/s.,B
-Comunicados,Em que período do dia devemos evitar manobras nas comportas do vertedouro da UHE FGO?,Das 18:00 às 06:00 horas.,Das 00:00 às 06:00 horas.,Das 18:00 às 23:59 horas.,Das 20:00 às 23:59 horas.,A
-Comunicados,A partida das unidades geradoras da UHE Ferreira Gomes é efetuada de forma lenta para permitir a fuga dos peixes do local antes que a turbina atinja a rotação nominal. Qual é o tempo aproximado que a turbina leva para atingir 100% de sua rotação nominal?,10 minutos.,13.5 minutos.,20 minutos.,23.5 minutos.,B
-Comunicados,Durante o controle diário de geração (qual é o valor de geração mínimo) em que o operador tem autonomia para ajustar nas unidades geradoras?,20 MW.,21 MW.,24 MW.,25 MW.,C
-Comunicados,Em caso de necessidade de efetuar a alteração de geração de qualquer unidade geradora (qual é a taxa de variação máxima) a ser seguido nestas ocasiões?,5 MW a cada 5 minutos.,5 MW a cada 10 minutos.,10 MW a cada 5 minutos.,10 MW a cada 10 minutos.,C
-Comunicados,Estando a Vazão Defluente menor ou igual a 134 m3/s (qual é o Nível de Montante máximo) poderá ser atingido?,21.20m.,21.00m.,20.80m.,20.60m.,A
-Comunicados,Estando a Vazão Defluente maior que 134 m3/s e menor que 750 m3/s (qual o Nível de Montante máximo) poderá ser atingido?,21.20m.,21.00m.,20.80m.,20.60m.,C
-Comunicados,Estando a Vazão Defluente maior ou igual a 750 m3/s (qual o Nível de Montante máximo) poderá ser atingido?,21.20m.,21.00m.,20.80m.,20.60m.,D
-Comunicados,Qual é o valor do Delta (afogamento da comporta) que não podemos infringir durante as manobras das comportas do vertedouro até a posição de 1300mm em cada comporta?,Menor que 75 cm.,Menor que 85 cm e maior que 75 cm.,Menor que 65 cm.,Menor que 300 mm.,A
-Comunicados,De 300mm até 1300mm de abertura em cada comporta (as manobras nas comportas do vertedouro) deverão ser efetuadas em steps máximo de?,100 mm.,250 mm.,300 mm.,500 mm.,C
-Comunicados,Porque a parada programada de unidades geradoras por baixa afluência tem que ocorrer com o início da subida da maré?,Permitir que o delta da comporta seja cumprido mesmo em baixas vazões pois nesta situação o nível sobe e com isso aumenta o valor do delta.,Efetuar a manobra com menor presença de peixe no local (pois) quando a maré está alta existe mais peixes no local.,Permitir que o deplecionamento do rio (à jusante da usina) seja feito de forma natural por ocasião da redução da vazão defluente em função da parada da unidade geradora.,Em virtude dos índices de saturação de oxigênio ser menor quando a maré está baixa.,C
-Comunicados,Porque as manobras nas comportas do vertedouro devem ser executadas (preferencialmente) através do controle conjunto do SDSC do COG ou da UHE?,Para permitir movimentações simétricas das comportas.,Para possibilitar o monitoramento dos níveis de saturação de oxigênio.,Para acompanhar as posições de abertura das comportas do vertedouro.,Para acompanhar os valores de delta das comportas.,A
-Comunicados,Ao efetuar o comando de abertura da comporta de emergência da UHE FGO (qual é o tempo estimado) para que ela atinja a sua abertura total?,10 minutos.,12 minutos.,20 minutos.,22 minutos.,B
-Comunicados,"Quando os níveis de saturação de oxigênio atingir a faixa de 105 a 110%, devemos paralisar as manobras e aguardar por 30 minutos antes de dar início às próximas manobras. Esta espera é motivada por?",Para verificar se os níveis de saturação de oxigênio irão diminuir.,Permitir a fuga dos peixes deste ambiente para prosseguir com as manobras.,Para verificar se os níveis de saturação de oxigênio irão aumentar.,Para evitar a redução brusca do nível de jusante.,B
-Comunicados,Quando da necessidade de compensação entre a vazão vertida e a vazão turbinada (ou seja) redução de uma e aumento da outra não haverá necessidade de verificar os índices de saturação de oxigênio (uma vez que) nestas condições não há alteração do nível de jusante e com isso o delta não é alterado.,Verdadeiro.,Falso, , ,B
-Comunicados,As manobras de fechamento das comportas do vertedouro não necessitam de acionamento das equipes de meio ambiente para inspeção à jusante da usina?,Verdadeiro.,Falso., , ,B
-Comunicados,"Para os mancais que necessitam de lubrificação de óleo forçada, são aplicados os sistemas de lubrificação de óleo de modo a suprir as necessidades de lubrificação e ou resfriamento do mancal. Essa afirmação é verdadeira ou falsa?",Verdadeira.,Falsa., , ,A
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+assunto;localidade;pergunta;opcao_a;opcao_b;opcao_c;opcao_d;resposta_correta
+Matemática;TODAS;Quanto é 7 x 8?;54;56;58;64;B
+Matemática;TODAS;Qual é a raiz quadrada de 144?;10;11;12;14;C
+Matemática;TODAS;Quanto é 15% de 200?;20;25;30;35;C
+Matemática;TODAS;Qual o resultado de 9² - 5²?;56;60;64;81;A
+Português;TODAS;Qual a classe gramatical da palavra 'rapidamente'?;Substantivo;Advérbio;Adjetivo;Pronome;B
+Português;TODAS;Assinale o plural correto de 'cidadão':;Cidadães;Cidadões;Cidadãos;Cidadão's;C
+Português;TODAS;Qual figura de linguagem está em 'Chove pedras de gelo'?;Metáfora;Hipérbole;Eufemismo;Ironia;B
+Português;TODAS;'Ele chegou, porém não avisou.' A conjunção destacada é:;Aditiva;Adversativa;Conclusiva;Explicativa;B
+História;TODAS;Em que ano foi proclamada a Independência do Brasil?;1808;1822;1889;1500;B
+História;TODAS;Quem foi o primeiro presidente do Brasil?;Dom Pedro II;Getúlio Vargas;Deodoro da Fonseca;Juscelino Kubitschek;C
+História;TODAS;A Revolução Francesa teve início em:;1789;1776;1804;1815;A
+História;TODAS;Qual evento marcou o fim da Segunda Guerra Mundial?;Queda do Muro de Berlim;Rendição do Japão;Revolução Russa;Tratado de Versalhes;B
+Geografia;TODAS;Qual é o maior país do mundo em extensão territorial?;China;Estados Unidos;Rússia;Canadá;C
+Geografia;TODAS;Qual é o rio mais extenso do mundo?;Nilo;Amazonas;Yangtzé;Mississippi;B
+Geografia;TODAS;Quantos estados possui a Região Norte do Brasil?;5;6;7;9;C
+Geografia;TODAS;Qual é a capital da Austrália?;Sydney;Melbourne;Camberra;Perth;C
+Ciências;TODAS;Qual é o principal gás responsável pelo efeito estufa?;Oxigênio;Nitrogênio;Gás Carbônico;Hidrogênio;C
+Ciências;TODAS;Quantos ossos tem, aproximadamente, o corpo humano adulto?;156;186;206;226;C
+Ciências;TODAS;Qual órgão é responsável por bombear o sangue no corpo?;Pulmão;Fígado;Coração;Rim;C
+Ciências;TODAS;Qual é a unidade básica da vida?;Átomo;Célula;Molécula;Tecido;B
+Informática;TODAS;O que significa a sigla 'CPU'?;Central Process Unit;Central Processing Unit;Computer Personal Unit;Central Program Unit;B
+Informática;TODAS;Qual desses é um sistema operacional?;Excel;Chrome;Linux;Word;C
+Informática;TODAS;O que é 'RAM' em um computador?;Memória de armazenamento permanente;Memória volátil de curto prazo;Um tipo de processador;Uma linguagem de programação;B
+Informática;TODAS;Qual extensão é usada para arquivos do Excel?;.docx;.pptx;.xlsx;.pdf;C
+Atualidades;TODAS;Qual é a moeda oficial da União Europeia?;Dólar;Euro;Libra;Franco;B
+Atualidades;TODAS;Em que continente fica o Egito?;Ásia;Europa;África;Oceania;C
+Atualidades;TODAS;Qual é o maior oceano do planeta?;Atlântico;Índico;Ártico;Pacífico;D
+Atualidades;TODAS;Quantos jogadores compõem um time de futebol em campo?;9;10;11;12;C
+Comunicados;FGO;Para os mancais que necessitam de lubrificação de óleo forçada, são aplicados os sistemas de lubrificação de óleo de modo a suprir as necessidades de lubrificação e ou resfriamento do mancal. Essa afirmação é verdadeira ou falsa?;Verdadeira.;Falsa.; ; ;A
+Comunicados;FGO;Qual é a faixa dos índices de saturação de oxigênio que torna o ambiente hostil para os peixes provocando a sua saída deste local?;De 50 a 100 % de saturação de oxigênio.;De 105 a 110 % de saturação de oxigênio.;De 115 a 120 % de saturação de oxigênio.;Maior que 120 % de saturação de oxigênio;B
+Comunicados;FGO;O primeiro contato com a defesa civil da cidade de Ferreira Gomes informando sobre a Vazão Defluente prevista ou praticada na UHE FGO é de?;2700 m3/s.;3000 m3/s.;3200 m3/s.;3500 m3/s.;A
+Comunicados;FGO;Qual é o valor da Vazão Defluente na UHE FGO onde se observa os primeiros pontos de alagamentos na cidade de Ferreira Gomes?;2700 m3/s.;3000 m3/s.;3200 m3/s.;3500 m3/s.;B
+Comunicados;FGO;Em que período do dia devemos evitar manobras nas comportas do vertedouro da UHE FGO?;Das 18:00 às 06:00 horas.;Das 00:00 às 06:00 horas.;Das 18:00 às 23:59 horas.;Das 20:00 às 23:59 horas.;A
+Comunicados;FGO;A partida das unidades geradoras da UHE Ferreira Gomes é efetuada de forma lenta para permitir a fuga dos peixes do local antes que a turbina atinja a rotação nominal. Qual é o tempo aproximado que a turbina leva para atingir 100% de sua rotação nominal?;10 minutos.;13.5 minutos.;20 minutos.;23.5 minutos.;B
+Comunicados;FGO;Durante o controle diário de geração (qual é o valor de geração mínimo) em que o operador tem autonomia para ajustar nas unidades geradoras?;20 MW.;21 MW.;24 MW.;25 MW.;C
+Comunicados;FGO;Em caso de necessidade de efetuar a alteração de geração de qualquer unidade geradora (qual é a taxa de variação máxima) a ser seguido nestas ocasiões?;5 MW a cada 5 minutos.;5 MW a cada 10 minutos.;10 MW a cada 5 minutos.;10 MW a cada 10 minutos.;C
+Comunicados;FGO;Estando a Vazão Defluente menor ou igual a 134 m3/s (qual é o Nível de Montante máximo) poderá ser atingido?;21.20m.;21.00m.;20.80m.;20.60m.;A
+Comunicados;FGO;Estando a Vazão Defluente maior que 134 m3/s e menor que 750 m3/s (qual o Nível de Montante máximo) poderá ser atingido?;21.20m.;21.00m.;20.80m.;20.60m.;C
+Comunicados;FGO;Estando a Vazão Defluente maior ou igual a 750 m3/s (qual o Nível de Montante máximo) poderá ser atingido?;21.20m.;21.00m.;20.80m.;20.60m.;D
+Comunicados;FGO;Qual é o valor do Delta (afogamento da comporta) que não podemos infringir durante as manobras das comportas do vertedouro até a posição de 1300mm em cada comporta?;Menor que 75 cm.;Menor que 85 cm e maior que 75 cm.;Menor que 65 cm.;Menor que 300 mm.;A
+Comunicados;FGO;De 300mm até 1300mm de abertura em cada comporta (as manobras nas comportas do vertedouro) deverão ser efetuadas em steps máximo de?;100 mm.;250 mm.;300 mm.;500 mm.;C
+Comunicados;FGO;Porque a parada programada de unidades geradoras por baixa afluência tem que ocorrer com o início da subida da maré?;Permitir que o delta da comporta seja cumprido mesmo em baixas vazões pois nesta situação o nível sobe e com isso aumenta o valor do delta.;Efetuar a manobra com menor presença de peixe no local (pois) quando a maré está alta existe mais peixes no local.;Permitir que o deplecionamento do rio (à jusante da usina) seja feito de forma natural por ocasião da redução da vazão defluente em função da parada da unidade geradora.;Em virtude dos índices de saturação de oxigênio ser menor quando a maré está baixa.;C
+Comunicados;FGO;Porque as manobras nas comportas do vertedouro devem ser executadas (preferencialmente) através do controle conjunto do SDSC do COG ou da UHE?;Para permitir movimentações simétricas das comportas.;Para possibilitar o monitoramento dos níveis de saturação de oxigênio.;Para acompanhar as posições de abertura das comportas do vertedouro.;Para acompanhar os valores de delta das comportas.;A
+Comunicados;FGO;Ao efetuar o comando de abertura da comporta de emergência da UHE FGO (qual é o tempo estimado) para que ela atinja a sua abertura total?;10 minutos.;12 minutos.;20 minutos.;22 minutos.;B
