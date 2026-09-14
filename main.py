@@ -1,4 +1,4 @@
-# Código atualizado em 12-09-26 – 17,12 (Inclusão do Click_23)
+# Código atualizado em 14-09-26 – 16,03 (Inclusão do Click_23)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -39,7 +39,6 @@ entries = {}
 # Lista para armazenar as manobras/alteracoes do sim_hidro_fgo
 resultados = []
 manobras = []
-
 
 # ---------------------------------------------------
 # CONFIGURAÇÃO DO BANCO DE DADOS
@@ -8632,7 +8631,7 @@ def criar_grafico_resultado(parent, percentual_usuario, percentual_media, meta=7
 
     categorias = ["Sua Nota", "Média Geral"]
     valores = [percentual_usuario, percentual_media]
-    cores = ["#024593", "#a4bad2"]
+    cores = ["#024593", "#079541"]
 
     barras = ax.bar(categorias, valores, color=cores, width=0.5)
     ax.axhline(y=meta, color="red", linestyle="--", linewidth=1.5)
@@ -8679,16 +8678,16 @@ def cmd_click23():
 
     quiz_win = Toplevel(root)
     quiz_win.title('COG - AUTO-AVALIAÇÃO')
-    quiz_win.geometry('900x600')
+    quiz_win.geometry('1200x650')
     quiz_win.resizable(False, False)
     quiz_win['bg'] = "#a4bad2"
 
     lf1 = Label(quiz_win, text='Auto-avaliação - Teste seus Conhecimentos', font=('Arial', '14', 'bold'),
                 bg="#024593", fg="white")
-    lf1.place(relx=0.00, rely=0.00, width=900, height=60)
+    lf1.place(relx=0.00, rely=0.00, width=1200, height=60)
 
     conteudo_frame = Frame(quiz_win, borderwidth=1, relief="solid", bg="#F0F0F0")
-    conteudo_frame.place(x=20, y=80, width=860, height=460)
+    conteudo_frame.place(x=20, y=80, width=1160, height=460)
 
     rodape_label = Label(quiz_win, text="", bg="#a4bad2", font=("Arial", 9))
     rodape_label.place(x=20, y=560)
@@ -8773,7 +8772,7 @@ def cmd_click23():
         rodape_label.config(text=f"Treinando: {estado['nome']}")
 
         Label(conteudo_frame, text=f"Olá, {estado['nome']}! Escolha o formato das questões que deseja responder:",
-              bg="#F0F0F0", font=("Arial", 12, "bold"), wraplength=800).place(x=30, y=30)
+              bg="#F0F0F0", font=("Arial", 12, "bold"), wraplength=1100).place(x=30, y=30)
 
         banco_atual = carregar_questoes()
         opcoes_assunto = ["TODAS"] + sorted({str(q["assunto"]).strip() for q in banco_atual})
@@ -8788,19 +8787,19 @@ def cmd_click23():
 
         # Coluna 2 - Localidade
         Label(conteudo_frame, text="Localidade", bg="#F0F0F0",
-              font=("Arial", 11, "bold")).place(x=320, y=90)
+              font=("Arial", 11, "bold")).place(x=540, y=90)
         localidade_var = StringVar(value="TODAS")
         ttk.Combobox(conteudo_frame, textvariable=localidade_var, values=OPCOES_LOCALIDADE,
                      state="readonly", justify='center', font=("Arial", 11), width=15
-                     ).place(x=320, y=120, height=28)
+                     ).place(x=510, y=120, height=28)
 
         # Coluna 3 - Assunto
         Label(conteudo_frame, text="Assunto", bg="#F0F0F0",
-              font=("Arial", 11, "bold")).place(x=560, y=90)
+              font=("Arial", 11, "bold")).place(x=970, y=90)
         assunto_var = StringVar(value="TODAS")
         ttk.Combobox(conteudo_frame, textvariable=assunto_var, values=opcoes_assunto,
                      state="readonly", justify='center', font=("Arial", 11), width=22
-                     ).place(x=560, y=120, height=28)
+                     ).place(x=910, y=120, height=28)
 
         def iniciar():
             quantidade = int(quantidade_var.get())
@@ -8830,14 +8829,14 @@ def cmd_click23():
             mostrar_pergunta()
 
         largura_botao = 220
-        x_centralizado = 30 + (800 - largura_botao) // 2
+        x_centralizado = 30 + (1100 - largura_botao) // 2
 
         Button(conteudo_frame, text="Iniciar Questionário", command=iniciar, bg="#024593", fg="white",
                font=("Arial", 11, "bold")).place(x=x_centralizado, y=350, width=largura_botao, height=35)
 
         if pode_ver_relatorio:
             Button(conteudo_frame, text="Relatório dos treinandos", command=gerar_relatorio_treinandos,
-                   bg="#555555", fg="white", font=("Arial", 11, "bold")
+                   bg="#079541", fg="white", font=("Arial", 11, "bold")
                    ).place(x=x_centralizado, y=400, width=largura_botao, height=35)
 
     def mostrar_pergunta():
@@ -8850,7 +8849,7 @@ def cmd_click23():
             text=f"Treinando: {estado['nome']}    |    Pergunta {idx + 1} de {total}    |    Assunto: {pergunta['assunto']}")
 
         Label(conteudo_frame, text=f"Questão {idx + 1}: {pergunta['pergunta']}", bg="#F0F0F0",
-              font=("Arial", 12, "bold"), wraplength=800, justify="left").place(x=30, y=25, width=800)
+              font=("Arial", 12, "bold"), wraplength=1100, justify="left").place(x=30, y=25, width=1100)
 
         estado["resposta_var"] = StringVar(value="")
         opcoes = [("A", pergunta["opcao_a"]), ("B", pergunta["opcao_b"]),
@@ -8859,8 +8858,8 @@ def cmd_click23():
         y_pos = 100
         for letra, texto in opcoes:
             Radiobutton(conteudo_frame, text=f"{letra}) {texto}", variable=estado["resposta_var"],
-                        value=letra, bg="#F0F0F0", font=("Arial", 11), wraplength=750,
-                        justify="left", anchor="w").place(x=50, y=y_pos, width=780, height=30)
+                        value=letra, bg="#F0F0F0", font=("Arial", 11), wraplength=1080,
+                        justify="left", anchor="w").place(x=50, y=y_pos, width=1090, height=50)
             y_pos += 50
 
         def confirmar():
@@ -8890,7 +8889,7 @@ def cmd_click23():
 
         texto_botao = "Próxima Pergunta" if idx + 1 < total else "Finalizar Questionário"
         Button(conteudo_frame, text=texto_botao, command=confirmar, bg="#024593", fg="white",
-               font=("Arial", 11, "bold")).place(x=630, y=400, width=200, height=35)
+               font=("Arial", 11, "bold")).place(x=510, y=400, width=200, height=35)
 
     def finalizar_questionario():
         acertos = estado["acertos"]
