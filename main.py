@@ -19,6 +19,20 @@ from tkinter import ttk, messagebox, Toplevel, Frame, Label, Button, Entry, List
 import requests  # exclusivo para o click22
 import threading  # exclusivo para o click22
 from concurrent.futures import ThreadPoolExecutor, as_completed #exclusivo para o click22
+import re  # exclusivo para o click22 (destaque da instalação no PDF)
+import unicodedata  # exclusivo para o click22 (destaque da instalação no PDF)
+import base64  # exclusivo para o click22 (destaque da instalação no PDF)
+import tempfile  # exclusivo para o click22 (destaque da instalação no PDF)
+try:
+    import pymupdf as fitz  # exclusivo para o click22 (destaque da instalação no PDF)
+    PYMUPDF_DISPONIVEL = True
+except ImportError:
+    try:
+        import fitz  # versões antigas do PyMuPDF
+        PYMUPDF_DISPONIVEL = True
+    except ImportError:
+        fitz = None
+        PYMUPDF_DISPONIVEL = False
 from matplotlib.figure import Figure  # exclusivo para o click23
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # exclusivo para o click23
 
@@ -7986,6 +8000,406 @@ def cmd_click21():
            bg="#FF0000", fg="white", font=("Arial", 11, "bold"), width=15).pack(pady=10)
 
 
+# =============================================================================================
+# CLICK_22 - DESTAQUE DA INSTALAÇÃO NOS PROCEDIMENTOS ONS
+# Ao abrir um cadastro/instrução, o PDF atualizado é baixado, as ocorrências da Usina/Subestação
+# selecionada são destacadas no próprio arquivo e uma janela permite navegar entre elas.
+# Requer PyMuPDF (pip install pymupdf). Sem ele, o Click_22 funciona como antes (navegador).
+# =============================================================================================
+
+# Termos procurados no PDF para cada localidade do Click_22.
+# A busca ignora acentos, maiúsculas/minúsculas, hífens e quebras de linha.
+# Para incluir siglas ou nomes alternativos (ex.: "FGO"), basta acrescentar na lista.
+TERMOS_BUSCA_INSTALACAO = {
+    "UHE Müller de Godoy Pereira": ["Müller de Godoy Pereira", "Muller de Godoy", "Godoy Pereira"],
+    "UHE São José": ["São José"],
+    "UHE Ferreira Gomes": ["Ferreira Gomes"],
+    "SE Macapá": ["Macapá"],
+    "SE Itaguaçu": ["Itaguaçu"],
+    "SE Russas-II": ["Russas II", "Russas 2"],
+    "CGE Pitombeira": ["Pitombeira"],
+    "CGE Jandaíra-III": ["Jandaíra III", "Jandaíra 3"],
+    "UFV Pitombeira": ["Pitombeira"],
+}
+
+COR_DESTAQUE_PDF = (1.0, 0.92, 0.23)  # amarelo marca-texto
+REGEX_NUMERO_SECAO = re.compile(r"^(\d{1,2}\.(?:\d{1,2}\.?)*)\s+(\S.{1,150})$")
+
+
+def normalizar_texto_busca(texto):
+    """Remove acentos e padroniza maiúsculas/minúsculas para comparação."""
+    texto = unicodedata.normalize("NFKD", texto or "")
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return texto.casefold()
+
+
+def tokenizar_busca(texto):
+    """Quebra o texto em palavras normalizadas (letras e números)."""
+    return re.findall(r"[a-z0-9]+", normalizar_texto_busca(texto))
+
+
+def termos_busca_padrao(localidade):
+    """Termos de busca sugeridos para a localidade (configuração ou nome sem o prefixo)."""
+    if localidade in TERMOS_BUSCA_INSTALACAO:
+        return list(TERMOS_BUSCA_INSTALACAO[localidade])
+    nome = re.sub(r"^(UHE|UTE|PCH|CGH|SE|CGE|EOL|UFV|LT)\s+", "", localidade.strip(), flags=re.IGNORECASE)
+    return [nome.replace("-", " ")]
+
+
+def _titulos_secao_da_pagina(pagina, textpage):
+    """Identifica títulos numerados (ex.: '6.2. RECOMPOSIÇÃO') em negrito ou caixa alta."""
+    titulos = []
+    for bloco in pagina.get_text("dict", textpage=textpage).get("blocks", []):
+        for linha in bloco.get("lines", []):
+            spans = [s for s in linha.get("spans", []) if s.get("text", "").strip()]
+            if not spans:
+                continue
+            texto = " ".join("".join(s["text"] for s in spans).split())
+            achado = REGEX_NUMERO_SECAO.match(texto)
+            if not achado:
+                continue
+            negrito = all((s.get("flags", 0) & 16) or "bold" in s.get("font", "").lower() for s in spans)
+            letras = [c for c in achado.group(2) if c.isalpha()]
+            caixa_alta = len(letras) >= 3 and all(c.isupper() for c in letras)
+            if negrito or caixa_alta:
+                titulos.append((linha["bbox"][1], texto[:120]))
+    return sorted(titulos)
+
+
+def localizar_ocorrencias_pdf(doc, termos):
+    """
+    Procura os termos em todas as páginas do PDF.
+    Retorna (ocorrencias, paginas_com_texto). Cada ocorrência é um dict com:
+    pagina (base 0), rects (retângulos das palavras), termo, trecho (parágrafo/célula),
+    secao (último título numerado anterior) e repetida (cabeçalho/rodapé repetido).
+    """
+    termos_tokens = []
+    for termo in termos:
+        tokens = tokenizar_busca(termo)
+        if tokens and (termo, tokens) not in termos_tokens:
+            termos_tokens.append((termo, tokens))
+    termos_tokens.sort(key=lambda t: len(t[1]), reverse=True)  # o termo mais longo tem prioridade
+
+    ocorrencias = []
+    paginas_com_texto = 0
+    secao_atual = ""
+
+    for num_pagina, pagina in enumerate(doc):
+        textpage = pagina.get_textpage()
+        palavras = pagina.get_text("words", textpage=textpage, sort=True)
+        if palavras:
+            paginas_com_texto += 1
+        blocos = {b[5]: " ".join(b[4].split()) for b in pagina.get_text("blocks", textpage=textpage)}
+        titulos = _titulos_secao_da_pagina(pagina, textpage)
+
+        # Cada palavra do PDF pode gerar mais de um token (ex.: "Russas-II" → russas, ii)
+        tokens = []
+        for indice, palavra in enumerate(palavras):
+            for token in tokenizar_busca(palavra[4]):
+                tokens.append((token, indice))
+        sequencia = [t[0] for t in tokens]
+
+        achados = []
+        i = 0
+        while i < len(sequencia):
+            casou = None
+            for termo, alvo in termos_tokens:
+                if sequencia[i:i + len(alvo)] == alvo:
+                    casou = (termo, alvo)
+                    break
+            if not casou:
+                i += 1
+                continue
+            termo, alvo = casou
+            indices = sorted({tokens[k][1] for k in range(i, i + len(alvo))})
+            rects = []
+            for k in indices:  # une palavras da mesma linha em um único retângulo
+                r = fitz.Rect(palavras[k][:4])
+                if rects and abs(rects[-1].y0 - r.y0) < 2 and 0 <= r.x0 - rects[-1].x1 < 15:
+                    rects[-1] |= r
+                else:
+                    rects.append(r)
+            achados.append((rects[0].y0, termo, rects, palavras[indices[0]][5]))
+            i += len(alvo)
+
+        for y, termo, rects, bloco in achados:
+            for y_titulo, titulo in titulos:
+                if y_titulo <= y + 1:
+                    secao_atual = titulo
+            ocorrencias.append({
+                "pagina": num_pagina,
+                "rects": rects,
+                "termo": termo,
+                "trecho": blocos.get(bloco, ""),
+                "secao": secao_atual,
+                "repetida": False,
+            })
+        if titulos:
+            secao_atual = titulos[-1][1]
+
+    # Marca como repetidas as ocorrências de cabeçalho/rodapé (mesmo texto em muitas páginas)
+    paginas_por_texto = {}
+    for oc in ocorrencias:
+        chave = re.sub(r"\d+", "#", normalizar_texto_busca(oc["trecho"]))
+        paginas_por_texto.setdefault(chave, set()).add(oc["pagina"])
+    limite = max(3, 0.5 * len(doc))
+    for oc in ocorrencias:
+        chave = re.sub(r"\d+", "#", normalizar_texto_busca(oc["trecho"]))
+        oc["repetida"] = len(paginas_por_texto[chave]) >= limite
+
+    return ocorrencias, paginas_com_texto
+
+
+def aplicar_destaques_pdf(doc, ocorrencias, localidade):
+    """Grava os destaques no PDF e acrescenta marcadores (bookmarks) para navegação."""
+    paginas = {}  # mantém a referência da página enquanto a anotação é editada
+    for oc in ocorrencias:
+        pagina = paginas.setdefault(oc["pagina"], doc[oc["pagina"]])
+        annot = pagina.add_highlight_annot(oc["rects"])
+        annot.set_colors(stroke=COR_DESTAQUE_PDF)
+        annot.set_info(title="COG - Click_22", content=f"Ocorrência: {localidade} ({oc['termo']})")
+        annot.update()
+
+    relevantes = [oc for oc in ocorrencias if not oc["repetida"]] or ocorrencias
+    if not relevantes:
+        return
+    marcadores = [[1, f"★ OCORRÊNCIAS - {localidade} ({len(relevantes)})", relevantes[0]["pagina"] + 1]]
+    for oc in relevantes[:300]:
+        trecho = oc["trecho"] if len(oc["trecho"]) <= 70 else oc["trecho"][:67] + "..."
+        marcadores.append([2, f"Pág. {oc['pagina'] + 1} - {trecho}", oc["pagina"] + 1])
+    try:
+        existentes = [m[:3] for m in doc.get_toc(simple=True) if 1 <= m[2] <= len(doc)]
+        doc.set_toc(marcadores + existentes)
+    except Exception:
+        try:
+            doc.set_toc(marcadores)
+        except Exception:
+            pass  # marcadores são um complemento; os destaques já foram aplicados
+
+
+def montar_resumo_ocorrencias(ocorrencias, localidade):
+    """Resumo textual agrupado por seção do procedimento, sem trechos duplicados."""
+    relevantes = [oc for oc in ocorrencias if not oc["repetida"]] or ocorrencias
+    secoes = {}
+    for oc in relevantes:
+        secao = oc["secao"] or "(Início do documento)"
+        grupo = secoes.setdefault(secao, {"paginas": [], "trechos": []})
+        if oc["pagina"] + 1 not in grupo["paginas"]:
+            grupo["paginas"].append(oc["pagina"] + 1)
+        if oc["trecho"] and oc["trecho"] not in grupo["trechos"]:
+            grupo["trechos"].append(oc["trecho"])
+
+    linhas = [f"RESUMO - Trechos do procedimento relacionados a {localidade}",
+              f"{len(relevantes)} ocorrência(s) em {len(secoes)} seção(ões)", ""]
+    for secao, grupo in secoes.items():
+        paginas = ", ".join(str(p) for p in grupo["paginas"])
+        linhas.append(f"■ {secao}   [pág. {paginas}]")
+        for trecho in grupo["trechos"]:
+            linhas.append(f"   • {trecho if len(trecho) <= 600 else trecho[:597] + '...'}")
+        linhas.append("")
+    return "\n".join(linhas)
+
+
+def gerar_pdf_destacado(url_pdf, termos, localidade, pasta_destino=None):
+    """
+    Baixa o PDF atualizado, destaca as ocorrências e salva uma cópia local.
+    Retorna (doc, ocorrencias, caminho_salvo). Lança ValueError com mensagem
+    amigável quando o destaque não é possível (PDF digitalizado, sem ocorrências...).
+    """
+    resposta = requests.get(url_pdf, timeout=(5, 60))
+    resposta.raise_for_status()
+
+    doc = fitz.open(stream=resposta.content, filetype="pdf")
+    if doc.needs_pass:
+        doc.close()
+        raise ValueError("O PDF está protegido por senha.")
+
+    ocorrencias, paginas_com_texto = localizar_ocorrencias_pdf(doc, termos)
+    if paginas_com_texto == 0:
+        doc.close()
+        raise ValueError("O PDF não possui camada de texto (documento digitalizado).")
+    if not ocorrencias:
+        doc.close()
+        raise ValueError(f"Nenhuma ocorrência de {' / '.join(termos)} foi encontrada no documento.")
+
+    aplicar_destaques_pdf(doc, ocorrencias, localidade)
+
+    pasta_destino = pasta_destino or os.path.join(tempfile.gettempdir(), "COG_Procedimentos_ONS")
+    os.makedirs(pasta_destino, exist_ok=True)
+    nome_original = os.path.splitext(os.path.basename(requests.utils.unquote(url_pdf)))[0]
+    sufixo = re.sub(r"[^A-Za-z0-9]+", "_", normalizar_texto_busca(localidade)).strip("_")
+    caminho = os.path.join(pasta_destino,
+                           f"{nome_original}_{sufixo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    doc.save(caminho)
+    return doc, ocorrencias, caminho
+
+
+def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_pdf, url_original):
+    """Janela com a lista de ocorrências, resumo por seção e a página com os destaques."""
+
+    janela = Toplevel(root)
+    janela.title(f"Procedimento ONS - {localidade} - {subtipo}")
+    janela.geometry("1250x820")
+    janela['bg'] = "#a4bad2"
+
+    estado = {"lista": [], "atual": -1, "zoom": 1.5, "imagem": None, "pagina_render": None}
+    var_repetidas = BooleanVar(value=False)
+
+    Label(janela, text=f"🖍 {localidade} - {subtipo}", font=('Arial', '14', 'bold'),
+          bg="#024593", fg="white", height=2).pack(fill='x')
+
+    # ----- Barra de navegação -----
+    barra = Frame(janela, bg="#a4bad2")
+    barra.pack(fill='x', padx=10, pady=6)
+
+    lbl_contador = Label(barra, text="", bg="#a4bad2", font=("Arial", 11, "bold"), fg="#024593", width=22)
+
+    Button(barra, text="◀ Anterior", command=lambda: navegar(-1), bg="#024593", fg="white",
+           font=("Arial", 10, "bold"), width=11).pack(side=LEFT, padx=3)
+    lbl_contador.pack(side=LEFT, padx=3)
+    Button(barra, text="Próxima ▶", command=lambda: navegar(1), bg="#024593", fg="white",
+           font=("Arial", 10, "bold"), width=11).pack(side=LEFT, padx=3)
+    Button(barra, text="🔍 −", command=lambda: alterar_zoom(-0.25), font=("Arial", 10), width=4).pack(side=LEFT, padx=(15, 2))
+    Button(barra, text="🔍 +", command=lambda: alterar_zoom(0.25), font=("Arial", 10), width=4).pack(side=LEFT, padx=2)
+    Checkbutton(barra, text="Incluir cabeçalhos/rodapés", variable=var_repetidas,
+                command=lambda: preencher_lista(), bg="#a4bad2", font=("Arial", 9)).pack(side=LEFT, padx=8)
+
+    Button(barra, text="Fechar", command=lambda: fechar(), bg="#FF0000", fg="white",
+           font=("Arial", 10, "bold"), width=10).pack(side=RIGHT, padx=3)
+    Button(barra, text="🌐 Original (navegador)", command=lambda: webbrowser.open(url_original),
+           bg="#34495E", fg="white", font=("Arial", 9, "bold")).pack(side=RIGHT, padx=3)
+    Button(barra, text="📄 Abrir PDF destacado", command=lambda: abrir_pdf(caminho_pdf),
+           bg="#2ECC71", fg="white", font=("Arial", 9, "bold")).pack(side=RIGHT, padx=3)
+
+    corpo = PanedWindow(janela, orient=HORIZONTAL, bg="#a4bad2", sashwidth=6)
+    corpo.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+
+    # ----- Painel esquerdo: ocorrências e resumo -----
+    abas = ttk.Notebook(corpo)
+    frame_lista = Frame(abas)
+    lista = Listbox(frame_lista, font=("Consolas", 9), activestyle="none",
+                    selectbackground="#024593", exportselection=False)
+    scroll_lista = Scrollbar(frame_lista, orient=VERTICAL, command=lista.yview)
+    lista.configure(yscrollcommand=scroll_lista.set)
+    scroll_lista.pack(side=RIGHT, fill=Y)
+    lista.pack(side=LEFT, fill=BOTH, expand=True)
+    abas.add(frame_lista, text="Ocorrências")
+
+    frame_resumo = Frame(abas)
+    texto_resumo = Text(frame_resumo, wrap="word", font=("Arial", 9), bg="#FFFDF0")
+    scroll_resumo = Scrollbar(frame_resumo, orient=VERTICAL, command=texto_resumo.yview)
+    texto_resumo.configure(yscrollcommand=scroll_resumo.set)
+    scroll_resumo.pack(side=RIGHT, fill=Y)
+    texto_resumo.pack(side=LEFT, fill=BOTH, expand=True)
+    resumo = montar_resumo_ocorrencias(ocorrencias, localidade)
+    texto_resumo.insert("1.0", resumo)
+    texto_resumo.configure(state="disabled")
+
+    def copiar_resumo():
+        janela.clipboard_clear()
+        janela.clipboard_append(resumo)
+        messagebox.showinfo("Resumo", "Resumo copiado para a área de transferência.", parent=janela)
+
+    Button(frame_resumo, text="📋 Copiar", command=copiar_resumo, font=("Arial", 8)).place(relx=1.0, x=-22, y=2, anchor="ne")
+    abas.add(frame_resumo, text="Resumo por seção")
+    corpo.add(abas, width=420)
+
+    # ----- Painel direito: página renderizada -----
+    frame_pagina = Frame(corpo, bg="#555")
+    canvas = Canvas(frame_pagina, bg="#777", highlightthickness=0)
+    scroll_v = Scrollbar(frame_pagina, orient=VERTICAL, command=canvas.yview)
+    scroll_h = Scrollbar(frame_pagina, orient=HORIZONTAL, command=canvas.xview)
+    canvas.configure(yscrollcommand=scroll_v.set, xscrollcommand=scroll_h.set)
+    scroll_v.pack(side=RIGHT, fill=Y)
+    scroll_h.pack(side=BOTTOM, fill=X)
+    canvas.pack(side=LEFT, fill=BOTH, expand=True)
+    corpo.add(frame_pagina)
+
+    lbl_rodape = Label(janela, text="", bg="#a4bad2", font=("Arial", 8), fg="#333", anchor="w")
+    lbl_rodape.pack(fill='x', padx=10, pady=(0, 6))
+
+    def preencher_lista():
+        estado["lista"] = [oc for oc in ocorrencias if var_repetidas.get() or not oc["repetida"]] or ocorrencias
+        lista.delete(0, END)
+        for oc in estado["lista"]:
+            trecho = oc["trecho"] if len(oc["trecho"]) <= 90 else oc["trecho"][:87] + "..."
+            lista.insert(END, f"Pág. {oc['pagina'] + 1:>3} │ {trecho}")
+        estado["atual"] = -1
+        mostrar(0)
+
+    def mostrar(indice):
+        if not estado["lista"]:
+            return
+        indice = max(0, min(indice, len(estado["lista"]) - 1))
+        estado["atual"] = indice
+        oc = estado["lista"][indice]
+        pagina = doc[oc["pagina"]]
+        zoom = estado["zoom"]
+
+        if estado["pagina_render"] != (oc["pagina"], zoom):
+            pix = pagina.get_pixmap(matrix=fitz.Matrix(zoom, zoom), annots=True)
+            estado["imagem"] = PhotoImage(data=base64.b64encode(pix.tobytes("png")).decode("ascii"))
+            estado["pagina_render"] = (oc["pagina"], zoom)
+            canvas.delete("all")
+            canvas.create_image(0, 0, anchor="nw", image=estado["imagem"])
+            canvas.configure(scrollregion=(0, 0, pix.width, pix.height))
+        canvas.delete("marcador")
+
+        transformacao = pagina.rotation_matrix * fitz.Matrix(zoom, zoom)
+        topo = None
+        for r in oc["rects"]:
+            rr = fitz.Rect(r) * transformacao
+            canvas.create_rectangle(rr.x0 - 3, rr.y0 - 3, rr.x1 + 3, rr.y1 + 3,
+                                    outline="#E00000", width=3, tags="marcador")
+            topo = rr.y0 if topo is None else min(topo, rr.y0)
+
+        altura = max(1, estado["imagem"].height())
+        canvas.update_idletasks()
+        visivel = canvas.winfo_height()
+        canvas.yview_moveto(max(0.0, (topo - visivel / 3) / altura))
+
+        lista.selection_clear(0, END)
+        lista.selection_set(indice)
+        lista.see(indice)
+        lbl_contador.configure(text=f"{indice + 1} / {len(estado['lista'])}  (pág. {oc['pagina'] + 1})")
+        lbl_rodape.configure(text=f"Seção: {oc['secao'] or '-'}   │   Termo: {oc['termo']}   │   "
+                                  f"Arquivo destacado: {caminho_pdf}")
+
+    def navegar(passo):
+        if estado["lista"]:
+            mostrar((estado["atual"] + passo) % len(estado["lista"]))
+
+    def alterar_zoom(delta):
+        estado["zoom"] = max(0.75, min(3.0, estado["zoom"] + delta))
+        mostrar(estado["atual"])
+
+    def ao_selecionar(_evento=None):
+        selecao = lista.curselection()
+        if selecao and selecao[0] != estado["atual"]:
+            mostrar(selecao[0])
+
+    def rolar(evento):
+        canvas.yview_scroll(-1 if (evento.delta > 0 or evento.num == 4) else 1, "units")
+
+    def fechar():
+        try:
+            doc.close()
+        finally:
+            janela.destroy()
+
+    lista.bind("<<ListboxSelect>>", ao_selecionar)
+    canvas.bind("<MouseWheel>", rolar)
+    canvas.bind("<Button-4>", rolar)
+    canvas.bind("<Button-5>", rolar)
+    janela.bind("<F3>", lambda e: navegar(1))
+    janela.bind("<Shift-F3>", lambda e: navegar(-1))
+    janela.bind("<Next>", lambda e: navegar(1))
+    janela.bind("<Prior>", lambda e: navegar(-1))
+    janela.protocol("WM_DELETE_WINDOW", fechar)
+
+    janela.after(100, preencher_lista)
+
+
 def cmd_click22():
     """Função para acesso rápido a procedimentos ONS - URLs específicas por instalação"""
 
@@ -8246,7 +8660,8 @@ def cmd_click22():
 
     # ===== FUNÇÃO QUE EXECUTA A BUSCA EM THREAD =====
     def executar_busca_em_thread(localidade, categoria, subtipo, url_base,
-                                 janela_progresso, progress_bar, lbl_status, lbl_revisao):
+                                 janela_progresso, progress_bar, lbl_status, lbl_revisao,
+                                 opcoes_destaque=None, busca_cancelada=None):
 
         if "INSERIR URL" in url_base:
             janela_progresso.after(0, janela_progresso.destroy)
@@ -8273,6 +8688,26 @@ def cmd_click22():
 
         url_final = encontrar_ultima_revisao(url_base, callback_progresso)
 
+        aviso_destaque = ""
+        if url_final and opcoes_destaque and PYMUPDF_DISPONIVEL:
+            if busca_cancelada is not None and busca_cancelada.is_set():
+                return
+            try:
+                janela_progresso.after(0, lambda: lbl_status.configure(
+                    text="📥 Baixando o PDF atualizado e destacando a instalação..."))
+                doc, ocorrencias, caminho = gerar_pdf_destacado(url_final, opcoes_destaque["termos"], localidade)
+                if busca_cancelada is not None and busca_cancelada.is_set():
+                    doc.close()
+                    return
+                janela_progresso.after(0, janela_progresso.destroy)
+                root.after(0, lambda: abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo,
+                                                                  caminho, url_final))
+                return
+            except ValueError as erro:
+                aviso_destaque = f"\n\n🖍 Destaque não aplicado: {erro}"
+            except Exception as erro:
+                aviso_destaque = f"\n\n🖍 Destaque não aplicado (falha ao processar o PDF): {erro}"
+
         if url_final:
             janela_progresso.after(1000, janela_progresso.destroy)
             webbrowser.open(url_final)
@@ -8280,7 +8715,8 @@ def cmd_click22():
                                                                   f"✅ Procedimento aberto com sucesso!\n\n"
                                                                   f"Localidade: {localidade}\n"
                                                                   f"Documento: {subtipo}\n\n"
-                                                                  f"O arquivo foi aberto no seu navegador."))
+                                                                  f"O arquivo foi aberto no seu navegador."
+                                                                  f"{aviso_destaque}"))
         else:
             janela_progresso.after(0, janela_progresso.destroy)
             janela_progresso.after(0, lambda: messagebox.showerror("Erro",
@@ -8291,7 +8727,7 @@ def cmd_click22():
                                                                    f"documento está disponível no site."))
 
     # ===== FUNÇÃO PARA ABRIR PROCEDIMENTO =====
-    def abrir_procedimento(localidade, categoria, subtipo, url_base):
+    def abrir_procedimento(localidade, categoria, subtipo, url_base, opcoes_destaque=None):
 
         janela_progresso = Toplevel()
         janela_progresso.title("Buscando procedimento...")
@@ -8326,7 +8762,10 @@ def cmd_click22():
                               bg="#a4bad2", font=("Arial", 8), fg="#555")
         lbl_instrucao.pack(pady=10)
 
+        busca_cancelada = threading.Event()
+
         def cancelar_busca():
+            busca_cancelada.set()
             janela_progresso.destroy()
             messagebox.showinfo("Busca cancelada", "A busca foi cancelada pelo usuário.")
 
@@ -8337,7 +8776,8 @@ def cmd_click22():
         thread_busca = threading.Thread(
             target=executar_busca_em_thread,
             args=(localidade, categoria, subtipo, url_base,
-                  janela_progresso, progress_bar, lbl_status, lbl_revisao),
+                  janela_progresso, progress_bar, lbl_status, lbl_revisao,
+                  opcoes_destaque, busca_cancelada),
             daemon=True
         )
         thread_busca.start()
@@ -8353,7 +8793,7 @@ def cmd_click22():
 
         janela_subtipos = Toplevel(frame_principal)
         janela_subtipos.title(f"{categoria} - {localidade}")
-        janela_subtipos.geometry("600x500")
+        janela_subtipos.geometry("620x640")
         janela_subtipos.resizable(False, False)
         janela_subtipos['bg'] = "#a4bad2"
 
@@ -8365,6 +8805,35 @@ def cmd_click22():
         subtitulo = Label(janela_subtipos, text=f"Selecione o documento desejado:",
                           bg="#a4bad2", font=("Arial", 11))
         subtitulo.pack(pady=15)
+
+        # ----- Destaque da instalação no PDF (opcional) -----
+        frame_destaque = LabelFrame(janela_subtipos, text="🖍 Destaque da instalação no PDF",
+                                    bg="#a4bad2", font=("Arial", 10, "bold"), fg="#024593")
+        frame_destaque.pack(fill='x', padx=30, pady=(0, 5))
+
+        var_destacar = BooleanVar(value=PYMUPDF_DISPONIVEL)
+        Checkbutton(frame_destaque,
+                    text=f"Destacar as ocorrências de {localidade} e navegar entre elas",
+                    variable=var_destacar, bg="#a4bad2", font=("Arial", 9),
+                    state="normal" if PYMUPDF_DISPONIVEL else "disabled").pack(anchor="w", padx=5)
+
+        frame_termos = Frame(frame_destaque, bg="#a4bad2")
+        frame_termos.pack(fill='x', padx=5, pady=(0, 5))
+        Label(frame_termos, text="Termos (separe por ;):", bg="#a4bad2", font=("Arial", 9)).pack(side=LEFT)
+        entry_termos = Entry(frame_termos, font=("Arial", 9))
+        entry_termos.insert(0, "; ".join(termos_busca_padrao(localidade)))
+        entry_termos.pack(side=LEFT, fill='x', expand=True, padx=5)
+
+        if not PYMUPDF_DISPONIVEL:
+            entry_termos.configure(state="disabled")
+            Label(frame_destaque, text="Recurso indisponível: instale o PyMuPDF (pip install pymupdf)",
+                  bg="#a4bad2", font=("Arial", 8), fg="#B00000").pack(anchor="w", padx=5, pady=(0, 3))
+
+        def obter_opcoes_destaque():
+            termos = [t.strip() for t in entry_termos.get().split(";") if t.strip()]
+            if not (PYMUPDF_DISPONIVEL and var_destacar.get() and termos):
+                return None
+            return {"termos": termos}
 
         frame_botoes = Frame(janela_subtipos, bg="#a4bad2")
         frame_botoes.pack(fill='both', expand=True, padx=30, pady=10)
@@ -8388,7 +8857,8 @@ def cmd_click22():
                 btn_state = "normal"
 
             btn = Button(btn_frame, text=btn_text,
-                         command=lambda s=subtipo, u=url_base: abrir_procedimento(localidade, categoria, s, u),
+                         command=lambda s=subtipo, u=url_base: abrir_procedimento(localidade, categoria, s, u,
+                                                                                  obter_opcoes_destaque()),
                          bg=cor, fg="white",
                          font=("Arial", 10, "bold"),
                          height=2, width=25,
