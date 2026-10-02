@@ -1,4 +1,4 @@
-# Código atualizado em 26-09-26 – 2200 - (Alterado o click_22 - destaque dos procedimentos)
+# Código atualizado em 02-10-26 – 1100 - (Alterado o click_22 - destaque dos procedimentos)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
