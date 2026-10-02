@@ -1,4 +1,4 @@
-# Código atualizado em 02-10-26 – 1100 - (Alterado o click_22 - destaque dos procedimentos)
+# Código atualizado em 02-10-26 – 1550 - (Alterado o click_22 - destaque dos procedimentos)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -8518,8 +8518,8 @@ TERMOS_BUSCA_INSTALACAO = {
     "UHE Müller de Godoy Pereira": ["Müller de Godoy Pereira", "Muller de Godoy", "Godoy Pereira", "J.L.M.G.PEREIRA" , "JLM G. PEREIRA", "Eng.José Luiz","Foz do Rio Claro", "ALUPAR", "AF ENERGIA"],
     "UHE São José": ["São José", "ALUPAR", "AF ENERGIA"],
     "UHE Ferreira Gomes": ["Ferreira Gomes", "ALUPAR", "AF ENERGIA"],
-    "SE Macapá": ["Macapá", "Ferreira Gomes", "ALUPAR", "AF ENERGIA"],
-    "SE Itaguaçu": ["Itaguaçu", "J.L.M.G.PEREIRA" , "JLM G. PEREIRA", "Eng.José Luiz", "Müller de Godoy Pereira", "Muller de Godoy", "Godoy Pereira","Foz do Rio Claro", "ALUPAR", "AF ENERGIA"],
+    "SE Macapá": ["F.Gomes", "F. Gomes", "Ferreira Gomes", "ALUPAR", "AF ENERGIA"],
+    "SE Itaguaçu": ["J.L.M.G.PEREIRA" , "JLM G. PEREIRA", "Eng.José Luiz", "Müller de Godoy Pereira", "Muller de Godoy", "Godoy Pereira","Foz do Rio Claro", "ALUPAR", "AF ENERGIA"],
     "SE Russas-II": ["Russas II", "Russas 2", "Pitombeira", "ALUPAR", "AF ENERGIA"],
     "CGE Pitombeira": ["Pitombeira", "Ubatuba", "Santa Catarina", "Ventos de horizonte", "Goiabeira", "ALUPAR", "AF ENERGIA"],
     "CGE Jandaíra-III": ["Jandaíra III", "Jandaíra 3", "ALUPAR", "AF ENERGIA"],
