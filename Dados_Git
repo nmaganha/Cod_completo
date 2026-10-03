@@ -1,0 +1,56 @@
+###COMANDO BASH
+ls	    => lista arquivos
+cd	    => move entre diretórios
+pwd	    => mostra diretório de trabalho
+cat	    => exibe conteúdo do arquivo
+rm	    => remove arquivo ou diretório
+q	    => para retornar a digitação no git bash (quando estiver o END)
+rm -rf	=> remove de forma recursiva e forçada todos diretórios
+Ctrl + l	=> limpa a tela e leva o cursor para a parte superior
+nano <nome do arquivo> => para criar um txt pelo git bash
+
+###COMANDOS GIT
+git init . 	=> Cria um repo git na pasta atual
+git status 	=> Mostra o status do trabalho (de cada arquivo)
+git add .	=> Adiciona todos os arquivos para serem comitados. Se for digitado git add <nome_arquivo> é comitado apenas este arquivo.
+git log     => Mostra todo o histórico de comites
+git commit -m "msg"  	        => Faz commit do que estava para ser comitado
+git diff <nome arquivo.xxx>	    => Mostra a diferença do arquivo atual com o último comitê.
+git reset <nome arquivo.xxx>	=> Após um add . é possivel eliminar um dos arquivos do commit com este comando.
+git config --global user.email "nivaldo.magnha@gmail.com"
+git config --global user.name "Nivaldo Maganha"
+
+####COMANDOS BRANCH
+git checkout -b secundaria	Cria uma nova branch com o nome secundaria.
+git checkout branch	Mostra dos as branchs existentes.
+git checkout main	Sai da branch secundaria ou outra qualquer e retorna para a branch principal (main).
+git checkout <nome_branch>	Sai da branch onde está e vai para a branch selecionada (secundaria).
+git branch -D <nome_branch>	Para deletar uma branch (obs: para dar este comando você precisa estar na main)
+git branch -d <nome_branch>	Para deletar uma branch que ainda não foi mergeada (obs: para dar este comando você precisa estar na main)
+git merge <nome_branch>	Para fazer o merge da branch (obs: para dar este comando você precisa estar na main)
+git push origin --delete <nome da branch> -> para deletar uma branch remotamente.
+
+## FLUXO DE TRABALHO
+1. criar o diretório (pasta) do projeto
+2. iniciar o git dentro do diretório criado (git init .)
+3. edita ou cria arquivos
+4. git status
+5. git add <nome arquivo>
+6. git status
+7. git commit -m "Mensagem estranha"
+8. git status
+9. volta para o passo 3
+
+## FLUXO PARA O PULL REQUEST PC PARTICULAR
+git status
+git add .
+git commit -m “MSG”
+git push
+
+## FLUXO PARA O PULL REQUEST PC TRABALHO
+git status
+git add .
+git commit -m “MSG”
+git push ou git push -u origin master
+git push -u origin master => para enviar o código para o github
+git pull origin master    => para buscar o código no github
