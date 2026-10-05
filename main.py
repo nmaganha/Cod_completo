@@ -1,4 +1,4 @@
-# Código atualizado em 03-10-26 – 1019 - (Revisão_Geral)
+# Código atualizado em 04-10-26 – 2229 - (Revisão click22 inserido resumo)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -8738,6 +8738,234 @@ def gerar_pdf_destacado(url_pdf, termos, localidade, pasta_destino=None):
     return doc, ocorrencias, caminho
 
 
+# ---------------------------------------------------------------------------------------------
+# CLICK_22 - ÚLTIMA REVISÃO JÁ ENCONTRADA DE CADA DOCUMENTO
+# A busca começa por ela (e pelas JANELA_REVISAO_NOVA revisões acima, caso o ONS tenha publicado uma
+# nova) e só varre todas as revisões quando não achar. O arquivo fica na pasta temporária do
+# Click_22 (fora da pasta do projeto, para não ir para o Git); se for apagado, a busca completa refaz.
+# ---------------------------------------------------------------------------------------------
+ARQUIVO_REVISOES_CONHECIDAS = os.path.join(tempfile.gettempdir(), "COG_Procedimentos_ONS", "ultimas_revisoes.json")
+JANELA_REVISAO_NOVA = 30
+_REVISOES_CONHECIDAS = {}   # url_base -> última revisão encontrada
+_REVISOES_CARREGADAS = False
+_TRAVA_REVISOES = threading.Lock()
+
+
+def _carregar_revisoes_conhecidas():
+    """Lê o arquivo uma única vez por execução (chamar com _TRAVA_REVISOES adquirida)."""
+    global _REVISOES_CARREGADAS
+    if _REVISOES_CARREGADAS:
+        return
+    _REVISOES_CARREGADAS = True
+    try:
+        with open(ARQUIVO_REVISOES_CONHECIDAS, encoding="utf-8") as arquivo:
+            for url_base, revisao in json.load(arquivo).items():
+                if isinstance(revisao, int):
+                    _REVISOES_CONHECIDAS[url_base] = revisao
+    except (OSError, ValueError, AttributeError):
+        pass  # primeiro uso ou arquivo ilegível: a busca completa refaz
+
+
+def obter_revisao_conhecida(url_base):
+    with _TRAVA_REVISOES:
+        _carregar_revisoes_conhecidas()
+        return _REVISOES_CONHECIDAS.get(url_base)
+
+
+def registrar_revisao_conhecida(url_base, revisao):
+    with _TRAVA_REVISOES:
+        _carregar_revisoes_conhecidas()
+        if _REVISOES_CONHECIDAS.get(url_base) == revisao:
+            return
+        _REVISOES_CONHECIDAS[url_base] = revisao
+        try:
+            os.makedirs(os.path.dirname(ARQUIVO_REVISOES_CONHECIDAS), exist_ok=True)
+            temporario = ARQUIVO_REVISOES_CONHECIDAS + ".tmp"
+            with open(temporario, "w", encoding="utf-8") as arquivo:
+                json.dump(_REVISOES_CONHECIDAS, arquivo, ensure_ascii=False, indent=1)
+            os.replace(temporario, ARQUIVO_REVISOES_CONHECIDAS)
+        except OSError:
+            pass  # o cache é só um atalho; sem ele a busca funciona normalmente
+
+
+# ---------------------------------------------------------------------------------------------
+# CLICK_22 - BOTÃO COM TEXTO DE APOIO DENTRO (ex.: "Clique para acessar")
+# ---------------------------------------------------------------------------------------------
+class BotaoComRotulo(Frame):
+    """Botão com título e uma linha de apoio dentro da própria área clicável.
+
+    Antes o texto "Clique para acessar" era um Label solto abaixo do botão e as pessoas clicavam
+    nele em vez de no botão. Agora o título, o texto de apoio e o fundo fazem parte do mesmo botão:
+    qualquer clique em qualquer parte dele aciona o comando (também responde a Enter/Espaço
+    quando recebe o foco pelo teclado). A cor do texto de apoio é escolhida por fg_rotulo."""
+
+    def __init__(self, master, texto, rotulo, comando, bg, fg="white", fg_rotulo=None,
+                 largura=250, altura=64, fonte=("Arial", 10, "bold"), fonte_rotulo=("Arial", 8)):
+        cor = _ui_cor("bg", bg)  # mesma conversão de cores que o Button do tema aplica
+        Frame.__init__(self, master, bg=cor, width=largura, height=altura, cursor="hand2",
+                       highlightthickness=2, highlightbackground=cor, highlightcolor="white", takefocus=1)
+        self._cor = cor
+        self._cor_hover = _ui_escurecer(cor)
+        self._cor_pressionado = _ui_escurecer(cor, 0.7)
+        self._comando = comando
+
+        # O Frame mantém o tamanho pedido (só tem filhos posicionados com place)
+        miolo = Frame(self, bg=cor, cursor="hand2")
+        miolo.place(relx=0.5, rely=0.5, anchor="center")
+        lbl_titulo = Label(miolo, text=texto, bg=cor, fg=fg, font=fonte, justify="center",
+                           wraplength=largura - 24, cursor="hand2")
+        lbl_titulo.pack()
+        lbl_rotulo = Label(miolo, text=rotulo, bg=cor, fg=fg_rotulo or fg, font=fonte_rotulo,
+                           cursor="hand2")
+        lbl_rotulo.pack(pady=(2, 0))
+
+        self._partes = (self, miolo, lbl_titulo, lbl_rotulo)
+        for parte in self._partes:
+            parte.bind("<Enter>", lambda e: self._pintar(self._cor_hover))
+            parte.bind("<Leave>", self._ao_sair)
+            parte.bind("<ButtonPress-1>", lambda e: self._pintar(self._cor_pressionado))
+            parte.bind("<ButtonRelease-1>", self._ao_soltar)
+        self.bind("<Return>", lambda e: self.invocar())
+        self.bind("<space>", lambda e: self.invocar())
+
+    def _pintar(self, cor):
+        self.configure(bg=cor, highlightbackground=cor)
+        for parte in self._partes[1:]:
+            parte.configure(bg=cor)
+
+    def _mouse_dentro(self, x_tela, y_tela):
+        try:
+            return self.winfo_containing(x_tela, y_tela) in self._partes
+        except Exception:
+            return False
+
+    def _ao_sair(self, _evento=None):
+        # Ao passar do fundo para o texto (ou vice-versa) o mouse continua dentro do botão
+        try:
+            if not self._mouse_dentro(*self.winfo_pointerxy()):
+                self._pintar(self._cor)
+        except Exception:
+            pass  # janela já fechada
+
+    def _ao_soltar(self, evento):
+        if self._mouse_dentro(evento.x_root, evento.y_root):
+            self._pintar(self._cor_hover)
+            self.invocar()
+        else:
+            self._pintar(self._cor)
+
+    def invocar(self):
+        if self._comando:
+            self._comando()
+
+
+# ---------------------------------------------------------------------------------------------
+# CLICK_22 - RESUMO DO PROCEDIMENTO (seção "1. OBJETIVO" lida direto do PDF no site do ONS)
+# ---------------------------------------------------------------------------------------------
+# O título "1. OBJETIVO" aparece sozinho na linha no corpo do documento; no índice ele vem seguido
+# de pontilhado e número de página, por isso não confunde. A seção termina no título "2. XXXX".
+REGEX_OBJETIVO_INICIO = re.compile(r"^[ \t]*1\.?[ \t]*\n?[ \t]*OBJETIVOS?[ \t]*$", re.IGNORECASE | re.MULTILINE)
+REGEX_OBJETIVO_FIM = re.compile(r"^[ \t]*2\.[ \t]*\n?[ \t]*[A-ZÀ-Ý]{3}", re.MULTILINE)
+# Início de item dentro do objetivo: marcador, "1.1." (sozinho ou seguido de maiúscula), "a)" ou "1)".
+# "5.5 dos Procedimentos de Rede" (minúscula) é continuação da frase, não um item novo.
+REGEX_NOVO_PARAGRAFO = re.compile(r"^(?:[-•–·▪]\s|\d+(?:\.\d+)+\.?(?:\s+[A-ZÀ-Ý]|$)|\d+\)\s|[A-Za-z]\)\s)")
+LIMITE_OBJETIVO_SEM_FIM = 2500   # caracteres lidos se o título da seção seguinte não for encontrado
+PAGINAS_LIDAS_RESUMO = 40        # o objetivo vem após a capa e o índice (que chega a 10 páginas nos PDFs maiores)
+PAGINAS_JANELA_OBJETIVO = 6      # páginas lidas a partir do título (o objetivo pode passar de página)
+VALIDADE_CACHE_RESUMO = timedelta(hours=6)
+_CACHE_RESUMO_ONS = {}           # url_base -> (data_hora, resumo)
+
+
+def _remover_cabecalho_rodape(textos_paginas):
+    """Tira de cada página as linhas que se repetem na maioria delas (cabeçalho, rodapé, nº da página)."""
+    chaves_por_pagina = [{re.sub(r"\d+", "#", l.strip()) for l in t.splitlines() if l.strip()}
+                         for t in textos_paginas]
+    contagem = {}
+    for chaves in chaves_por_pagina:
+        for chave in chaves:
+            contagem[chave] = contagem.get(chave, 0) + 1
+    limite = max(3, 0.5 * len(textos_paginas))
+    return ["\n".join(l for l in t.splitlines() if contagem.get(re.sub(r"\d+", "#", l.strip()), 0) < limite)
+            for t in textos_paginas]
+
+
+def _reformatar_paragrafos(texto):
+    """Junta as quebras de linha do PDF em parágrafos corridos, preservando itens numerados e marcadores."""
+    paragrafos, atual = [], []
+    for linha in texto.splitlines():
+        linha = " ".join(linha.split())
+        if not re.search(r"\w", linha):
+            continue
+        if atual and REGEX_NOVO_PARAGRAFO.match(linha):
+            paragrafos.append(" ".join(atual))
+            atual = []
+        atual.append(linha)
+    if atual:
+        paragrafos.append(" ".join(atual))
+    return "\n\n".join(paragrafos)
+
+
+def extrair_objetivo_pdf(doc, max_paginas=PAGINAS_LIDAS_RESUMO):
+    """Devolve (texto_do_objetivo, pagina_base_1) lido da seção '1. OBJETIVO' do procedimento.
+    Lança ValueError com mensagem amigável quando a seção não puder ser lida."""
+    pagina_inicio, paginas_com_texto = None, 0
+    for numero in range(min(len(doc), max_paginas)):
+        texto = doc[numero].get_text("text")
+        paginas_com_texto += bool(texto.strip())
+        if REGEX_OBJETIVO_INICIO.search(texto):
+            pagina_inicio = numero
+            break
+    if paginas_com_texto == 0:
+        raise ValueError("O PDF não possui camada de texto (documento digitalizado).")
+    if pagina_inicio is None:
+        raise ValueError("Não foi possível localizar a seção '1. OBJETIVO' neste documento.")
+
+    ultima = min(len(doc), pagina_inicio + PAGINAS_JANELA_OBJETIVO)
+    paginas = _remover_cabecalho_rodape([doc[i].get_text("text") for i in range(pagina_inicio, ultima)])
+    inicio = REGEX_OBJETIVO_INICIO.search(paginas[0])
+    resto = paginas[0][inicio.end():] + "\n" + "\n".join(paginas[1:])  # o objetivo pode passar de página
+    fim = REGEX_OBJETIVO_FIM.search(resto)
+    objetivo = _reformatar_paragrafos(resto[:fim.start()] if fim else resto[:LIMITE_OBJETIVO_SEM_FIM])
+    if not objetivo:
+        raise ValueError("A seção '1. OBJETIVO' deste documento está vazia.")
+    return objetivo, pagina_inicio + 1
+
+
+def extrair_identificacao_pdf(doc):
+    """Título, código, revisão e vigência lidos da capa do procedimento (melhor esforço: pode vir vazio)."""
+    info = {"titulo": "", "codigo": "", "revisao": "", "vigencia": ""}
+    try:
+        texto = doc[0].get_text("text")
+        achado = re.search(r"C[óo]digo\s+Revis[ãa]o\s+Item\s+Vig[êe]ncia\s+(\S+)\s+(\d+)\s+\S+\s+(\d{2}/\d{2}/\d{4})",
+                           texto)
+        if achado:
+            info.update(codigo=achado.group(1), revisao=achado.group(2), vigencia=achado.group(3))
+        capa = re.search(r"Subm[óo]dulo\s+[\d.]+[^\n]*\n(.*?)(?=\n\s*C[óo]digo\b|\n[\s.]*MOTIVO DA)", texto, re.DOTALL)
+        if capa:
+            linhas = [" ".join(l.split()) for l in capa.group(1).splitlines() if l.strip(" .\t")]
+            info["titulo"] = (f"{linhas[0].rstrip(' .')} - {' '.join(linhas[1:])}" if len(linhas) > 1
+                              else " ".join(linhas))
+    except Exception:
+        pass  # a identificação é um complemento; o objetivo continua sendo exibido
+    return info
+
+
+def obter_resumo_objetivo(url_pdf):
+    """Baixa o PDF no site do ONS e devolve o resumo (objetivo + identificação do documento)."""
+    resposta = requests.get(url_pdf, timeout=(5, 60))
+    resposta.raise_for_status()
+    doc = fitz.open(stream=resposta.content, filetype="pdf")
+    try:
+        if doc.needs_pass:
+            raise ValueError("O PDF está protegido por senha.")
+        objetivo, pagina = extrair_objetivo_pdf(doc)
+        resumo = extrair_identificacao_pdf(doc)
+    finally:
+        doc.close()
+    resumo.update(objetivo=objetivo, pagina=pagina)
+    return resumo
+
+
 def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_pdf, url_original):
     """Janela com a lista de ocorrências, resumo por seção e a página com os destaques."""
 
@@ -8781,8 +9009,7 @@ def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_p
     # ----- Painel esquerdo: ocorrências e resumo -----
     abas = ttk.Notebook(corpo)
     frame_lista = Frame(abas)
-    lista = Listbox(frame_lista, font=("Consolas", 9), activestyle="none",
-                    selectbackground="#00ffff", exportselection=False)
+    lista = Listbox(frame_lista, font=("Consolas", 9), activestyle="none", selectbackground="#00ffff", exportselection=False)
     scroll_lista = Scrollbar(frame_lista, orient=VERTICAL, command=lista.yview)
     lista.configure(yscrollcommand=scroll_lista.set)
     scroll_lista.pack(side=RIGHT, fill=Y)
@@ -9092,7 +9319,7 @@ def cmd_click22():
         },
     }
     # ===== CONFIGURAÇÕES GLOBAIS PARA BUSCA =====
-    MAX_REVISAO = 400
+    MAX_REVISAO = 500
     TIMEOUT_REQUISICAO = 2
     MAX_THREADS = 20  # quantidade de buscas simultâneas
 
@@ -9122,6 +9349,22 @@ def cmd_click22():
 
         with requests.Session() as session:
 
+            # 1) Atalho: última revisão já encontrada deste documento e as logo acima dela
+            #    (normalmente basta uma rodada curta de consultas, em vez de varrer até MAX_REVISAO)
+            conhecida = obter_revisao_conhecida(url_base)
+            if conhecida is not None:
+                proximas = range(min(conhecida + JANELA_REVISAO_NOVA, MAX_REVISAO), conhecida - 1, -1)
+                with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+                    achadas = [(rev, url) for rev, url in
+                               executor.map(lambda rev: testar_revisao(session, url_base, rev), proximas) if url]
+                if achadas:
+                    revisao, url_encontrada = max(achadas)  # a mais alta encontrada
+                    registrar_revisao_conhecida(url_base, revisao)
+                    if callback_progresso:
+                        callback_progresso(100, revisao)
+                    return url_encontrada
+
+            # 2) Varredura completa (primeira busca do documento ou revisão fora da janela do atalho)
             # Começa da maior revisão para a menor
             revisoes = range(MAX_REVISAO, -1, -1)
 
@@ -9153,6 +9396,7 @@ def cmd_click22():
                     # Encontrou → encerra imediatamente
                     if resultado:
                         executor.shutdown(wait=False, cancel_futures=True)
+                        registrar_revisao_conhecida(url_base, revisao)
 
                         if callback_progresso:
                             callback_progresso(100, revisao)
@@ -9165,7 +9409,7 @@ def cmd_click22():
     # ===== FUNÇÃO QUE EXECUTA A BUSCA EM THREAD =====
     def executar_busca_em_thread(localidade, categoria, subtipo, url_base,
                                  janela_progresso, progress_bar, lbl_status, lbl_revisao,
-                                 opcoes_destaque=None, busca_cancelada=None):
+                                 opcoes_destaque=None, busca_cancelada=None, somente_resumo=False):
 
         if "INSERIR URL" in url_base:
             janela_progresso.after(0, janela_progresso.destroy)
@@ -9185,12 +9429,36 @@ def cmd_click22():
                 msg = f"Buscando revisões... testando {revisao_atual} (0 → {MAX_REVISAO})"
             elif progresso < 100:
                 msg = f"Continuando busca... testando revisão {revisao_atual}"
+            elif somente_resumo:
+                msg = "✅ Revisão encontrada! Lendo o objetivo do procedimento..."
             else:
                 msg = "✅ Busca concluída! Abrindo navegador..."
 
             janela_progresso.after(0, lambda: lbl_status.configure(text=msg))
 
         url_final = encontrar_ultima_revisao(url_base, callback_progresso)
+
+        if url_final and somente_resumo:
+            if busca_cancelada is not None and busca_cancelada.is_set():
+                return
+            try:
+                resumo = obter_resumo_objetivo(url_final)
+            except Exception as erro:
+                if busca_cancelada is not None and busca_cancelada.is_set():
+                    return
+                mensagem = (f"❌ Não foi possível obter o resumo!\n\n"
+                            f"Localidade: {localidade}\n"
+                            f"Documento: {subtipo}\n\n"
+                            f"{erro}")
+                janela_progresso.after(0, janela_progresso.destroy)
+                janela_progresso.after(0, lambda: messagebox.showerror("Resumo indisponível", mensagem))
+                return
+            if busca_cancelada is not None and busca_cancelada.is_set():
+                return
+            _CACHE_RESUMO_ONS[url_base] = (datetime.now(), resumo)
+            janela_progresso.after(0, janela_progresso.destroy)
+            root.after(0, lambda: abrir_janela_resumo(localidade, categoria, subtipo, resumo))
+            return
 
         aviso_destaque = ""
         if url_final and opcoes_destaque and PYMUPDF_DISPONIVEL:
@@ -9231,17 +9499,18 @@ def cmd_click22():
                                                                    f"documento está disponível no site."))
 
     # ===== FUNÇÃO PARA ABRIR PROCEDIMENTO =====
-    def abrir_procedimento(localidade, categoria, subtipo, url_base, opcoes_destaque=None):
+    def abrir_procedimento(localidade, categoria, subtipo, url_base, opcoes_destaque=None, somente_resumo=False):
 
         janela_progresso = Toplevel()
-        janela_progresso.title("Buscando procedimento...")
-        janela_progresso.geometry("500x280")
+        janela_progresso.title("Buscando resumo..." if somente_resumo else "Buscando procedimento...")
+        janela_progresso.geometry("500x410")
         janela_progresso.resizable(False, False)
         janela_progresso['bg'] = "#a4bad2"
         janela_progresso.transient()
         janela_progresso.grab_set()
 
-        lbl_titulo = Label(janela_progresso, text="🔍 BUSCANDO PROCEDIMENTO",
+        lbl_titulo = Label(janela_progresso,
+                           text="📝 BUSCANDO RESUMO" if somente_resumo else "🔍 BUSCANDO PROCEDIMENTO",
                            font=('Arial', '14', 'bold'),
                            bg="#024593", fg="white", height=2)
         lbl_titulo.pack(fill='x')
@@ -9262,7 +9531,7 @@ def cmd_click22():
         progress_bar.pack(pady=20)
 
         lbl_instrucao = Label(janela_progresso,
-                              text="⏳ Buscando revisões de 00 até 99...\nIsso pode levar alguns segundos.",
+                              text=f"⏳ Buscando revisões de 00 até {MAX_REVISAO}...\nIsso pode levar alguns segundos.",
                               bg="#a4bad2", font=("Arial", 8), fg="#555")
         lbl_instrucao.pack(pady=10)
 
@@ -9281,10 +9550,71 @@ def cmd_click22():
             target=executar_busca_em_thread,
             args=(localidade, categoria, subtipo, url_base,
                   janela_progresso, progress_bar, lbl_status, lbl_revisao,
-                  opcoes_destaque, busca_cancelada),
+                  opcoes_destaque, busca_cancelada, somente_resumo),
             daemon=True
         )
         thread_busca.start()
+
+    # ===== RESUMO DO PROCEDIMENTO (OBJETIVO LIDO NO SITE DO ONS) =====
+    def abrir_resumo(localidade, categoria, subtipo, url_base):
+        """Botão 'Resumo': mostra o objetivo do procedimento. Reaproveita o resumo já lido
+        (por algumas horas) para não buscar a revisão e baixar o PDF a cada clique."""
+        em_cache = _CACHE_RESUMO_ONS.get(url_base)
+        if em_cache and datetime.now() - em_cache[0] < VALIDADE_CACHE_RESUMO:
+            abrir_janela_resumo(localidade, categoria, subtipo, em_cache[1])
+            return
+        abrir_procedimento(localidade, categoria, subtipo, url_base, somente_resumo=True)
+
+    def abrir_janela_resumo(localidade, categoria, subtipo, resumo):
+        janela = Toplevel(root)
+        janela.title(f"Resumo - {subtipo} - {localidade}")
+        janela.geometry("760x520")
+        janela.minsize(560, 380)
+        janela['bg'] = "#a4bad2"
+
+        Label(janela, text=f"📝 RESUMO - {subtipo}\n{localidade} ({categoria})",
+              font=('Arial', '14', 'bold'), bg="#024593", fg="white", height=2).pack(fill='x')
+
+        identificacao = " │ ".join(parte for parte in (
+            f"Código: {resumo['codigo']}" if resumo["codigo"] else "",
+            f"Revisão: {resumo['revisao']}" if resumo["revisao"] else "",
+            f"Vigência: {resumo['vigencia']}" if resumo["vigencia"] else "",
+            f"Objetivo na pág. {resumo['pagina']} do PDF") if parte)
+        if resumo["titulo"]:
+            Label(janela, text=resumo["titulo"], bg="#a4bad2", fg="#024593", font=("Arial", 10, "bold"),
+                  wraplength=700, justify="left", anchor="w").pack(fill='x', padx=20, pady=(12, 0))
+        Label(janela, text=identificacao, bg="#a4bad2", font=("Arial", 9), fg="#555",
+              anchor="w").pack(fill='x', padx=20, pady=(2, 8))
+
+        # Botões primeiro (lado inferior) para nunca serem cortados quando a janela for reduzida
+        barra = Frame(janela, bg="#a4bad2")
+        barra.pack(side="bottom", fill='x', padx=20, pady=12)
+
+        quadro = LabelFrame(janela, text="🎯 Objetivo do procedimento", bg="#a4bad2",
+                            font=("Arial", 10, "bold"), fg="#024593")
+        quadro.pack(side="top", fill=BOTH, expand=True, padx=20, pady=(0, 0))
+        rolagem = Scrollbar(quadro, orient=VERTICAL)
+        texto = Text(quadro, wrap="word", font=("Arial", 11), bg="white", yscrollcommand=rolagem.set,
+                     spacing2=3, spacing3=8)
+        rolagem.configure(command=texto.yview)
+        rolagem.pack(side=RIGHT, fill=Y, padx=(0, 4), pady=4)
+        texto.pack(side=LEFT, fill=BOTH, expand=True, padx=(4, 0), pady=4)
+        texto.insert("1.0", resumo["objetivo"])
+        texto.configure(state="disabled")
+
+        def copiar():
+            janela.clipboard_clear()
+            janela.clipboard_append(resumo["objetivo"])
+            messagebox.showinfo("Resumo", "Objetivo copiado para a área de transferência.", parent=janela)
+
+        Button(barra, text="Fechar", command=janela.destroy, bg="#FF0000", fg="white",
+               font=("Arial", 10, "bold"), width=12).pack(side=RIGHT, padx=3)
+        Button(barra, text="📋 Copiar", command=copiar, bg="#2ECC71", fg="white",
+               font=("Arial", 9, "bold")).pack(side=RIGHT, padx=3)
+
+        janela.bind("<Escape>", lambda e: janela.destroy())
+        janela.lift()
+        janela.focus_force()
 
     # ===== JANELA DE SUBTIPOS =====
     def abrir_subtipos(localidade, categoria):
@@ -9295,9 +9625,13 @@ def cmd_click22():
 
         cores = ["#3498DB", "#2ECC71", "#E74C3C", "#F39C12", "#9B59B6", "#1ABC9C", "#E67E22", "#34495E"]
 
+        colunas = 2
+        # Altura acompanha a quantidade de documentos (cada linha tem botão + "Resumo")
+        linhas_botoes = (len(subtipos) + colunas - 1) // colunas
+
         janela_subtipos = Toplevel(frame_principal)
         janela_subtipos.title(f"{categoria} - {localidade}")
-        janela_subtipos.geometry("620x640")
+        janela_subtipos.geometry(f"620x{min(330 + linhas_botoes * 118, janela_subtipos.winfo_screenheight() - 80)}")
         janela_subtipos.resizable(False, False)
         janela_subtipos['bg'] = "#a4bad2"
 
@@ -9342,7 +9676,6 @@ def cmd_click22():
         frame_botoes = Frame(janela_subtipos, bg="#a4bad2")
         frame_botoes.pack(fill='both', expand=True, padx=30, pady=10)
 
-        colunas = 2
         for idx, subtipo in enumerate(subtipos):
             linha = idx // colunas
             coluna = idx % colunas
@@ -9351,28 +9684,29 @@ def cmd_click22():
             url_base = dados[subtipo]
 
             btn_frame = Frame(frame_botoes, bg="#a4bad2")
-            btn_frame.grid(row=linha, column=coluna, padx=10, pady=10, sticky="nsew")
+            btn_frame.grid(row=linha, column=coluna, padx=10, pady=6, sticky="nsew")
 
             if "INSERIR URL" in url_base:
-                btn_text = f"⚠️ {subtipo}\n(URL não configurada)"
-                btn_state = "disabled"
-            else:
-                btn_text = subtipo
-                btn_state = "normal"
+                # Documento ainda sem URL: botão desabilitado, sem "Resumo"
+                Button(btn_frame, text=f"⚠️ {subtipo}\n(URL não configurada)", bg=cor, fg="white",
+                       font=("Arial", 10, "bold"), height=3, wraplength=236,
+                       state="disabled").pack(fill='x')
+                Label(btn_frame, text="⚠️ Configurar URL", bg="#a4bad2", font=("Arial", 8),
+                      fg="#555").pack(pady=(5, 0))
+                continue
 
-            btn = Button(btn_frame, text=btn_text,
-                         command=lambda s=subtipo, u=url_base: abrir_procedimento(localidade, categoria, s, u,
-                                                                                  obter_opcoes_destaque()),
-                         bg=cor, fg="white",
-                         font=("Arial", 10, "bold"),
-                         height=2, width=25,
-                         wraplength=200,
-                         state=btn_state)
-            btn.pack()
+            # "Clique para abrir" fica DENTRO do botão (com a cor de fundo da janela), para ninguém
+            # clicar no texto achando que é o botão
+            BotaoComRotulo(btn_frame, texto=subtipo, rotulo="Clique para abrir",
+                           comando=lambda s=subtipo, u=url_base: abrir_procedimento(localidade, categoria, s, u,
+                                                                                    obter_opcoes_destaque()),
+                           bg=cor, fg_rotulo=janela_subtipos.cget("bg"), largura=260, altura=72).pack()
 
-            descricao = "Clique para abrir"
-            Label(btn_frame, text=descricao if "INSERIR" not in url_base else "⚠️ Configurar URL",
-                  bg="#a4bad2", font=("Arial", 8), fg="#555").pack(pady=(5, 0))
+            # "Resumo" com a mesma cor do botão do procedimento ao qual está associado
+            Button(btn_frame, text="📝 Resumo",
+                   command=lambda s=subtipo, u=url_base: abrir_resumo(localidade, categoria, s, u),
+                   bg=cor, fg="white", font=("Arial", 9, "bold"),
+                   state="normal" if PYMUPDF_DISPONIVEL else "disabled").pack(fill='x', pady=(4, 0))
 
         for i in range(colunas):
             frame_botoes.grid_columnconfigure(i, weight=1)
@@ -9385,7 +9719,7 @@ def cmd_click22():
 
         janela_opcoes = Toplevel(frame_principal)
         janela_opcoes.title(f"Opções - {localidade}")
-        janela_opcoes.geometry("500x350")
+        janela_opcoes.geometry("500x510")
         janela_opcoes.resizable(False, False)
         janela_opcoes['bg'] = "#a4bad2"
 
@@ -9421,7 +9755,7 @@ def cmd_click22():
     # ===== CRIAÇÃO DA JANELA PRINCIPAL =====
     frame_principal = Toplevel(root)
     frame_principal.title('Acesso a Procedimentos ONS - Localidades')
-    frame_principal.geometry('800x600')
+    frame_principal.geometry('960x600')
     frame_principal.resizable(True, True)
     frame_principal['bg'] = "#a4bad2"
 
@@ -9460,16 +9794,12 @@ def cmd_click22():
         btn_frame = Frame(frame_botoes_localidades, bg="#a4bad2")
         btn_frame.grid(row=linha, column=coluna, padx=15, pady=15, sticky="nsew")
 
-        btn = Button(btn_frame, text=localidade,
-                     command=lambda l=localidade: abrir_opcoes_localidade(l),
-                     bg="#024593", fg="white",
-                     font=("Arial", 10, "bold"),
-                     height=3, width=25,
-                     wraplength=200)
-        btn.pack()
-
-        Label(btn_frame, text="Clique para acessar", bg="#a4bad2",
-              font=("Arial", 8), fg="#666").pack(pady=(5, 0))
+        # "Clique para acessar" fica DENTRO do botão (com a cor de fundo da janela), para ninguém
+        # clicar no texto achando que é o botão
+        BotaoComRotulo(btn_frame, texto=localidade, rotulo="Clique para acessar",
+                       comando=lambda l=localidade: abrir_opcoes_localidade(l),
+                       bg="#024593", fg_rotulo=frame_principal.cget("bg"),
+                       largura=270, altura=80).pack()
 
     for i in range(colunas):
         frame_botoes_localidades.grid_columnconfigure(i, weight=1)
