@@ -15633,7 +15633,7 @@ fileDOC_LIB.add_command(label="SM_Avulso", command=cmd_click25_sm_avulso)
 fileDOC_LIB.add_separator()
 fileDOC_LIB.add_command(label='Sair', command=root.quit)
 meuMenu.add_cascade(label="DOC_LIB.", menu=fileDOC_LIB)
-# ========cascate SEGUNDA PARTE termina aqui
+# ========cascate SEGUNDA PARTE termina aqui-
 
 ADMINMenu = Menu(meuMenu, tearoff=0)
 ADMINMenu.add_command(label="Cadastrar Usuário", command=cmd_click_cadastrar_usuario)
