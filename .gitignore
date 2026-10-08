@@ -1,0 +1,3 @@
+# Configuracao local do envio de e-mail do ATEIE (pode conter senha): nunca versionar.
+# O modelo sem senha e o config_email_ateie.exemplo.json
+config_email_ateie.json

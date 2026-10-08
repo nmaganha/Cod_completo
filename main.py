@@ -1,4 +1,4 @@
-# Código atualizado em 08-10-26 – 16:12h - (Ajustes pontuais)
+# Código atualizado em 08-10-26 - Click_25: ATEIE Reservado, Agrupar ATEIEs, Encaminhar ATEIE e cores dos status
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -20,6 +20,9 @@ from tkinter import ttk, messagebox, Toplevel, Frame, Label, Button, Entry, List
 import requests  # exclusivo para o click22
 import threading  # exclusivo para o click22
 from concurrent.futures import ThreadPoolExecutor, as_completed #exclusivo para o click22
+import smtplib  # exclusivo para o click25 (Encaminhar ATEIE por e-mail)
+import ssl  # exclusivo para o click25 (Encaminhar ATEIE por e-mail)
+from email.message import EmailMessage  # exclusivo para o click25 (Encaminhar ATEIE por e-mail)
 import re  # exclusivo para o click22 (destaque da instalação no PDF)
 import unicodedata  # exclusivo para o click22 (destaque da instalação no PDF)
 import base64  # exclusivo para o click22 (destaque da instalação no PDF)
@@ -11995,6 +11998,35 @@ DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE = ["FOZ DO RIO CLARO ENERGIA SA", "IJUÍ ENE
 DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "EDP", "ENGIE", "CELEO_REDES", "ENERGISA", "ISA-ENERGIA", "CBA", "EQUATORIAL",
                                       "CPFL-RGE", "ARGO", "CIMY", "OUTRA"]         # combobox "Empresa" de "Pessoal Notificado"
 DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
+
+# ---- Encaminhar ATEIE (e-mail) -------------------------------------------------------------------------------------
+# Remetente fixo. Como o e-mail é enviado (SMTP ou Outlook) é definido no arquivo local config_email_ateie.json (modelo:
+# config_email_ateie.exemplo.json). Esse arquivo NÃO vai para o GitHub porque pode conter senha.
+EMAIL_ATEIE_REMETENTE = "nmaganha@alupar.com.br"
+ARQUIVO_CONFIG_EMAIL_ATEIE = os.path.join(PASTA_BASE, "config_email_ateie.json")
+EMAIL_ATEIE_ASSUNTO = "ATEIE - Para análise e De Acordo"
+EMAIL_ATEIE_TEXTO = ("Prezados,\n\n"
+                     "Segue para análise e o De Acordo o(s) ATEIEs números: {numeros}.\n\n"
+                     "Atenciosamente,\n"
+                     "COG-ALUPAR")
+# Destinatários cadastrados na primeira vez em que o banco é preparado; depois disso a lista vale a do banco, que pode
+# receber mais e-mails por empresa na tela "Cadastrar e-mails" (botão Encaminhar ATEIE).
+# (Empresa Solicitante, destinatário a escolher na hora do envio - "" quando não há escolha, e-mail)
+DOC_LIB_DESTINATARIOS_INICIAIS = [
+    ("FOZ DO RIO CLARO ENERGIA SA", "", "nivado.maganha@gmail.com"),
+    ("IJUÍ ENERGIA SA", "", "nivado.maganha@gmail.com"),
+    ("US. PAULISTA LAVRINHAS DE ENERGIA SA", "", "nivado.maganha@gmail.com"),
+    ("FERREIRA GOMES ENERGIA SA", "ENERGISA", "nivado.maganha@gmail.com"),
+    ("FERREIRA GOMES ENERGIA SA", "EDP", "nivado.maganha@homail.com"),
+    ("VERDE 08 ENERGIA SA", "", "nivado.maganha@gmail.com"),
+    ("ENERGIA DOS VENTOS SA", "AXIA", "nivado.maganha@gmail.com"),
+    ("ENERGIA DOS VENTOS SA", "WEG", "nivado.maganha@homail.com"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO", "nivado.maganha@gmail.com"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "CIMY", "nivado.maganha@homail.com"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY", "nivado.maganha@gmail.com"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY", "nivado.maganha@homail.com"),
+]
+
 # Texto padrão do campo "Observações": obrigatório em todos os documentos (entra já preenchido no formulário)
 DOC_LIB_TEXTO_PADRAO_OBSERVACOES = (
     "Bloquear ou manter bloqueado o religamento automático de todos os disjuntores que alimentam os "
@@ -12017,8 +12049,17 @@ STATUS_ATEIE_EM_EXECUCAO = "Em Execução"
 STATUS_ATEIE_CONCLUIDO = "Concluído"
 # ATEIE cancelado mantém o número (nunca reaproveitado) e fica registrado no documento
 STATUS_ATEIE_CANCELADO = "Cancelado"
+# Número de ATEIE reservado (botão "ATEIE-Reservado"): registro individual só com o número e as Observações padrão,
+# aguardando o preenchimento posterior. Ao ser preenchido e salvo passa a "Em análise" e segue o fluxo normal.
+STATUS_ATEIE_RESERVADO = "Reservado"
 DOC_LIB_STATUS_ATEIE = [STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_AGUARDA_DE_ACORDO, STATUS_ATEIE_APROVADO_EXECUCAO,
-                        STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO]
+                        STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO,
+                        STATUS_ATEIE_RESERVADO]
+DOC_LIB_LIMITE_RESERVA = 10            # máximo de números reservados em uma única operação
+DOC_LIB_LIMITE_AGRUPAMENTO = 10        # máximo de ATEIEs reservados agrupados em um único documento
+# Texto exibido no GRID ATEIE, em "Equipamento de Interligação", enquanto o registro permanece reservado (no banco e
+# no formulário o campo fica em branco)
+DOC_LIB_TEXTO_EQUIPAMENTO_RESERVADO = "ATEIE RESERVADO"
 # Só é possível cancelar um ATEIE antes de entrar em execução ("Em análise", "Aguarda De Acordo" ou "Aprovado para
 # Execução"): em execução o ATEIE somente pode ser concluído (procedimento); concluído e cancelado também não
 # podem ser cancelados
@@ -12069,7 +12110,12 @@ class DocLibBloqueado(Exception):
 
 
 class DocLibRegra(Exception):
-    """Dado de execução que contraria uma regra de data do ATEIE (colunas 6 e 10)."""
+    """Dado de execução que contraria uma regra de data do ATEIE (colunas 6 e 10) ou operação que contraria as
+    regras de reserva, agrupamento e cadastro de destinatários."""
+
+
+class DocLibEmailErro(Exception):
+    """Falha na configuração ou no envio do e-mail do ATEIE."""
 
 
 # ---------------------------------------------------
@@ -12232,12 +12278,55 @@ def garantir_banco_doc_lib():
                         ultimo INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (tipo, ano))''')
 
+    # histórico dos agrupamentos de ATEIEs reservados (os números originais continuam em cada intervenção)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_ateie_agrupamentos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ateie_id INTEGER NOT NULL,
+                        numeros TEXT NOT NULL,
+                        agrupado_por TEXT,
+                        agrupado_em TEXT)''')
+
+    # e-mails enviados pelo botão "Encaminhar ATEIE"
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_ateie_emails (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ateie_id INTEGER NOT NULL,
+                        numeros TEXT NOT NULL,
+                        destinatarios TEXT NOT NULL,
+                        remetente TEXT,
+                        assunto TEXT,
+                        anexo TEXT,
+                        metodo TEXT,
+                        enviado_por TEXT,
+                        enviado_em TEXT)''')
+
+    # destinatários do "Encaminhar ATEIE": por Empresa Solicitante e, quando a empresa tem mais de um destinatário
+    # possível, pela opção escolhida na hora do envio (escolha = '' quando não há escolha). Pode ter vários e-mails.
+    destinatarios_existia = cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'doclib_ateie_destinatarios'").fetchone()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_ateie_destinatarios (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        empresa TEXT NOT NULL,
+                        escolha TEXT NOT NULL DEFAULT '',
+                        email TEXT NOT NULL,
+                        incluido_por TEXT,
+                        incluido_em TEXT,
+                        UNIQUE(empresa, escolha, email))''')
+    if not destinatarios_existia:          # carga inicial só na criação: o que for removido depois não volta
+        cursor.executemany("INSERT OR IGNORE INTO doclib_ateie_destinatarios (empresa, escolha, email, incluido_por, "
+                           "incluido_em) VALUES (?, ?, ?, 'sistema', ?)",
+                           [(empresa, escolha, email, datetime.now().strftime("%d/%m/%Y - %H:%Mh"))
+                            for empresa, escolha, email in DOC_LIB_DESTINATARIOS_INICIAIS])
+
     # bancos criados por versões anteriores do Click_25: colunas novas
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie", "solicitado_por_usuario", "TEXT")
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie", "emitido", "INTEGER NOT NULL DEFAULT 0")
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie", "emitido_em", "TEXT")
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie", "emitido_por", "TEXT")
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie", "reservado_por", "TEXT")      # quem reservou o número
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie", "reservado_em", "TEXT")       # e quando (nunca é apagado)
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie_pessoal", "empresa_outra", "TEXT")
+    # revisão do documento depois de gerado o PDF: o e-mail só reaproveita um PDF que ainda reflete o documento atual
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie_pdfs", "revisao_final", "INTEGER")
 
     conexao.commit()
     conexao.close()
@@ -12260,7 +12349,9 @@ def _doc_lib_migrar_dados():
             or cur.execute("SELECT 1 FROM doclib_ateie_intervencoes WHERE status IN ('ATIVA', 'CANCELADA') "
                            "LIMIT 1").fetchone()
             or cur.execute("SELECT 1 FROM doclib_ateie WHERE emitido = 0 AND id IN "
-                           "(SELECT ateie_id FROM doclib_ateie_pdfs) LIMIT 1").fetchone()
+                           "(SELECT ateie_id FROM doclib_ateie_pdfs) AND id NOT IN "
+                           "(SELECT ateie_id FROM doclib_ateie_intervencoes WHERE status = ?) LIMIT 1",
+                           (STATUS_ATEIE_RESERVADO,)).fetchone()
             or any((empresa or "").strip() and empresa not in DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE
                    for (empresa,) in cur.execute("SELECT empresa FROM doclib_ateie_pessoal").fetchall())
             or cur.execute("SELECT 1 FROM doclib_ateie_intervencoes WHERE status = ? LIMIT 1",
@@ -12290,9 +12381,11 @@ def _doc_lib_migrar_dados():
         # Observações passou a ser obrigatória, com o texto padrão: documentos antigos sem texto recebem o padrão
         cursor.execute("UPDATE doclib_ateie SET observacoes = ? WHERE observacoes IS NULL OR TRIM(observacoes) = ''",
                        (DOC_LIB_TEXTO_PADRAO_OBSERVACOES,))
-        # documento que já teve PDF gerado é considerado emitido
+        # documento que já teve PDF gerado é considerado emitido (exceto o ATEIE reservado: o PDF dele é só o
+        # formulário em branco e não emite nada)
         cursor.execute("UPDATE doclib_ateie SET emitido = 1 WHERE emitido = 0 AND id IN "
-                       "(SELECT ateie_id FROM doclib_ateie_pdfs)")
+                       "(SELECT ateie_id FROM doclib_ateie_pdfs) AND id NOT IN "
+                       "(SELECT ateie_id FROM doclib_ateie_intervencoes WHERE status = ?)", (STATUS_ATEIE_RESERVADO,))
         # empresa do pessoal notificado: antes texto livre, agora lista (o que não for da lista vira OUTRA)
         cursor.execute("SELECT id, empresa FROM doclib_ateie_pessoal")
         for pessoal_id, empresa in cursor.fetchall():
@@ -12340,6 +12433,7 @@ def doc_lib_de_acordo_completo(notificacoes):
 def doc_lib_calcular_status(item, emitido, de_acordo=False):
     """Status automático de um ATEIE (uma intervenção), em função do que já aconteceu com ele:
       Cancelado ................ foi cancelado (nunca volta atrás)
+      Reservado ................ número reservado e ainda sem a programação (colunas 2 a 5) preenchida
       Em análise ............... salvo, mas o documento ainda não foi gerado
       Concluído ................ documento gerado e colunas 10 a 13 (término efetivo) todas preenchidas
       Em Execução .............. documento gerado e colunas 6 a 9 (início efetivo) todas preenchidas
@@ -12348,6 +12442,9 @@ def doc_lib_calcular_status(item, emitido, de_acordo=False):
     Preenchimento parcial das colunas 6 a 9 ou 10 a 13 não muda o status."""
     if item.get("status") == STATUS_ATEIE_CANCELADO:
         return STATUS_ATEIE_CANCELADO
+    if item.get("status") == STATUS_ATEIE_RESERVADO \
+            and not any(str(item.get(chave) or "").strip() for chave in DOC_LIB_CAMPOS_PROGRAMADOS):
+        return STATUS_ATEIE_RESERVADO
     if not emitido:
         return STATUS_ATEIE_EM_ANALISE
 
@@ -12365,10 +12462,11 @@ def _doc_lib_recalcular_status(cursor, ateie_id, emitido):
     """Recalcula e grava o status de cada ATEIE (intervenção) do documento, um a um."""
     cursor.execute("SELECT nome, data, hora FROM doclib_ateie_notificacoes WHERE ateie_id = ?", (ateie_id,))
     de_acordo = doc_lib_de_acordo_completo([{"nome": n, "data": d, "hora": h} for n, d, h in cursor.fetchall()])
-    cursor.execute(f"SELECT id, status, {', '.join(DOC_LIB_CAMPOS_EXECUCAO)} FROM doclib_ateie_intervencoes "
+    colunas = DOC_LIB_CAMPOS_PROGRAMADOS + DOC_LIB_CAMPOS_EXECUCAO
+    cursor.execute(f"SELECT id, status, {', '.join(colunas)} FROM doclib_ateie_intervencoes "
                    f"WHERE ateie_id = ?", (ateie_id,))
     for linha in cursor.fetchall():
-        item = dict(zip(["id", "status"] + list(DOC_LIB_CAMPOS_EXECUCAO), linha))
+        item = dict(zip(["id", "status"] + list(colunas), linha))
         novo = doc_lib_calcular_status(item, emitido, de_acordo)
         if novo != item["status"]:
             cursor.execute("UPDATE doclib_ateie_intervencoes SET status = ? WHERE id = ?", (novo, item["id"]))
@@ -12547,6 +12645,7 @@ def doc_lib_salvar_ateie(dados, usuario):
                 raise DocLibConflito("Este ATEIE foi alterado por outro usuário depois de aberto nesta janela.\n\n"
                                      "Feche-o e abra-o novamente (GRID ATEIE) para ver a versão atual.")
             emitido = bool(atual["emitido"])
+        era_reservado = doc_lib_documento_reservado(atual)
         bloqueadas = doc_lib_diferencas_bloqueadas(atual or {}, dados, emitido)
         if bloqueadas:
             if emitido:
@@ -12584,6 +12683,13 @@ def doc_lib_salvar_ateie(dados, usuario):
                     "local_servico = ?, servicos = ?, observacoes = ?, documentos_vinculados = ?, nota = ?, "
                     "revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? WHERE id = ?",
                     campos_gerais + (usuario, agora_texto, ateie_id))
+                if era_reservado:
+                    # ATEIE reservado sendo preenchido: "Solicitado por", data e hora passam a ser os de quem registra
+                    # o documento no sistema (a reserva fica registrada em reservado_por e reservado_em)
+                    cursor.execute("UPDATE doclib_ateie SET solicitado_por = ?, solicitado_por_usuario = ?, "
+                                   "data_preenchimento = ?, hora_preenchimento = ? WHERE id = ?",
+                                   (dados["solicitado_por"], dados.get("solicitado_por_usuario") or dados["solicitado_por"],
+                                    dados["data_preenchimento"], dados["hora_preenchimento"], ateie_id))
                 cursor.execute("DELETE FROM doclib_ateie_notificacoes WHERE ateie_id = ?", (ateie_id,))
                 cursor.execute("DELETE FROM doclib_ateie_pessoal WHERE ateie_id = ?", (ateie_id,))
 
@@ -12686,6 +12792,12 @@ def doc_lib_listar_ateie():
         resultado = []
         for (ateie_id, ordem, numero, ano, sequencia, status, equipamento, empresa, empresa_outra, local,
              servicos, solicitado_por, data_inicio, hora_inicio, data_termino, hora_termino) in cursor.fetchall():
+            if status == STATUS_ATEIE_RESERVADO:     # só o número e a expressão ATEIE RESERVADO; o resto em branco
+                resultado.append({
+                    "ateie_id": ateie_id, "ordem": ordem, "numero": numero, "ano": ano, "sequencia": sequencia,
+                    "status": status, "equipamento": DOC_LIB_TEXTO_EQUIPAMENTO_RESERVADO, "empresa": "",
+                    "solicitante": "", "prog_inicio": "", "prog_termino": "", "local": "", "servicos": ""})
+                continue
             resultado.append({
                 "ateie_id": ateie_id, "ordem": ordem, "numero": numero, "ano": ano, "sequencia": sequencia,
                 "status": status, "equipamento": equipamento or "",
@@ -12735,6 +12847,366 @@ def doc_lib_cancelar_intervencao(ateie_id, ordem, usuario, justificativa, revisa
         if conexao.in_transaction:
             cursor.execute("ROLLBACK")
         raise
+    finally:
+        conexao.close()
+
+
+# ---------------------------------------------------
+# ATEIE RESERVADO E AGRUPAMENTO DE ATEIEs RESERVADOS
+# ---------------------------------------------------
+def doc_lib_documento_reservado(doc):
+    """True se o documento ainda é um ATEIE reservado, isto é, algum dos seus ATEIE está com status Reservado. Um
+    reservado só tem o número e as Observações padrão: o PDF dele é um formulário em branco, não emite o documento
+    e ele continua editável até ser preenchido e salvo."""
+    return any(item.get("status") == STATUS_ATEIE_RESERVADO for item in (doc or {}).get("intervencoes") or [])
+
+
+def doc_lib_reservar_ateie(quantidade, usuario, nome_completo=""):
+    """Reserva 'quantidade' (1 a DOC_LIB_LIMITE_RESERVA) números de ATEIE, na sequência do último número emitido ou
+    reservado do ano. Cada número vira um registro individual (um documento com um ATEIE) com status Reservado, só
+    com o número e as Observações padrão; todos os demais campos ficam em branco para o preenchimento posterior.
+    Tudo em uma única transação: ou são reservados todos os números pedidos, ou nenhum.
+    Devolve [{"ateie_id": ..., "numero": ...}] na ordem da numeração. Lança DocLibRegra se a quantidade for inválida."""
+    try:
+        quantidade = int(str(quantidade).strip())
+    except (TypeError, ValueError):
+        raise DocLibRegra("Informe a quantidade de números a reservar (número inteiro).")
+    if not 1 <= quantidade <= DOC_LIB_LIMITE_RESERVA:
+        raise DocLibRegra(f"A quantidade de números a reservar deve estar entre 1 e {DOC_LIB_LIMITE_RESERVA}.")
+    agora = datetime.now()
+    agora_texto = agora.strftime("%d/%m/%Y - %H:%Mh")
+    nomes_colunas = [chave for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO]
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        reservados = []
+        for _ in range(quantidade):
+            sequencia = _doc_lib_consumir_numero(cursor, "ATEIE", agora.year)
+            numero = doc_lib_formatar_numero(sequencia, agora.year)
+            cursor.execute(
+                "INSERT INTO doclib_ateie (classificacao, equipamento, empresa, empresa_outra, local_servico, servicos, "
+                "observacoes, documentos_vinculados, nota, solicitado_por, solicitado_por_usuario, data_preenchimento, "
+                "hora_preenchimento, revisao, emitido, criado_em, atualizado_por, atualizado_em, reservado_por, "
+                "reservado_em) VALUES ('', '', '', '', '', '', ?, '', '', ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)",
+                (DOC_LIB_TEXTO_PADRAO_OBSERVACOES, nome_completo or usuario, usuario, agora.strftime("%d/%m/%Y"),
+                 agora.strftime("%H:%M"), agora_texto, usuario, agora_texto, usuario, agora_texto))
+            ateie_id = cursor.lastrowid
+            cursor.execute(
+                f"INSERT INTO doclib_ateie_intervencoes (ateie_id, ordem, numero, ano, sequencia, "
+                f"{', '.join(nomes_colunas)}, status) VALUES (?, 1, ?, ?, ?, {', '.join(['?'] * len(nomes_colunas))}, ?)",
+                [ateie_id, numero, agora.year, sequencia] + [""] * len(nomes_colunas) + [STATUS_ATEIE_RESERVADO])
+            reservados.append({"ateie_id": ateie_id, "numero": numero})
+        cursor.execute("COMMIT")
+        return reservados
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_agrupar_reservados(selecao, usuario):
+    """Agrupa ATEIEs reservados em um único documento (um só PDF, com todos os números). 'selecao' é a lista de
+    (id do documento, linha da tabela) dos ATEIEs escolhidos no GRID ATEIE. Regras:
+      - de 2 a DOC_LIB_LIMITE_AGRUPAMENTO ATEIEs, todos com status Reservado (a numeração não precisa ser sequencial);
+      - se um ATEIE selecionado já faz parte de um agrupamento, todos os ATEIE desse agrupamento têm de ser selecionados
+        (os cancelados acompanham o agrupamento);
+      - o documento resultante não pode passar de DOC_LIB_LINHAS_INTERVENCOES linhas.
+    A numeração original de cada ATEIE é preservada (as linhas ficam em ordem de número) e o histórico dos PDFs
+    em branco já gerados passa para o documento agrupado. O agrupamento fica registrado em doclib_ateie_agrupamentos.
+    Devolve (id do documento resultante, [números agrupados]). Lança DocLibRegra se não puderem ser agrupados e
+    DocLibConflito se algum deles foi alterado por outro usuário."""
+    pares = list(dict.fromkeys((int(ateie_id), int(ordem)) for ateie_id, ordem in selecao))
+    if len(pares) < 2:
+        raise DocLibRegra("Selecione dois ou mais ATEIEs com status Reservado para agrupar.")
+    if len(pares) > DOC_LIB_LIMITE_AGRUPAMENTO:
+        raise DocLibRegra(f"Um agrupamento pode ter no máximo {DOC_LIB_LIMITE_AGRUPAMENTO} ATEIEs "
+                          f"({len(pares)} foram selecionados).")
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        for ateie_id, ordem in pares:
+            cursor.execute("SELECT i.numero, i.status, a.emitido FROM doclib_ateie_intervencoes i "
+                           "JOIN doclib_ateie a ON a.id = i.ateie_id WHERE i.ateie_id = ? AND i.ordem = ?",
+                           (ateie_id, ordem))
+            linha = cursor.fetchone()
+            if linha is None:
+                raise DocLibConflito("Um dos ATEIEs selecionados não existe mais ou foi agrupado por outro usuário.\n\n"
+                                     "Feche e abra novamente o GRID ATEIE para ver a situação atual.")
+            numero, status, emitido = linha
+            if status != STATUS_ATEIE_RESERVADO or emitido:
+                raise DocLibRegra(f"O ATEIE {numero} está com status '{status}'. Só é possível agrupar ATEIEs com "
+                                  f"status '{STATUS_ATEIE_RESERVADO}'.")
+
+        documentos = list(dict.fromkeys(ateie_id for ateie_id, _ in pares))
+        if len(documentos) < 2:
+            raise DocLibRegra("Os ATEIEs selecionados já fazem parte do mesmo agrupamento (mesmo documento).")
+        linhas = []                 # (ano, sequência, id da intervenção, id do documento de origem, número)
+        for ateie_id in documentos:
+            cursor.execute("SELECT id, ordem, numero, ano, sequencia, status FROM doclib_ateie_intervencoes "
+                           "WHERE ateie_id = ? ORDER BY ordem", (ateie_id,))
+            do_documento = cursor.fetchall()
+            for intervencao_id, ordem, numero, ano, sequencia, status in do_documento:
+                if (ateie_id, ordem) not in pares and status != STATUS_ATEIE_CANCELADO:
+                    raise DocLibRegra(
+                        f"O ATEIE {numero} já foi agrupado com outros ATEIEs "
+                        f"({', '.join(item[2] for item in do_documento)}) e não foi selecionado.\n\n"
+                        f"Selecione todos os ATEIEs desse agrupamento para agrupá-los com outros.")
+                linhas.append((ano, sequencia, intervencao_id, ateie_id, numero))
+        if len(linhas) > DOC_LIB_LINHAS_INTERVENCOES:
+            raise DocLibRegra(f"O documento agrupado teria {len(linhas)} linhas (inclui ATEIEs cancelados) e o "
+                              f"máximo é {DOC_LIB_LINHAS_INTERVENCOES}.")
+
+        linhas.sort()
+        destino = linhas[0][3]                                  # documento do menor número
+        origens = [ateie_id for ateie_id in documentos if ateie_id != destino]
+        # as linhas passam para o documento de destino em ordem de número (primeiro afasta as ordens atuais, para
+        # não colidir com UNIQUE(ateie_id, ordem))
+        marcas = ", ".join("?" * len(linhas))
+        cursor.execute(f"UPDATE doclib_ateie_intervencoes SET ordem = ordem + 1000 WHERE id IN ({marcas})",
+                       [linha[2] for linha in linhas])
+        for ordem, (_, _, intervencao_id, _, _) in enumerate(linhas, start=1):
+            cursor.execute("UPDATE doclib_ateie_intervencoes SET ateie_id = ?, ordem = ? WHERE id = ?",
+                           (destino, ordem, intervencao_id))
+        marcas = ", ".join("?" * len(origens))
+        # o histórico dos PDFs em branco e dos agrupamentos anteriores acompanha as linhas para o documento de destino
+        cursor.execute(f"UPDATE doclib_ateie_pdfs SET ateie_id = ? WHERE ateie_id IN ({marcas})", [destino] + origens)
+        cursor.execute(f"UPDATE doclib_ateie_agrupamentos SET ateie_id = ? WHERE ateie_id IN ({marcas})",
+                       [destino] + origens)
+        # os documentos de origem (reservados, sem notificações nem pessoal) deixam de existir
+        cursor.execute(f"DELETE FROM doclib_ateie_notificacoes WHERE ateie_id IN ({marcas})", origens)
+        cursor.execute(f"DELETE FROM doclib_ateie_pessoal WHERE ateie_id IN ({marcas})", origens)
+        cursor.execute(f"DELETE FROM doclib_ateie WHERE id IN ({marcas})", origens)
+        cursor.execute("UPDATE doclib_ateie SET revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? "
+                       "WHERE id = ?", (usuario, agora_texto, destino))
+        numeros = [linha[4] for linha in linhas]
+        cursor.execute("INSERT INTO doclib_ateie_agrupamentos (ateie_id, numeros, agrupado_por, agrupado_em) "
+                       "VALUES (?, ?, ?, ?)", (destino, ", ".join(numeros), usuario, agora_texto))
+        cursor.execute("COMMIT")
+        return destino, numeros
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+# ---------------------------------------------------
+# ENCAMINHAR ATEIE POR E-MAIL
+# ---------------------------------------------------
+DOC_LIB_TEXTO_SEMPRE = "(todos os envios)"        # opção de destinatário vazia: o e-mail vale em qualquer escolha
+_DOC_LIB_PADRAO_EMAIL = re.compile(r"^[^@\s;,<>]+@[^@\s;,<>]+\.[^@\s;,<>]+$")
+
+
+def doc_lib_validar_email(email):
+    return bool(_DOC_LIB_PADRAO_EMAIL.match((email or "").strip()))
+
+
+def doc_lib_texto_numeros(numeros):
+    """0001/26 | 0001/26 e 0002/26 | 0001/26, 0002/26 e 0003/26"""
+    numeros = list(numeros)
+    if len(numeros) <= 1:
+        return "".join(numeros)
+    return ", ".join(numeros[:-1]) + " e " + numeros[-1]
+
+
+def doc_lib_empresa_do_documento(doc):
+    """Nome da Empresa Solicitante do documento (na opção OUTRA, o nome digitado), em caixa alta."""
+    empresa = doc.get("empresa_outra") if doc.get("empresa") == "OUTRA" and doc.get("empresa_outra") \
+        else doc.get("empresa")
+    return " ".join(str(empresa or "").split()).upper()
+
+
+def doc_lib_listar_destinatarios():
+    """Todos os e-mails cadastrados: [{id, empresa, escolha, email, incluido_por, incluido_em}]. Dentro de cada
+    empresa, na ordem do cadastro (é a ordem em que as opções de destinatário aparecem para escolha)."""
+    conexao = doc_lib_conectar()
+    try:
+        linhas = conexao.execute("SELECT id, empresa, escolha, email, incluido_por, incluido_em "
+                                 "FROM doclib_ateie_destinatarios ORDER BY empresa, id").fetchall()
+    finally:
+        conexao.close()
+    return [dict(zip(("id", "empresa", "escolha", "email", "incluido_por", "incluido_em"), linha))
+            for linha in linhas]
+
+
+def doc_lib_destinatarios_da_empresa(empresa):
+    """Destinatários cadastrados para a Empresa Solicitante: (opções, fixos, por_opcao).
+      opções ..... opções que o usuário escolhe na hora do envio (vazio quando a empresa não tem escolha)
+      fixos ...... e-mails que valem em qualquer escolha (cadastrados sem opção)
+      por_opcao .. {opção: [e-mails]}"""
+    chave = " ".join(str(empresa or "").split()).upper()
+    opcoes, fixos, por_opcao = [], [], {}
+    for item in doc_lib_listar_destinatarios():
+        if item["empresa"].upper() != chave:
+            continue
+        if item["escolha"]:
+            if item["escolha"] not in por_opcao:
+                opcoes.append(item["escolha"])
+            por_opcao.setdefault(item["escolha"], []).append(item["email"])
+        else:
+            fixos.append(item["email"])
+    return opcoes, fixos, por_opcao
+
+
+def doc_lib_incluir_destinatario(empresa, escolha, email, usuario):
+    """Cadastra mais um e-mail para a empresa (e opção). Vários e-mails por empresa/opção são permitidos."""
+    empresa = " ".join(str(empresa or "").split()).upper()
+    escolha = " ".join(str(escolha or "").split())
+    if escolha == DOC_LIB_TEXTO_SEMPRE:
+        escolha = ""
+    email = str(email or "").strip().lower()
+    if not empresa:
+        raise DocLibRegra("Informe a empresa.")
+    if not doc_lib_validar_email(email):
+        raise DocLibRegra(f"E-mail inválido: {email or '(vazio)'}")
+    conexao = doc_lib_conectar()
+    try:
+        igual = conexao.execute("SELECT 1 FROM doclib_ateie_destinatarios WHERE UPPER(empresa) = ? AND escolha = ? "
+                                "AND LOWER(email) = ?", (empresa, escolha, email)).fetchone()
+        if igual:
+            raise DocLibRegra("Este e-mail já está cadastrado para essa empresa e opção.")
+        conexao.execute("INSERT INTO doclib_ateie_destinatarios (empresa, escolha, email, incluido_por, incluido_em) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (empresa, escolha, email, usuario, datetime.now().strftime("%d/%m/%Y - %H:%Mh")))
+        conexao.commit()
+    finally:
+        conexao.close()
+
+
+def doc_lib_remover_destinatario(destinatario_id):
+    conexao = doc_lib_conectar()
+    try:
+        conexao.execute("DELETE FROM doclib_ateie_destinatarios WHERE id = ?", (destinatario_id,))
+        conexao.commit()
+    finally:
+        conexao.close()
+
+
+def doc_lib_config_email():
+    """Lê o config_email_ateie.json (opcional, local, fora do GitHub). Chaves: metodo ("auto", "smtp" ou "outlook"),
+    smtp_servidor, smtp_porta (587), smtp_seguranca ("starttls", "ssl" ou "nenhuma"), smtp_usuario, smtp_senha,
+    smtp_timeout (30). Modelo: config_email_ateie.exemplo.json."""
+    if not os.path.exists(ARQUIVO_CONFIG_EMAIL_ATEIE):
+        return {}
+    try:
+        with open(ARQUIVO_CONFIG_EMAIL_ATEIE, encoding="utf-8") as arquivo:
+            config = json.load(arquivo)
+        if not isinstance(config, dict):
+            raise ValueError("o conteúdo deve ser um objeto JSON")
+        return config
+    except (OSError, ValueError) as erro:
+        raise DocLibEmailErro(f"Não foi possível ler o arquivo de configuração de e-mail:\n"
+                              f"{ARQUIVO_CONFIG_EMAIL_ATEIE}\n\n{erro}")
+
+
+def _doc_lib_enviar_smtp(destinatarios, assunto, corpo, anexo, config):
+    servidor = str(config.get("smtp_servidor") or "").strip()
+    if not servidor:
+        raise DocLibEmailErro("Informe smtp_servidor no arquivo config_email_ateie.json.")
+    porta = int(config.get("smtp_porta") or 587)
+    seguranca = str(config.get("smtp_seguranca") or "starttls").lower()
+    timeout = int(config.get("smtp_timeout") or 30)
+    mensagem = EmailMessage()
+    mensagem["From"] = EMAIL_ATEIE_REMETENTE
+    mensagem["To"] = ", ".join(destinatarios)
+    mensagem["Subject"] = assunto
+    mensagem.set_content(corpo)
+    with open(anexo, "rb") as arquivo:
+        mensagem.add_attachment(arquivo.read(), maintype="application", subtype="pdf",
+                                filename=os.path.basename(anexo))
+    contexto = ssl.create_default_context()
+    try:
+        if seguranca == "ssl":
+            smtp = smtplib.SMTP_SSL(servidor, porta, timeout=timeout, context=contexto)
+        else:
+            smtp = smtplib.SMTP(servidor, porta, timeout=timeout)
+        with smtp:
+            smtp.ehlo()
+            if seguranca == "starttls":
+                smtp.starttls(context=contexto)
+                smtp.ehlo()
+            if config.get("smtp_usuario"):
+                smtp.login(str(config["smtp_usuario"]), str(config.get("smtp_senha") or ""))
+            smtp.send_message(mensagem)
+    except (smtplib.SMTPException, OSError) as erro:
+        raise DocLibEmailErro(f"Falha no envio por SMTP ({servidor}:{porta}):\n{erro}")
+
+
+def _doc_lib_enviar_outlook(destinatarios, assunto, corpo, anexo):
+    """Envia pelo Outlook instalado no computador (Windows), usando a conta do remetente."""
+    try:
+        import win32com.client
+    except ImportError:
+        raise DocLibEmailErro("Para enviar pelo Outlook é preciso instalar o pywin32 (pip install pywin32).\n\n"
+                              "Se preferir, configure o envio por SMTP no arquivo config_email_ateie.json.")
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        contas = outlook.Session.Accounts
+        conta = next((contas.Item(i) for i in range(1, contas.Count + 1)
+                      if str(contas.Item(i).SmtpAddress).strip().lower() == EMAIL_ATEIE_REMETENTE.lower()), None)
+        if conta is None:
+            raise DocLibEmailErro(f"A conta {EMAIL_ATEIE_REMETENTE} não está configurada no Outlook deste computador.")
+        item = outlook.CreateItem(0)
+        item.To = "; ".join(destinatarios)
+        item.Subject = assunto
+        item.Body = corpo
+        item.Attachments.Add(os.path.abspath(anexo))
+        item._oleobj_.Invoke(*(64209, 0, 8, 0, conta))        # SendUsingAccount = conta do remetente
+        item.Send()
+    except DocLibEmailErro:
+        raise
+    except Exception as erro:
+        raise DocLibEmailErro(f"Falha no envio pelo Outlook:\n{erro}")
+
+
+def doc_lib_enviar_email(destinatarios, assunto, corpo, anexo):
+    """Envia o e-mail (remetente EMAIL_ATEIE_REMETENTE) com o PDF anexado. O método vem do config_email_ateie.json:
+    "smtp", "outlook" ou "auto" (SMTP se houver smtp_servidor; senão Outlook, no Windows). Devolve o método usado."""
+    config = doc_lib_config_email()
+    metodo = str(config.get("metodo") or "auto").lower()
+    if metodo == "auto":
+        metodo = "smtp" if config.get("smtp_servidor") else ("outlook" if platform.system() == "Windows" else "")
+    if metodo == "smtp":
+        _doc_lib_enviar_smtp(destinatarios, assunto, corpo, anexo, config)
+        return "SMTP"
+    if metodo == "outlook":
+        _doc_lib_enviar_outlook(destinatarios, assunto, corpo, anexo)
+        return "Outlook"
+    raise DocLibEmailErro(
+        "O envio de e-mail ainda não foi configurado neste computador.\n\n"
+        "Crie o arquivo config_email_ateie.json (na pasta do programa) a partir do modelo "
+        "config_email_ateie.exemplo.json, com o servidor SMTP, ou use o Outlook (Windows, com pywin32).")
+
+
+def doc_lib_pdf_para_envio(doc, usuario):
+    """PDF a anexar no e-mail: o mais recente já arquivado que ainda reflete a versão atual do documento (mesma
+    revisão); se não houver, ou se o arquivo não existir mais, gera e arquiva um novo. Devolve (caminho, aviso)."""
+    conexao = doc_lib_conectar()
+    try:
+        linha = conexao.execute("SELECT caminho FROM doclib_ateie_pdfs WHERE ateie_id = ? AND revisao_final = ? "
+                                "ORDER BY id DESC LIMIT 1", (doc["id"], doc["revisao"])).fetchone()
+    finally:
+        conexao.close()
+    if linha and os.path.isfile(linha[0]):
+        return linha[0], None
+    return doc_lib_arquivar_pdf_ateie(doc, usuario)
+
+
+def doc_lib_registrar_envio(ateie_id, numeros, destinatarios, assunto, anexo, metodo, usuario):
+    """Registra o e-mail enviado (quem, quando, para quem, qual PDF)."""
+    conexao = doc_lib_conectar()
+    try:
+        conexao.execute("INSERT INTO doclib_ateie_emails (ateie_id, numeros, destinatarios, remetente, assunto, anexo, "
+                        "metodo, enviado_por, enviado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (ateie_id, ", ".join(numeros), "; ".join(destinatarios), EMAIL_ATEIE_REMETENTE, assunto, anexo,
+                         metodo, usuario, datetime.now().strftime("%d/%m/%Y - %H:%Mh")))
+        conexao.commit()
     finally:
         conexao.close()
 
@@ -12961,8 +13433,19 @@ class PDFAteie(FPDF):
 
 
 def doc_lib_gerar_pdf_ateie(doc, caminho, gerado_por=""):
-    """Gera o PDF do ATEIE (layout do documento de referência) em 'caminho'."""
+    """Gera o PDF do ATEIE (layout do documento de referência) em 'caminho'.
+
+    ATEIE RESERVADO (ou grupo de reservados): sai o formulário em branco, para uso físico em emissão manual ou de
+    emergência. Ficam apenas o número de cada ATEIE (coluna 1) e as Observações padrão; sem a linha vermelha sobre
+    as colunas 6 a 13 e sem o aviso "Aguardando o De Acordo do documento"."""
     agora = datetime.now()
+    if doc_lib_documento_reservado(doc):
+        em_branco = {chave: "" for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO}
+        doc = dict(doc, classificacao="", equipamento="", empresa="", empresa_outra="", local="", servicos="",
+                   documentos_vinculados="", nota="", solicitado_por="", solicitado_por_usuario="",
+                   data_preenchimento="", hora_preenchimento="", notificacoes=[], pessoal=[],
+                   observacoes=doc.get("observacoes") or DOC_LIB_TEXTO_PADRAO_OBSERVACOES,
+                   intervencoes=[dict(item, **em_branco) for item in doc.get("intervencoes") or []])
     pdf = PDFAteie(f"Gerado pelo sistema COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}")
     pdf.add_page()
     X0, X1 = PDFAteie.X0, PDFAteie.X1
@@ -13360,7 +13843,8 @@ def doc_lib_pasta_destino(tipo, ano):
 def doc_lib_registrar_geracao(doc, caminho, usuario):
     """Registra o PDF gerado e, na PRIMEIRA geração, EMITE o ATEIE: o documento passa a ser protegido (somente as
     colunas 6 a 13 continuam editáveis) e cada ATEIE não cancelado passa a "Aguarda De Acordo" (ou "Aprovado para Execução", se o "De acordo" já
-    estiver preenchido). Lança DocLibConflito se o
+    estiver preenchido). Um ATEIE RESERVADO não é emitido: o PDF dele é o formulário em branco, só fica registrado
+    e o documento continua reservado e editável. Lança DocLibConflito se o
     documento mudou desde que foi lido. Devolve a revisão atual do documento."""
     agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
     conexao = doc_lib_conectar(manual=True)
@@ -13375,13 +13859,15 @@ def doc_lib_registrar_geracao(doc, caminho, usuario):
         emitido = bool(linha[1])
         cursor.execute("INSERT INTO doclib_ateie_pdfs (ateie_id, revisao, caminho, gerado_por, gerado_em) "
                        "VALUES (?, ?, ?, ?, ?)", (doc["id"], doc["revisao"], caminho, usuario, agora_texto))
-        if not emitido:
+        id_pdf = cursor.lastrowid
+        if not emitido and not doc_lib_documento_reservado(doc):
             cursor.execute("UPDATE doclib_ateie SET emitido = 1, emitido_em = ?, emitido_por = ?, "
                            "revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? WHERE id = ?",
                            (agora_texto, usuario, usuario, agora_texto, doc["id"]))
             _doc_lib_recalcular_status(cursor, doc["id"], True)
         cursor.execute("SELECT revisao FROM doclib_ateie WHERE id = ?", (doc["id"],))
         revisao = cursor.fetchone()[0]
+        cursor.execute("UPDATE doclib_ateie_pdfs SET revisao_final = ? WHERE id = ?", (revisao, id_pdf))
         cursor.execute("COMMIT")
         return revisao
     except Exception:
@@ -13401,8 +13887,13 @@ def doc_lib_arquivar_pdf_ateie(doc, usuario):
     pasta, aviso = doc_lib_pasta_destino("ATEIE", ano)
 
     base = numeros[0] + (f"_a_{numeros[-1]}" if len(numeros) > 1 else "") if numeros else f"id{doc['id']}"
-    nome_arquivo = f"ATEIE_{base.replace('/', '-')}_{agora.strftime('%Y%m%d-%H%M%S')}.pdf"
-    caminho = os.path.join(pasta, nome_arquivo)
+    prefixo = "ATEIE_RESERVADO_" if doc_lib_documento_reservado(doc) else "ATEIE_"
+    nome_base = f"{prefixo}{base.replace('/', '-')}_{agora.strftime('%Y%m%d-%H%M%S')}"
+    caminho = os.path.join(pasta, nome_base + ".pdf")
+    repeticao = 1
+    while os.path.exists(caminho):          # duas gerações no mesmo segundo: nunca sobrescreve o PDF anterior
+        repeticao += 1
+        caminho = os.path.join(pasta, f"{nome_base}-{repeticao}.pdf")
     caminho_temporario = caminho + ".tmp"
     try:
         doc_lib_gerar_pdf_ateie(doc, caminho_temporario, usuario)
@@ -13433,10 +13924,14 @@ def doc_lib_imprimir_pdf(caminho):
 # ---------------------------------------------------
 # COMPONENTES VISUAIS DO DOC_LIB. (reaproveitam os componentes do SGA: mesmas cores e fonte)
 # ---------------------------------------------------
-# Cor do texto de cada status do ATEIE (mesma paleta do SGA)
-DOC_LIB_COR_STATUS = {STATUS_ATEIE_EM_ANALISE: "#CC8400", STATUS_ATEIE_AGUARDA_DE_ACORDO: SGA_AZUL,
-                      STATUS_ATEIE_APROVADO_EXECUCAO: "#0E7490", STATUS_ATEIE_EM_EXECUCAO: "#5E35B1", STATUS_ATEIE_CONCLUIDO: SGA_VERDE,
-                      STATUS_ATEIE_CANCELADO: SGA_VERMELHO}
+# Cor da fonte de cada status do ATEIE (linha do GRID ATEIE e status de cada ATEIE na janela do documento)
+DOC_LIB_COR_STATUS = {STATUS_ATEIE_EM_ANALISE: "#00A0E3",
+                      STATUS_ATEIE_AGUARDA_DE_ACORDO: "#6F7273",
+                      STATUS_ATEIE_APROVADO_EXECUCAO: "#373435",
+                      STATUS_ATEIE_EM_EXECUCAO: "#079541",
+                      STATUS_ATEIE_CONCLUIDO: "#024593",
+                      STATUS_ATEIE_CANCELADO: "#FF0000",
+                      STATUS_ATEIE_RESERVADO: "#FFA500"}
 DOC_LIB_COR_BLOQUEADO = "#EEF1F6"
 DOC_LIB_COR_DESABILITADO = "#E3E8EF"
 DOC_LIB_TEXTO_DESABILITADO = "#9AA3AF"
@@ -13602,7 +14097,9 @@ class TabelaQuebraDocLib(Frame):
         self.largura_total = total
         self.registros = []
         self.faixas = []                 # (y_inicial, y_final, retângulo de fundo, cor de fundo) de cada linha
-        self.selecionado = None
+        self.selecionado = None          # linha "corrente" (a última clicada): usada por setas, Enter e Abrir
+        self.selecionados = []           # todas as linhas selecionadas (Ctrl+clique soma ou tira, Shift+clique em faixa)
+        self.ancora = None               # linha onde começa a seleção em faixa (Shift+clique)
 
         self.cabecalho = Canvas(self, height=self.ALTURA_CABECALHO, bg=SGA_AZUL, highlightthickness=0,
                                 cursor="hand2")
@@ -13666,6 +14163,8 @@ class TabelaQuebraDocLib(Frame):
         """registros: [{'valores': [textos na ordem das colunas], 'cor': cor do texto, 'dados': qualquer objeto}]."""
         self.registros = list(registros)
         self.selecionado = None
+        self.selecionados = []
+        self.ancora = None
         corpo = self.corpo
         corpo.delete("all")
         self.faixas = []
@@ -13698,14 +14197,39 @@ class TabelaQuebraDocLib(Frame):
         return [fim - inicio for inicio, fim, _, _ in self.faixas]
 
     # ---- seleção e rolagem -----------------------------------------------------------------------------------
-    def selecionar(self, indice):
-        if self.selecionado is not None and self.selecionado < len(self.faixas):
-            self.corpo.itemconfigure(self.faixas[self.selecionado][2], fill=self.faixas[self.selecionado][3])
-        self.selecionado = indice if indice is not None and 0 <= indice < len(self.faixas) else None
+    def _definir_selecao(self, indices, corrente):
+        """Pinta como selecionadas só as linhas de 'indices' (as demais voltam à cor de fundo)."""
+        for inicio, fim, retangulo, fundo in self.faixas:
+            self.corpo.itemconfigure(retangulo, fill=fundo)
+        self.selecionados = [i for i in indices if 0 <= i < len(self.faixas)]
+        for indice in self.selecionados:
+            self.corpo.itemconfigure(self.faixas[indice][2], fill=self.COR_SELECAO)
+        self.selecionado = corrente if corrente in self.selecionados else None
         if self.selecionado is not None:
-            inicio, fim, retangulo, _ = self.faixas[self.selecionado]
-            self.corpo.itemconfigure(retangulo, fill=self.COR_SELECAO)
-            self._mostrar(inicio, fim)
+            self._mostrar(self.faixas[self.selecionado][0], self.faixas[self.selecionado][1])
+
+    def selecionar(self, indice):
+        """Seleciona somente a linha indicada (None limpa a seleção)."""
+        valido = indice is not None and 0 <= indice < len(self.faixas)
+        self._definir_selecao([indice] if valido else [], indice if valido else None)
+        self.ancora = self.selecionado
+
+    def selecionar_com_teclas(self, indice, soma=False, faixa=False):
+        """Clique com Ctrl (soma ou tira a linha da seleção) ou com Shift (seleciona da âncora até a linha)."""
+        if indice is None or not 0 <= indice < len(self.faixas):
+            return
+        if faixa and self.ancora is not None:
+            inicio, fim = sorted((self.ancora, indice))
+            self._definir_selecao(list(range(inicio, fim + 1)), indice)
+        elif soma:
+            if indice in self.selecionados:
+                restantes = [i for i in self.selecionados if i != indice]
+                self._definir_selecao(restantes, restantes[-1] if restantes else None)
+            else:
+                self._definir_selecao(self.selecionados + [indice], indice)
+            self.ancora = indice
+        else:
+            self.selecionar(indice)
 
     def _mostrar(self, inicio, fim):
         total = max(self.faixas[-1][1], 1)
@@ -13721,13 +14245,28 @@ class TabelaQuebraDocLib(Frame):
             return None
         return self.registros[self.selecionado].get("dados")
 
+    def dados_selecionados(self):
+        """Dados de todas as linhas selecionadas, na ordem em que aparecem na tabela."""
+        return [self.registros[i].get("dados") for i in sorted(self.selecionados)]
+
+    def _indice_em(self, evento):
+        y = self.corpo.canvasy(evento.y)
+        return next((i for i, (inicio, fim, _, _) in enumerate(self.faixas) if inicio <= y < fim), None)
+
     def _clicar(self, evento):
         self.corpo.focus_set()
-        y = self.corpo.canvasy(evento.y)
-        self.selecionar(next((i for i, (inicio, fim, _, _) in enumerate(self.faixas) if inicio <= y < fim), None))
+        indice = self._indice_em(evento)
+        # bits do estado do evento: 0x1 = Shift, 0x4 = Ctrl
+        self.selecionar_com_teclas(indice, soma=bool(evento.state & 0x4), faixa=bool(evento.state & 0x1))
+        if indice is None:
+            self.selecionar(None)
 
     def _duplo(self, evento):
-        self._clicar(evento)
+        if evento.state & 0x5:                          # com Ctrl ou Shift, cliques seguidos são só seleção
+            self._clicar(evento)
+            return
+        self.corpo.focus_set()
+        self.selecionar(self._indice_em(evento))        # duplo clique abre somente a linha clicada
         self._abrir_selecionado()
 
     def _abrir_selecionado(self):
@@ -13762,21 +14301,16 @@ class JanelaListaAteie:
         self.resultado = None            # (id do documento, linha da tabela) do ATEIE escolhido
         self.filtros = {}                # campo -> valor selecionado
         self.popup = None
-        self.registros = doc_lib_listar_ateie()
-        for registro in self.registros:
-            textos = {}
-            for chave, _, _, maiuscula in DOC_LIB_COLUNAS_LISTA:
-                texto = _doc_lib_uma_linha(registro[chave])
-                textos[chave] = texto.upper() if maiuscula else texto
-            registro["_texto"] = textos
+        self.carregar_registros()
 
         janela = self.janela = Toplevel(parent)
         janela.title("GRID ATEIE")
         janela.geometry("1400x700")
         janela.minsize(900, 500)
         janela.transient(parent)
-        ui_dialogo(janela, "GRID ATEIE", "Selecione o ATEIE e clique em Abrir (ou dê duplo clique). "
-                                                 "Clique no título de uma coluna para filtrar.")
+        ui_dialogo(janela, "GRID ATEIE", "Selecione o ATEIE e clique em Abrir (ou dê duplo clique). Clique no título "
+                                         "de uma coluna para filtrar. Para agrupar ATEIEs reservados, selecione-os com "
+                                         "Ctrl+clique (ou Shift+clique) e clique em Agrupar ATEIEs.")
 
         barra_busca = Frame(janela, bg=SGA_FUNDO)
         barra_busca.place(x=24, y=78, relwidth=1.0, width=-48, height=34)
@@ -13798,13 +14332,30 @@ class JanelaListaAteie:
 
         self.busca_var.trace_add("write", lambda *args: self.aplicar())
         doc_lib_criar_botao(janela, "Abrir", self.abrir, "primario"
-                            ).place(relx=0.5, x=-130, rely=1.0, y=-20, anchor="sw", width=120, height=40)
+                            ).place(relx=0.5, x=-225, rely=1.0, y=-20, anchor="sw", width=120, height=40)
+        doc_lib_criar_botao(janela, "Agrupar ATEIEs", self.agrupar, "aviso"
+                            ).place(relx=0.5, x=-95, rely=1.0, y=-20, anchor="sw", width=170, height=40)
         doc_lib_criar_botao(janela, "Voltar", janela.destroy, "neutro"
-                            ).place(relx=0.5, x=10, rely=1.0, y=-20, anchor="sw", width=120, height=40)
+                            ).place(relx=0.5, x=85, rely=1.0, y=-20, anchor="sw", width=120, height=40)
         self.aplicar()
         self.entrada_busca.focus_set()
 
     # ---- dados e filtros -------------------------------------------------------------------------------------
+    def carregar_registros(self):
+        """Lê do banco um registro por ATEIE e prepara o texto de cada coluna (caixa alta onde for o caso)."""
+        self.registros = doc_lib_listar_ateie()
+        for registro in self.registros:
+            textos = {}
+            for chave, _, _, maiuscula in DOC_LIB_COLUNAS_LISTA:
+                texto = _doc_lib_uma_linha(registro[chave])
+                textos[chave] = texto.upper() if maiuscula else texto
+            registro["_texto"] = textos
+
+    def recarregar(self):
+        """Relê os ATEIE do banco mantendo filtros e busca."""
+        self.carregar_registros()
+        self.aplicar()
+
     @staticmethod
     def valor_filtro(registro, chave):
         """Valor do registro usado no filtro da coluna (nas colunas de programação filtra-se pela data)."""
@@ -13953,8 +14504,57 @@ class JanelaListaAteie:
         if escolha is None:
             messagebox.showwarning("Atenção", "Selecione um ATEIE na lista.", parent=self.janela)
             return
+        if len(self.tabela.dados_selecionados()) > 1:
+            messagebox.showwarning("Atenção", "Há mais de um ATEIE selecionado. Selecione apenas um para abrir.",
+                                   parent=self.janela)
+            return
         self.resultado = escolha
         self.janela.destroy()
+
+    def agrupar(self):
+        """Agrupa os ATEIEs reservados selecionados (Ctrl+clique ou Shift+clique) em um único documento: um só PDF,
+        com todos os números, que preservam a numeração original. Máximo de DOC_LIB_LIMITE_AGRUPAMENTO ATEIEs."""
+        selecao = self.tabela.dados_selecionados()
+        if len(selecao) < 2:
+            messagebox.showwarning("Agrupar ATEIEs", "Selecione dois ou mais ATEIEs com status Reservado.\n\n"
+                                                     "Use Ctrl+clique (ou Shift+clique) para selecionar vários.",
+                                   parent=self.janela)
+            return
+        por_chave = {(registro["ateie_id"], registro["ordem"]): registro for registro in self.registros}
+        escolhidos = sorted((por_chave[chave] for chave in selecao if chave in por_chave),
+                            key=lambda registro: (registro["ano"], registro["sequencia"]))
+        if len(escolhidos) > DOC_LIB_LIMITE_AGRUPAMENTO:
+            messagebox.showwarning("Agrupar ATEIEs", f"Um agrupamento pode ter no máximo {DOC_LIB_LIMITE_AGRUPAMENTO} "
+                                                     f"ATEIEs. Foram selecionados {len(escolhidos)}.", parent=self.janela)
+            return
+        fora = [registro for registro in escolhidos if registro["status"] != STATUS_ATEIE_RESERVADO]
+        if fora:
+            messagebox.showwarning(
+                "Agrupar ATEIEs", f"Só é possível agrupar ATEIEs com status '{STATUS_ATEIE_RESERVADO}'.\n\n"
+                                  f"Não estão reservados: " + ", ".join(f"{r['numero']} ({r['status']})" for r in fora)
+                                  + ".", parent=self.janela)
+            return
+        numeros = ", ".join(registro["numero"] for registro in escolhidos)
+        if not messagebox.askyesno(
+                "Agrupar ATEIEs",
+                f"Agrupar os {len(escolhidos)} ATEIEs reservados abaixo em um único documento?\n\n{numeros}\n\n"
+                f"O PDF passará a ser um só, com todos esses números (a numeração original é preservada). "
+                f"O agrupamento não pode ser desfeito.", parent=self.janela):
+            return
+        try:
+            _, agrupados = doc_lib_agrupar_reservados(selecao, obter_nome_usuario_logado())
+        except (DocLibRegra, DocLibConflito) as erro:
+            messagebox.showwarning("Agrupar ATEIEs", str(erro), parent=self.janela)
+            if isinstance(erro, DocLibConflito):
+                self.recarregar()
+            return
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível agrupar os ATEIEs: {erro}", parent=self.janela)
+            return
+        self.recarregar()
+        messagebox.showinfo("Agrupar ATEIEs", f"ATEIEs agrupados em um único documento:\n\n{', '.join(agrupados)}\n\n"
+                                              f"Abra qualquer um deles para preencher o documento ou gerar o PDF único.",
+                            parent=self.janela)
 
 
 def doc_lib_escolher_ateie(parent):
@@ -14018,6 +14618,301 @@ def doc_lib_dialogo_documento_gerado(parent, caminho, aviso=None, lembrete=None)
     except TclError:
         pass
     janela.wait_window()
+
+
+def doc_lib_dialogo_reserva(parent, usuario, nome_completo=""):
+    """Janela do botão ATEIE-Reservado: pede a quantidade de números (1 a DOC_LIB_LIMITE_RESERVA), mostra quais serão
+    reservados e faz a reserva. Devolve a lista [{ateie_id, numero}] reservada, ou None se o usuário voltar."""
+    resultado = {"reservados": None}
+    janela = Toplevel(parent)
+    janela.title("ATEIE-Reservado")
+    janela.geometry("600x330")
+    janela.resizable(False, False)
+    janela.transient(parent)
+    ui_dialogo(janela, "ATEIE-Reservado", "Reserva de números de ATEIE para emissão manual em caso de "
+                                          "indisponibilidade do sistema")
+    cartao = ui_cartao(janela, 84, 150)
+    Label(cartao, text=f"Quantidade de números de ATEIE a reservar (1 a {DOC_LIB_LIMITE_RESERVA}):", bg=SGA_CARD,
+          fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).place(x=20, y=14)
+    quantidade = StringVar(value="1")
+    somente_digitos = (janela.register(lambda texto: texto == "" or (texto.isdigit() and len(texto) <= 3)), "%P")
+    campo = ttk.Spinbox(cartao, from_=1, to=DOC_LIB_LIMITE_RESERVA, textvariable=quantidade, width=6, justify="center",
+                        font=(SGA_FONTE, 12), validate="key", validatecommand=somente_digitos)
+    campo.place(x=20, y=44, width=90, height=34)
+    previsao = Label(cartao, text="", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10), wraplength=540,
+                     justify="left", anchor="w")
+    previsao.place(x=20, y=92)
+
+    def atualizar_previsao(*args):
+        try:
+            quantidade_digitada = int(quantidade.get().strip())
+        except ValueError:
+            quantidade_digitada = 0
+        if not 1 <= quantidade_digitada <= DOC_LIB_LIMITE_RESERVA:
+            previsao.config(text=f"Informe uma quantidade de 1 a {DOC_LIB_LIMITE_RESERVA}.", fg=SGA_VERMELHO)
+            return
+        try:
+            numeros = doc_lib_numeros_previstos(quantidade_digitada)
+        except sqlite3.Error:
+            numeros = []
+        texto = ""
+        if numeros:
+            faixa = numeros[0] if len(numeros) == 1 else f"{numeros[0]} a {numeros[-1]}"
+            texto = f"Serão reservados: {faixa} ({len(numeros)} ATEIE{'s' if len(numeros) > 1 else ''})."
+        previsao.config(text=texto, fg=SGA_TEXTO_SUAVE)
+
+    def reservar(evento=None):
+        try:
+            reservados = doc_lib_reservar_ateie(quantidade.get(), usuario, nome_completo)
+        except DocLibRegra as erro:
+            messagebox.showwarning("ATEIE-Reservado", str(erro), parent=janela)
+            return
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível reservar os números de ATEIE: {erro}", parent=janela)
+            return
+        resultado["reservados"] = reservados
+        janela.destroy()
+
+    quantidade.trace_add("write", atualizar_previsao)
+    atualizar_previsao()
+    doc_lib_criar_botao(janela, "Reservar", reservar, "aviso"
+                        ).place(relx=0.5, x=-145, rely=1.0, y=-22, anchor="sw", width=140, height=42)
+    doc_lib_criar_botao(janela, "Voltar", janela.destroy, "neutro"
+                        ).place(relx=0.5, x=5, rely=1.0, y=-22, anchor="sw", width=140, height=42)
+    janela.bind("<Return>", reservar)
+    janela.bind("<Escape>", lambda evento: janela.destroy())
+    try:
+        janela.grab_set()
+    except TclError:
+        pass
+    campo.focus_set()
+    janela.wait_window()
+    return resultado["reservados"]
+
+
+def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
+    """Janela "Cadastrar e-mails": e-mails de cada Empresa Solicitante usados pelo botão Encaminhar ATEIE. Pode haver
+    vários e-mails por empresa e, nas empresas com mais de um destinatário possível, por opção (a opção é escolhida
+    na hora do envio; "(todos os envios)" vale em qualquer escolha)."""
+    janela = Toplevel(parent)
+    janela.title("Cadastrar e-mails - Encaminhar ATEIE")
+    janela.geometry("1060x620")
+    janela.minsize(1040, 520)
+    janela.transient(parent)
+    ui_dialogo(janela, "E-mails do Encaminhar ATEIE", "Destinatários por Empresa Solicitante. Nas empresas com mais de "
+                                                      "um destinatário possível, a opção é escolhida na hora do envio.")
+    quadro = Frame(janela, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
+    quadro.place(x=24, y=80, relwidth=1.0, width=-48, relheight=1.0, height=-80 - 190)
+    arvore = ttk.Treeview(quadro, columns=("empresa", "escolha", "email", "incluido"), show="headings",
+                          selectmode="browse")
+    for chave, titulo, largura in (("empresa", "Empresa Solicitante", 320), ("escolha", "Destinatário (opção)", 150),
+                                   ("email", "E-mail", 250), ("incluido", "Incluído por / em", 240)):
+        arvore.heading(chave, text=titulo, anchor="w")
+        arvore.column(chave, width=largura, anchor="w")
+    rolagem = Scrollbar(quadro, orient=VERTICAL, command=arvore.yview)
+    arvore.configure(yscrollcommand=rolagem.set)
+    rolagem.pack(side=RIGHT, fill=Y)
+    arvore.pack(side=LEFT, fill=BOTH, expand=True)
+    ids = {}
+
+    def carregar():
+        arvore.delete(*arvore.get_children())
+        ids.clear()
+        for item in doc_lib_listar_destinatarios():
+            iid = arvore.insert("", END, values=(item["empresa"], item["escolha"] or DOC_LIB_TEXTO_SEMPRE,
+                                                 item["email"], f"{item['incluido_por'] or ''} - "
+                                                                f"{item['incluido_em'] or ''}"))
+            ids[iid] = item["id"]
+
+    formulario = Frame(janela, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
+    formulario.place(x=24, rely=1.0, y=-180, relwidth=1.0, width=-48, height=104)
+    empresas = [e for e in DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE if e != "OUTRA"]
+    var_empresa, var_opcao, var_email = StringVar(value=empresa_inicial), StringVar(value=DOC_LIB_TEXTO_SEMPRE), \
+        StringVar()
+    for texto, x in (("Empresa Solicitante", 16), ("Destinatário (opção)", 336), ("E-mail", 526)):
+        Label(formulario, text=texto, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")).place(x=x, y=8)
+    combo_empresa = ttk.Combobox(formulario, textvariable=var_empresa, values=empresas, font=(SGA_FONTE, 10))
+    combo_empresa.place(x=16, y=32, width=300, height=30)
+    combo_opcao = ttk.Combobox(formulario, textvariable=var_opcao, values=[DOC_LIB_TEXTO_SEMPRE],
+                               font=(SGA_FONTE, 10))
+    combo_opcao.place(x=336, y=32, width=170, height=30)
+    entrada_email = criar_entrada_sga(formulario, textvariable=var_email)
+    entrada_email.place(x=526, y=32, width=260, height=30)
+    Label(formulario, text="Para incluir outro e-mail na mesma empresa e opção, repita os dados e digite o novo "
+                           "e-mail. Para uma empresa que não está na lista (OUTRA), digite o nome da empresa.",
+          bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8), wraplength=900, justify="left", anchor="w"
+          ).place(x=16, y=70)
+
+    def atualizar_opcoes(*args):
+        opcoes, _, _ = doc_lib_destinatarios_da_empresa(var_empresa.get())
+        combo_opcao.configure(values=[DOC_LIB_TEXTO_SEMPRE] + opcoes)
+
+    def adicionar(evento=None):
+        try:
+            doc_lib_incluir_destinatario(var_empresa.get(), var_opcao.get(), var_email.get(), usuario)
+        except DocLibRegra as erro:
+            messagebox.showwarning("Cadastrar e-mails", str(erro), parent=janela)
+            return
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível cadastrar o e-mail: {erro}", parent=janela)
+            return
+        var_email.set("")
+        carregar()
+        atualizar_opcoes()
+
+    def remover():
+        selecionado = arvore.selection()
+        if not selecionado:
+            messagebox.showwarning("Cadastrar e-mails", "Selecione na lista o e-mail a remover.", parent=janela)
+            return
+        empresa, opcao, email, _ = arvore.item(selecionado[0], "values")
+        if not messagebox.askyesno("Remover e-mail", f"Remover {email}\n({empresa} - {opcao}) do Encaminhar ATEIE?",
+                                   parent=janela):
+            return
+        try:
+            doc_lib_remover_destinatario(ids[selecionado[0]])
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível remover o e-mail: {erro}", parent=janela)
+            return
+        carregar()
+        atualizar_opcoes()
+
+    doc_lib_criar_botao(formulario, "Adicionar", adicionar, "sucesso").place(x=806, y=30, width=110, height=34)
+    var_empresa.trace_add("write", atualizar_opcoes)
+    entrada_email.bind("<Return>", adicionar)
+    doc_lib_criar_botao(janela, "Remover selecionado", remover, "perigo"
+                        ).place(relx=0.5, x=-215, rely=1.0, y=-22, anchor="sw", width=200, height=42)
+    doc_lib_criar_botao(janela, "Fechar", janela.destroy, "neutro"
+                        ).place(relx=0.5, x=15, rely=1.0, y=-22, anchor="sw", width=140, height=42)
+    carregar()
+    atualizar_opcoes()
+    try:
+        janela.grab_set()
+    except TclError:
+        pass
+    janela.wait_window()
+
+
+def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario):
+    """Janela de confirmação do botão Encaminhar ATEIE. Mostra remetente, empresa, ATEIE(s), anexo, destinatários e o
+    texto do e-mail. Quando a empresa tem mais de um destinatário possível o usuário escolhe um; empresa sem e-mail
+    cadastrado (por exemplo OUTRA) permite digitar o endereço. Devolve a lista de e-mails confirmados ou None."""
+    empresa = doc_lib_empresa_do_documento(doc)
+    corpo = EMAIL_ATEIE_TEXTO.format(numeros=doc_lib_texto_numeros(numeros))
+    estado = {"destinatarios": None}
+    janela = Toplevel(parent)
+    janela.title("Encaminhar ATEIE")
+    janela.geometry("780x660")                      # cabe em tela de 1366x768
+    janela.resizable(False, False)
+    janela.transient(parent)
+    ui_dialogo(janela, "Encaminhar ATEIE", "Envio por e-mail, com o PDF do documento anexado, para análise e De Acordo")
+    cartao = ui_cartao(janela, 84, 500)
+    cartao.grid_columnconfigure(1, weight=1)
+
+    def rotulo_valor(linha, titulo, texto, negrito=False):
+        Label(cartao, text=titulo, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
+              ).grid(row=linha, column=0, sticky="nw", padx=(20, 10), pady=(12, 0))
+        Label(cartao, text=texto, bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold" if negrito else ""),
+              wraplength=520, justify="left", anchor="w").grid(row=linha, column=1, sticky="nw", pady=(11, 0))
+
+    rotulo_valor(0, "Remetente:", EMAIL_ATEIE_REMETENTE)
+    rotulo_valor(1, "Empresa solicitante:", empresa or "(não informada)")
+    rotulo_valor(2, "ATEIE(s):", doc_lib_texto_numeros(numeros), negrito=True)
+    rotulo_valor(3, "Anexo:", "PDF do documento ATEIE (versão atual, com status Aguarda De Acordo)")
+    rotulo_valor(4, "Assunto:", f"{EMAIL_ATEIE_ASSUNTO}: {doc_lib_texto_numeros(numeros)}")
+    zona = Frame(cartao, bg=SGA_CARD)
+    zona.grid(row=5, column=0, columnspan=2, sticky="ew", padx=20, pady=(14, 0))
+    zona.grid_columnconfigure(1, weight=1)
+    escolha = StringVar(value="")
+    var_manual = StringVar()
+
+    def calcular():
+        """(lista de e-mails, mensagem de erro)."""
+        opcoes, fixos, por_opcao = doc_lib_destinatarios_da_empresa(empresa)
+        if opcoes:
+            if not escolha.get():
+                return [], "Escolha o destinatário."
+            lista = por_opcao.get(escolha.get(), []) + fixos
+        elif fixos:
+            lista = list(fixos)
+        else:
+            lista = [parte for parte in re.split(r"[;,\s]+", var_manual.get().strip()) if parte]
+            invalidos = [parte for parte in lista if not doc_lib_validar_email(parte)]
+            if not lista:
+                return [], "Informe o e-mail do destinatário."
+            if invalidos:
+                return [], "E-mail inválido: " + ", ".join(invalidos)
+        return list(dict.fromkeys(item.lower() for item in lista)), ""
+
+    def mostrar_para(*args):
+        lista, erro = calcular()
+        rotulo_para.config(text="; ".join(lista) if lista else erro, fg=SGA_TEXTO if lista else SGA_VERMELHO)
+
+    def montar_zona():
+        for filho in zona.winfo_children():
+            filho.destroy()
+        opcoes, fixos, _ = doc_lib_destinatarios_da_empresa(empresa)
+        linha = 0
+        if escolha.get() not in opcoes:
+            escolha.set("")
+        if opcoes:
+            Label(zona, text="Destinatário:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"),
+                  anchor="nw").grid(row=linha, column=0, sticky="nw", padx=(0, 10))
+            opcoes_quadro = Frame(zona, bg=SGA_CARD)
+            opcoes_quadro.grid(row=linha, column=1, sticky="w")
+            for opcao in opcoes:
+                Radiobutton(opcoes_quadro, text=opcao, variable=escolha, value=opcao, tristatevalue="-",
+                            command=mostrar_para, font=(SGA_FONTE, 10), bg=SGA_CARD).pack(side=LEFT, padx=(0, 20))
+            linha += 1
+        elif not fixos:
+            Label(zona, text="Empresa sem e-mail cadastrado. Informe o(s) e-mail(s) (separe por ponto e vírgula) ou "
+                             "use 'Cadastrar e-mails':", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9),
+                  wraplength=700, justify="left", anchor="w").grid(row=linha, column=0, columnspan=2, sticky="w")
+            entrada = criar_entrada_sga(zona, textvariable=var_manual)
+            entrada.grid(row=linha + 1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        mostrar_para()
+
+    # destinatários resultantes (atualizados a cada escolha ou digitação)
+    Label(cartao, text="Para:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
+          ).grid(row=6, column=0, sticky="nw", padx=(20, 10), pady=(11, 0))
+    rotulo_para = Label(cartao, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"), wraplength=520,
+                        justify="left", anchor="w")
+    rotulo_para.grid(row=6, column=1, sticky="nw", pady=(10, 0))
+
+    Label(cartao, text="Texto do e-mail:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
+          ).grid(row=7, column=0, sticky="nw", padx=(20, 10), pady=(14, 0))
+    previa = criar_area_texto_sga(cartao, wrap=WORD, height=8, width=60)
+    previa.insert("1.0", corpo)
+    previa.configure(state=DISABLED, bg=DOC_LIB_COR_BLOQUEADO)
+    previa.grid(row=7, column=1, sticky="nw", pady=(12, 0))
+
+    def confirmar(evento=None):
+        lista, erro = calcular()
+        if not lista:
+            messagebox.showwarning("Encaminhar ATEIE", erro, parent=janela)
+            return
+        estado["destinatarios"] = lista
+        janela.destroy()
+
+    def cadastrar():
+        doc_lib_dialogo_destinatarios(janela, usuario, empresa)
+        montar_zona()
+
+    var_manual.trace_add("write", mostrar_para)
+    montar_zona()
+    doc_lib_criar_botao(janela, "Cadastrar e-mails", cadastrar, "neutro"
+                        ).place(relx=0.5, x=-300, rely=1.0, y=-22, anchor="sw", width=180, height=42)
+    doc_lib_criar_botao(janela, "Confirmar envio", confirmar, "sucesso"
+                        ).place(relx=0.5, x=-105, rely=1.0, y=-22, anchor="sw", width=200, height=42)
+    doc_lib_criar_botao(janela, "Cancelar", janela.destroy, "neutro"
+                        ).place(relx=0.5, x=110, rely=1.0, y=-22, anchor="sw", width=190, height=42)
+    janela.bind("<Escape>", lambda evento: janela.destroy())
+    try:
+        janela.grab_set()
+    except TclError:
+        pass
+    janela.wait_window()
+    return estado["destinatarios"]
 
 
 class LinhasDinamicasDocLib:
@@ -14226,6 +15121,7 @@ class JanelaAteie:
         self.revisao = None
         self.salvo = False            # versão atual gravada e campos travados (documento ainda não emitido)
         self.emitido = False          # documento já gerado: só as colunas 6 a 13 continuam editáveis
+        self.reservado = False        # ATEIE reservado aberto para preenchimento: editável, PDF em branco, não emite
         agora = datetime.now()
         # "Solicitado por" mostra o nome completo do profissional; o user.name (login) vai para o campo
         # "Visto Responsável" do documento
@@ -14279,7 +15175,7 @@ class JanelaAteie:
 
     # ------------------------------------------------------------------ montagem da janela
     def _montar_cabecalho(self):
-        faixa = ui_dialogo(self.janela, "ATEIE - Docomento de Liberação.",
+        faixa = ui_dialogo(self.janela, "ATEIE - Documento de Liberação.",
                            "Autorização para Trabalhos em Equipamentos de Interligação Energizados")
         doc_lib_criar_botao(faixa, "GRID ATEIE", self.abrir_salvo, "neutro"
                             ).place(relx=1.0, x=-24, rely=0.5, anchor="e", width=170, height=34)
@@ -14391,8 +15287,12 @@ class JanelaAteie:
         self.btn_salvar = doc_lib_criar_botao(rodape, "Salvar", self.salvar, "sucesso")
         self.btn_editar = doc_lib_criar_botao(rodape, "Editar", self.editar, "aviso")
         self.btn_gerar = doc_lib_criar_botao(rodape, "Gerar Documento", self.gerar, "primario")
-        for posicao, botao in enumerate((self.btn_voltar, self.btn_salvar, self.btn_editar, self.btn_gerar)):
-            botao.place(relx=0.5, x=-321 + posicao * 164, rely=0.5, anchor="w", width=150, height=42)
+        self.btn_encaminhar = doc_lib_criar_botao(rodape, "Encaminhar ATEIE", self.encaminhar, "agendar")
+        self.btn_reservar = doc_lib_criar_botao(rodape, "ATEIE-Reservado", self.reservar, "aviso")
+        botoes = (self.btn_voltar, self.btn_salvar, self.btn_editar, self.btn_gerar, self.btn_encaminhar,
+                  self.btn_reservar)
+        for posicao, botao in enumerate(botoes):
+            botao.place(relx=0.5, x=-475 + posicao * 160, rely=0.5, anchor="w", width=150, height=42)
 
     def _montar_tabela(self):
         """Tabela de intervenções: 13 colunas x 10 linhas. Cada linha é um ATEIE com número, status e
@@ -14818,9 +15718,17 @@ class JanelaAteie:
         """Mostra na tela um ATEIE gravado no banco."""
         self._limpar_erros()
         self.ateie_id, self.revisao = doc["id"], doc["revisao"]
-        self.solicitado_por = doc["solicitado_por"]
-        self.solicitado_por_usuario = doc.get("solicitado_por_usuario") or doc["solicitado_por"]
-        self.data_preenchimento, self.hora_preenchimento = doc["data_preenchimento"], doc["hora_preenchimento"]
+        if doc_lib_documento_reservado(doc):
+            # ATEIE reservado: quem o preenche passa a constar como solicitante, com a data e a hora de agora
+            # (a reserva fica registrada em reservado_por e reservado_em)
+            agora = datetime.now()
+            self.solicitado_por_usuario = obter_nome_usuario_logado()
+            self.solicitado_por = obter_nome_completo_usuario(self.solicitado_por_usuario)
+            self.data_preenchimento, self.hora_preenchimento = agora.strftime("%d/%m/%Y"), agora.strftime("%H:%M")
+        else:
+            self.solicitado_por = doc["solicitado_por"]
+            self.solicitado_por_usuario = doc.get("solicitado_por_usuario") or doc["solicitado_por"]
+            self.data_preenchimento, self.hora_preenchimento = doc["data_preenchimento"], doc["hora_preenchimento"]
         self.lbl_solicitante.configure(text=self.solicitado_por)
         self.lbl_data.configure(text=self.data_preenchimento)
         self.lbl_hora.configure(text=self.hora_preenchimento)
@@ -14852,11 +15760,13 @@ class JanelaAteie:
 
     def _carregar_documento(self, doc):
         """Mostra o ATEIE gravado: travado (versão salva) e, se já foi gerado, no estado EMITIDO (somente as colunas
-        6 a 13 editáveis)."""
+        6 a 13 editáveis). Um ATEIE RESERVADO abre em modo editável (sem travar) para o preenchimento das informações
+        do ATEIE que foi utilizado fisicamente."""
         self._preencher(doc)
         self._doc_gravado = doc
         self.emitido = bool(doc.get("emitido"))
-        self.salvo = True
+        self.reservado = doc_lib_documento_reservado(doc) and not self.emitido
+        self.salvo = not self.reservado
         self._aplicar_bloqueios()
         self._assinatura_ref = self._assinatura()
         self._atualizar_estado()
@@ -14905,7 +15815,7 @@ class JanelaAteie:
         nas colunas 6 a 13)."""
         if self.ateie_id is None:
             return True
-        if self.emitido:
+        if self.emitido or self.reservado:      # reservado: já nasce editável, só há o que salvar depois de digitar
             return self._assinatura() != self._assinatura_ref
         return not self.salvo
 
@@ -14919,6 +15829,9 @@ class JanelaAteie:
             texto = "Novo documento (não salvo)"
         elif self.emitido:
             texto = f"ATEIE ID {self.ateie_id} - emitido (rev. {self.revisao})" \
+                    + (" - alterações não salvas" if pendente else "")
+        elif self.reservado:
+            texto = f"ATEIE ID {self.ateie_id} - reservado (rev. {self.revisao})" \
                     + (" - alterações não salvas" if pendente else "")
         elif self.salvo:
             texto = f"ATEIE ID {self.ateie_id} - salvo (rev. {self.revisao})"
@@ -14941,6 +15854,7 @@ class JanelaAteie:
         provisorios = {i: e["numero"] for i, e in enumerate(self.estado_intervencoes) if e["provisorio"]}
         status_antes = {i: e["status"] for i, e in enumerate(self.estado_intervencoes) if e["numero"]}
         ja_emitido = self.emitido
+        era_reservado = self.reservado
         try:
             ateie_id = doc_lib_salvar_ateie(dados, usuario)
         except DocLibConflito as erro:
@@ -14979,7 +15893,9 @@ class JanelaAteie:
                 mensagem += "\n\nRegistrados e bloqueados (não podem mais ser alterados):\n" + "\n".join(travados)
         else:
             numeros = ", ".join(item["numero"] for item in doc["intervencoes"] if item.get("numero"))
-            mensagem = f"ATEIE salvo com sucesso!\n\nIntervenção(ões): {numeros}\nStatus: {STATUS_ATEIE_EM_ANALISE}"
+            mensagem = ("ATEIE reservado preenchido e salvo com sucesso!" if era_reservado
+                        else "ATEIE salvo com sucesso!") + \
+                f"\n\nIntervenção(ões): {numeros}\nStatus: {STATUS_ATEIE_EM_ANALISE}"
             trocados = [f"{provisorios[i]} passou a {self.estado_intervencoes[i]['numero']}" for i in provisorios
                         if self.estado_intervencoes[i]["numero"] != provisorios[i]]
             if trocados:
@@ -15001,7 +15917,13 @@ class JanelaAteie:
         """Gera o PDF a partir da versão salva (revalida antes), arquiva e oferece abrir/imprimir. A primeira
         geração EMITE o ATEIE: status "Aguarda De Acordo" e proteção dos dados (só as colunas 6 a 13 seguem editáveis)."""
         if self.ateie_id is None or self._pendente():
-            messagebox.showwarning("Atenção", "Salve o ATEIE antes de gerar o documento.", parent=self.janela)
+            if self.reservado and self.ateie_id is not None:
+                messagebox.showwarning(
+                    "Atenção", "Há dados digitados que ainda não foram salvos.\n\nSalve o preenchimento do ATEIE "
+                               "reservado ou, para imprimir o formulário em branco, abra-o novamente pelo GRID ATEIE.",
+                    parent=self.janela)
+            else:
+                messagebox.showwarning("Atenção", "Salve o ATEIE antes de gerar o documento.", parent=self.janela)
             return
         try:
             doc = doc_lib_carregar_ateie(self.ateie_id)
@@ -15014,13 +15936,14 @@ class JanelaAteie:
                                    "Feche-o e abra-o novamente (GRID ATEIE) antes de gerar o documento.",
                                    parent=self.janela)
             return
-        erros = doc_lib_validar_ateie(doc, doc)
+        reservado = doc_lib_documento_reservado(doc)     # formulário em branco: nada a validar nem a emitir
+        erros = [] if reservado else doc_lib_validar_ateie(doc, doc)
         if erros:
             messagebox.showwarning("Campos obrigatórios",
                                    "O documento salvo possui pendências e não pode ser gerado:\n\n"
                                    + "\n".join(f"• {mensagem}" for _, mensagem in erros[:14]), parent=self.janela)
             return
-        if not self.emitido and not messagebox.askyesno(
+        if not self.emitido and not reservado and not messagebox.askyesno(
                 "Emitir ATEIE",
                 "Ao gerar o documento o ATEIE será considerado EMITIDO, com status 'Aguarda De Acordo').\n\n"
                 "A partir daí os dados do documento não poderão ser alterados.\n\n"
@@ -15037,9 +15960,94 @@ class JanelaAteie:
         doc = doc_lib_carregar_ateie(self.ateie_id)
         self._carregar_documento(doc)
         lembrete = None
-        if any(item.get("status") == STATUS_ATEIE_AGUARDA_DE_ACORDO for item in doc["intervencoes"]):
+        if reservado:
+            lembrete = ("ATEIE reservado: o PDF é um formulário em branco (só o número e as Observações). O ATEIE "
+                        "continua Reservado e editável; depois de usá-lo, abra-o no GRID ATEIE e preencha todos os "
+                        "campos.")
+        elif any(item.get("status") == STATUS_ATEIE_AGUARDA_DE_ACORDO for item in doc["intervencoes"]):
             lembrete = ("Status: Aguarda De Acordo. ATEIE não pode ser liberado para execução.")
         doc_lib_dialogo_documento_gerado(self.janela, caminho, aviso, lembrete)
+
+    def reservar(self):
+        """Botão ATEIE-Reservado: pede a quantidade (1 a 10) e reserva os números na sequência do último ATEIE
+        emitido ou reservado. Cada número vira um ATEIE individual no GRID ATEIE, com status Reservado."""
+        usuario = obter_nome_usuario_logado()
+        reservados = doc_lib_dialogo_reserva(self.janela, usuario, obter_nome_completo_usuario(usuario))
+        if not reservados:
+            return
+        try:
+            self._atualizar_numeracao_provisoria()       # os números previstos do documento aberto avançaram
+        except (TclError, sqlite3.Error):
+            pass
+        numeros = [item["numero"] for item in reservados]
+        messagebox.showinfo(
+            "ATEIE-Reservado",
+            f"{len(numeros)} número(s) de ATEIE reservado(s):\n\n{', '.join(numeros)}\n\n"
+            f"Os ATEIEs reservados aparecem no GRID ATEIE com status 'Reservado'. Para imprimir o formulário em "
+            f"branco, abra o ATEIE reservado no GRID e use 'Gerar Documento'.", parent=self.janela)
+
+    def encaminhar(self):
+        """Botão Encaminhar ATEIE: depois de confirmar numa janela, envia por e-mail (remetente EMAIL_ATEIE_REMETENTE),
+        com o PDF do documento anexado, o(s) ATEIE com status "Aguarda De Acordo". O destinatário vem da tabela por
+        Empresa Solicitante (com escolha do usuário nas empresas que têm mais de uma opção)."""
+        titulo = "Encaminhar ATEIE"
+        if self.ateie_id is None or self._pendente():
+            messagebox.showwarning(titulo, "Salve o ATEIE e gere o documento antes de encaminhá-lo.\n\nO envio só é "
+                                           "permitido para ATEIE com status 'Aguarda De Acordo'.", parent=self.janela)
+            return
+        try:
+            doc = doc_lib_carregar_ateie(self.ateie_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler o ATEIE salvo: {erro}", parent=self.janela)
+            return
+        if doc is None or doc["revisao"] != self.revisao:
+            messagebox.showwarning("Documento alterado",
+                                   "Este ATEIE foi alterado por outro usuário depois de aberto nesta janela.\n\n"
+                                   "Feche-o e abra-o novamente (GRID ATEIE) antes de encaminhá-lo.", parent=self.janela)
+            return
+        aguardando = [item["numero"] for item in doc["intervencoes"]
+                      if item.get("numero") and item.get("status") == STATUS_ATEIE_AGUARDA_DE_ACORDO]
+        if not aguardando:
+            situacao = "\n".join(f"• {item['numero']}: {item['status']}" for item in doc["intervencoes"]
+                                 if item.get("numero"))
+            dica = "" if doc.get("emitido") else "\n\nUse 'Gerar Documento' para emitir o ATEIE."
+            messagebox.showwarning(titulo, f"O envio só é permitido para ATEIE com status "
+                                           f"'{STATUS_ATEIE_AGUARDA_DE_ACORDO}'.\n\nSituação atual:\n{situacao}{dica}",
+                                   parent=self.janela)
+            return
+        usuario = obter_nome_usuario_logado()
+        destinatarios = doc_lib_dialogo_encaminhar(self.janela, doc, aguardando, usuario)
+        if not destinatarios:
+            return
+
+        assunto = f"{EMAIL_ATEIE_ASSUNTO}: {doc_lib_texto_numeros(aguardando)}"
+        corpo = EMAIL_ATEIE_TEXTO.format(numeros=doc_lib_texto_numeros(aguardando))
+        self.janela.configure(cursor="watch")
+        self.janela.update_idletasks()
+        try:
+            caminho_pdf, aviso = doc_lib_pdf_para_envio(doc, usuario)
+            metodo = doc_lib_enviar_email(destinatarios, assunto, corpo, caminho_pdf)
+        except DocLibEmailErro as erro:
+            messagebox.showerror(titulo, f"O e-mail NÃO foi enviado.\n\n{erro}", parent=self.janela)
+            return
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except (sqlite3.Error, OSError) as erro:
+            messagebox.showerror(titulo, f"O e-mail NÃO foi enviado.\n\nNão foi possível preparar o PDF do "
+                                         f"documento: {erro}", parent=self.janela)
+            return
+        finally:
+            self.janela.configure(cursor="")
+        resumo = (f"E-mail enviado ({metodo}).\n\nDe: {EMAIL_ATEIE_REMETENTE}\nPara: {'; '.join(destinatarios)}\n"
+                  f"ATEIE(s): {doc_lib_texto_numeros(aguardando)}\nAnexo: {os.path.basename(caminho_pdf)}")
+        try:
+            doc_lib_registrar_envio(doc["id"], aguardando, destinatarios, assunto, caminho_pdf, metodo, usuario)
+        except sqlite3.Error as erro:
+            resumo += f"\n\nAtenção: o e-mail foi enviado, mas o envio não pôde ser registrado no banco: {erro}"
+        if aviso:
+            resumo += f"\n\n{aviso}"
+        messagebox.showinfo(titulo, resumo, parent=self.janela)
 
     def cancelar_intervencao(self, indice):
         """Cancela somente o ATEIE da linha; os demais ATEIE do documento mantêm o seu status."""
