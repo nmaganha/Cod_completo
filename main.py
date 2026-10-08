@@ -1,4 +1,4 @@
-# Código atualizado em 08-10-26 – 00:33h - (Click25: ATEIE - Observações padrão obrigatória e dica sob Equipamento de Interligação)
+# Código atualizado em 08-10-26 – 16:12h - (Ajustes pontuais)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -11989,21 +11989,22 @@ LOGO_ATEIE = os.path.join(PASTA_BASE, "logo_ateie.png")
 # Empresas do ATEIE: duas listas independentes (hoje com os mesmos nomes), porque as empresas que solicitam o ATEIE
 # são diferentes das empresas que recebem a notificação. Para alterar uma lista basta editá-la aqui, sem mexer na
 # outra; "OUTRA" deve continuar como última opção (ela libera o campo para digitar o nome da empresa).
-DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE = ["AXIA", "EDP", "ENGIE", "CELEO_REDES", "ENERGISA", "CTEEP", "CBA", "EQUATORIAL",
-                                       "OUTRA"]        # combobox "Empresa Solicitante"
-DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "EDP", "ENGIE", "CELEO_REDES", "ENERGISA", "CTEEP", "CBA", "EQUATORIAL",
-                                      "OUTRA"]         # combobox "Empresa" de "Pessoal Notificado"
+DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE = ["FOZ DO RIO CLARO ENERGIA SA", "IJUÍ ENERGIA SA", "US. PAULISTA LAVRINHAS DE ENERGIA SA",
+                                       "FERREIRA GOMES ENERGIA SA", "ENERGIA DOS VENTOS SA",
+                                       "EÓLICA DO AGRESTE POTIGUAR SA", "VERDE 08 ENERGIA SA", "OUTRA"]  # combobox "Empresa Solicitante"
+DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "EDP", "ENGIE", "CELEO_REDES", "ENERGISA", "ISA-ENERGIA", "CBA", "EQUATORIAL",
+                                      "CPFL-RGE", "ARGO", "CIMY", "OUTRA"]         # combobox "Empresa" de "Pessoal Notificado"
 DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
 # Texto padrão do campo "Observações": obrigatório em todos os documentos (entra já preenchido no formulário)
 DOC_LIB_TEXTO_PADRAO_OBSERVACOES = (
     "Bloquear ou manter bloqueado o religamento automático de todos os disjuntores que alimentam os "
     "equipamentos de interligação sob intervenção, condicionando qualquer religamento manual ao prévio contato "
-    "e à autorização deste COG.")
+    "e à autorização do COG-Alupar.")
 # campos do formulário sempre apresentados em caixa alta (tela, lista e PDF), qualquer que seja a digitação
 DOC_LIB_CAMPOS_CAIXA_ALTA = ("equipamento", "empresa", "empresa_outra", "local")
 DOC_LIB_LIMITE_NOTIFICACOES = 3        # linhas de "De acordo" (Pessoas/Áreas notificadas)
 DOC_LIB_LIMITE_PESSOAL = 3             # linhas de "Pessoal Notificado"
-DOC_LIB_LINHAS_INTERVENCOES = 10       # intervenções por documento ATEIE
+DOC_LIB_LINHAS_INTERVENCOES = 10       # intervenções por documento ATEIEs
 
 # Situação de cada ATEIE. Cada linha da tabela de intervenções é um ATEIE com número próprio e com status
 # próprio, calculado automaticamente por doc_lib_calcular_status e gravado na intervenção.
@@ -12544,7 +12545,7 @@ def doc_lib_salvar_ateie(dados, usuario):
             atual = _doc_lib_ler_ateie(conexao, ateie_id)
             if atual is None or atual["revisao"] != dados.get("revisao"):
                 raise DocLibConflito("Este ATEIE foi alterado por outro usuário depois de aberto nesta janela.\n\n"
-                                     "Feche-o e abra-o novamente (Abrir ATEIE salvo) para ver a versão atual.")
+                                     "Feche-o e abra-o novamente (GRID ATEIE) para ver a versão atual.")
             emitido = bool(atual["emitido"])
         bloqueadas = doc_lib_diferencas_bloqueadas(atual or {}, dados, emitido)
         if bloqueadas:
@@ -12711,7 +12712,7 @@ def doc_lib_cancelar_intervencao(ateie_id, ordem, usuario, justificativa, revisa
         linha = cursor.fetchone()
         if linha is None or linha[0] != revisao_esperada:
             raise DocLibConflito("Este ATEIE foi alterado por outro usuário depois de aberto nesta janela.\n\n"
-                                 "Feche-o e abra-o novamente (Abrir ATEIE salvo) para ver a versão atual.")
+                                 "Feche-o e abra-o novamente (GRID ATEIE) para ver a versão atual.")
         cursor.execute("SELECT status FROM doclib_ateie_intervencoes WHERE ateie_id = ? AND ordem = ?",
                        (ateie_id, ordem))
         linha = cursor.fetchone()
@@ -13370,7 +13371,7 @@ def doc_lib_registrar_geracao(doc, caminho, usuario):
         linha = cursor.fetchone()
         if linha is None or linha[0] != doc["revisao"]:
             raise DocLibConflito("Este ATEIE foi alterado por outro usuário enquanto o documento era gerado.\n\n"
-                                 "Feche-o e abra-o novamente (Abrir ATEIE salvo) antes de gerar o documento.")
+                                 "Feche-o e abra-o novamente (GRID ATEIE) antes de gerar o documento.")
         emitido = bool(linha[1])
         cursor.execute("INSERT INTO doclib_ateie_pdfs (ateie_id, revisao, caminho, gerado_por, gerado_em) "
                        "VALUES (?, ?, ?, ?, ?)", (doc["id"], doc["revisao"], caminho, usuario, agora_texto))
@@ -13560,7 +13561,7 @@ def doc_lib_selecionar_data(parent, entrada, ano_curto=False, ao_selecionar=None
         pass
 
 
-# Colunas da janela "Abrir ATEIE salvo": (campo, título, largura em pixels, exibir sempre em caixa alta)
+# Colunas da janela "GRID ATEIE": (campo, título, largura em pixels, exibir sempre em caixa alta)
 DOC_LIB_COLUNAS_LISTA = [
     ("numero", "N° ATEIE", 105, False),
     ("equipamento", "Equipamento de Interligação", 185, True),
@@ -13749,7 +13750,7 @@ class TabelaQuebraDocLib(Frame):
 
 
 class JanelaListaAteie:
-    """Janela "Abrir ATEIE salvo": UMA linha por ATEIE (número), com busca livre e filtros por coluna que
+    """Janela "GRID ATEIE": UMA linha por ATEIE (número), com busca livre e filtros por coluna que
     podem ser combinados (clique no título da coluna para ver os valores existentes, sem repetição). O texto de
     cada coluna quebra em mais de uma linha quando é maior que a largura; Equipamento de Interligação, Empresa e
     Local aparecem sempre em caixa alta."""
@@ -13770,11 +13771,11 @@ class JanelaListaAteie:
             registro["_texto"] = textos
 
         janela = self.janela = Toplevel(parent)
-        janela.title("Abrir ATEIE salvo")
+        janela.title("GRID ATEIE")
         janela.geometry("1400x700")
         janela.minsize(900, 500)
         janela.transient(parent)
-        ui_dialogo(janela, "Abrir ATEIE salvo", "Selecione o ATEIE e clique em Abrir (ou dê duplo clique). "
+        ui_dialogo(janela, "GRID ATEIE", "Selecione o ATEIE e clique em Abrir (ou dê duplo clique). "
                                                  "Clique no título de uma coluna para filtrar.")
 
         barra_busca = Frame(janela, bg=SGA_FUNDO)
@@ -13957,7 +13958,7 @@ class JanelaListaAteie:
 
 
 def doc_lib_escolher_ateie(parent):
-    """Abre a janela "Abrir ATEIE salvo" e devolve (id do documento, linha da tabela) do ATEIE escolhido,
+    """Abre a janela "GRID ATEIE" e devolve (id do documento, linha da tabela) do ATEIE escolhido,
     ou None se o usuário voltar sem escolher."""
     janela = JanelaListaAteie(parent)
     try:
@@ -14278,9 +14279,9 @@ class JanelaAteie:
 
     # ------------------------------------------------------------------ montagem da janela
     def _montar_cabecalho(self):
-        faixa = ui_dialogo(self.janela, "ATEIE - Doc_Lib.",
+        faixa = ui_dialogo(self.janela, "ATEIE - Docomento de Liberação.",
                            "Autorização para Trabalhos em Equipamentos de Interligação Energizados")
-        doc_lib_criar_botao(faixa, "Abrir ATEIE salvo", self.abrir_salvo, "neutro"
+        doc_lib_criar_botao(faixa, "GRID ATEIE", self.abrir_salvo, "neutro"
                             ).place(relx=1.0, x=-24, rely=0.5, anchor="e", width=170, height=34)
         self.lbl_status = Label(faixa, text="", bg=SGA_AZUL, fg="#B8CCE8", font=(SGA_FONTE, 9, "bold"))
         self.lbl_status.place(relx=1.0, x=-208, rely=0.5, anchor="e")
@@ -14313,7 +14314,7 @@ class JanelaAteie:
 
         # 2. Equipamento de Interligação / 4. Local / 5. Serviços / 6. Observações / 7. Documentos
         self.txt_equipamento = self._campo_texto("equipamento", "Equipamento de Interligação", 3, maiusculas=True,
-                                                 dica="(não usar siglas)")
+                                                 dica="(Não utilizar siglas, com exceção \ndaquelas já consagradas no setor, \ntais como: LT, UG, TR e SE)")
 
         # 3. Empresa Solicitante (+ nome manual quando OUTRA)
         rot = self._rotulo("Empresa Solicitante")
@@ -15010,7 +15011,7 @@ class JanelaAteie:
         if doc is None or doc["revisao"] != self.revisao:
             messagebox.showwarning("Documento alterado",
                                    "Este ATEIE foi alterado por outro usuário depois de aberto nesta janela.\n\n"
-                                   "Feche-o e abra-o novamente (Abrir ATEIE salvo) antes de gerar o documento.",
+                                   "Feche-o e abra-o novamente (GRID ATEIE) antes de gerar o documento.",
                                    parent=self.janela)
             return
         erros = doc_lib_validar_ateie(doc, doc)
@@ -15021,9 +15022,8 @@ class JanelaAteie:
             return
         if not self.emitido and not messagebox.askyesno(
                 "Emitir ATEIE",
-                "Ao gerar o documento o ATEIE será considerado EMITIDO (status 'Aguarda De Acordo').\n\n"
-                "A partir daí os dados gerais e as colunas 1 a 5 da tabela não poderão mais ser alterados; "
-                "somente as colunas 6 a 13 (execução e normalização) continuarão editáveis.\n\n"
+                "Ao gerar o documento o ATEIE será considerado EMITIDO, com status 'Aguarda De Acordo').\n\n"
+                "A partir daí os dados do documento não poderão ser alterados.\n\n"
                 "Deseja gerar o documento?", parent=self.janela):
             return
         try:
@@ -15038,9 +15038,7 @@ class JanelaAteie:
         self._carregar_documento(doc)
         lembrete = None
         if any(item.get("status") == STATUS_ATEIE_AGUARDA_DE_ACORDO for item in doc["intervencoes"]):
-            lembrete = ("Status: Aguarda De Acordo. O PDF traz uma linha vermelha nas colunas 6 a 13 e o aviso "
-                        "'Aguardando o De Acordo do documento'. Preencha e salve o 'De acordo' e gere o documento "
-                        "novamente: a marca sai e as colunas 6 a 13 são liberadas para a execução.")
+            lembrete = ("Status: Aguarda De Acordo. ATEIE não pode ser liberado para execução.")
         doc_lib_dialogo_documento_gerado(self.janela, caminho, aviso, lembrete)
 
     def cancelar_intervencao(self, indice):
