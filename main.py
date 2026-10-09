@@ -20,6 +20,7 @@ from tkinter import ttk, messagebox, Toplevel, Frame, Label, Button, Entry, List
 import requests  # exclusivo para o click22
 import threading  # exclusivo para o click22
 from concurrent.futures import ThreadPoolExecutor, as_completed #exclusivo para o click22
+import filecmp  # exclusivo para o click25 (cópia do PDF do Encaminhar ATEIE na pasta Downloads)
 import smtplib  # exclusivo para o click25 (Encaminhar ATEIE por e-mail)
 import ssl  # exclusivo para o click25 (Encaminhar ATEIE por e-mail)
 from email.message import EmailMessage  # exclusivo para o click25 (Encaminhar ATEIE por e-mail)
@@ -12004,6 +12005,10 @@ DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
 # config_email_ateie.exemplo.json). Esse arquivo NÃO vai para o GitHub porque pode conter senha.
 EMAIL_ATEIE_REMETENTE = "nmaganha@alupar.com.br"
 ARQUIVO_CONFIG_EMAIL_ATEIE = os.path.join(PASTA_BASE, "config_email_ateie.json")
+# Pasta onde o botão Encaminhar ATEIE guarda uma cópia do PDF que será anexado ao e-mail (para enviar manualmente se
+# o envio falhar). None = pasta Downloads do usuário no Windows. Para usar outra, informe o caminho, por exemplo
+#     PASTA_DOWNLOAD_ATEIE = r"C:\Users\nmaganha\Downloads"
+PASTA_DOWNLOAD_ATEIE = None
 EMAIL_ATEIE_ASSUNTO = "ATEIE - Para análise e De Acordo"
 EMAIL_ATEIE_TEXTO = ("Prezados,\n\n"
                      "Segue para análise e o De Acordo o(s) ATEIEs números: {numeros}.\n\n"
@@ -12327,6 +12332,8 @@ def garantir_banco_doc_lib():
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie_pessoal", "empresa_outra", "TEXT")
     # revisão do documento depois de gerado o PDF: o e-mail só reaproveita um PDF que ainda reflete o documento atual
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie_pdfs", "revisao_final", "INTEGER")
+    # tipo do PDF: vazio = gerado pelo botão Gerar Documento; "envio" = PDF limpo anexado ao e-mail do Encaminhar ATEIE
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie_pdfs", "tipo", "TEXT")
 
     conexao.commit()
     conexao.close()
@@ -13185,17 +13192,67 @@ def doc_lib_enviar_email(destinatarios, assunto, corpo, anexo):
 
 
 def doc_lib_pdf_para_envio(doc, usuario):
-    """PDF a anexar no e-mail: o mais recente já arquivado que ainda reflete a versão atual do documento (mesma
-    revisão); se não houver, ou se o arquivo não existir mais, gera e arquiva um novo. Devolve (caminho, aviso)."""
+    """PDF a anexar no e-mail do Encaminhar ATEIE: o documento SEM a linha vermelha das colunas 6 a 13 e sem o aviso
+    "Aguardando o De Acordo do documento" (marcas de controle interno que não devem ir para a outra empresa).
+    Reaproveita o PDF desse tipo já arquivado enquanto o documento não mudou (mesma revisão); se não houver, ou se o
+    arquivo não existir mais, gera e arquiva um novo em ATEIE/Enviados/<ano>. Devolve (caminho, aviso)."""
     conexao = doc_lib_conectar()
     try:
-        linha = conexao.execute("SELECT caminho FROM doclib_ateie_pdfs WHERE ateie_id = ? AND revisao_final = ? "
-                                "ORDER BY id DESC LIMIT 1", (doc["id"], doc["revisao"])).fetchone()
+        linha = conexao.execute("SELECT caminho FROM doclib_ateie_pdfs WHERE ateie_id = ? AND tipo = 'envio' "
+                                "AND revisao_final = ? ORDER BY id DESC LIMIT 1",
+                                (doc["id"], doc["revisao"])).fetchone()
     finally:
         conexao.close()
     if linha and os.path.isfile(linha[0]):
         return linha[0], None
-    return doc_lib_arquivar_pdf_ateie(doc, usuario)
+    return doc_lib_arquivar_pdf_ateie(doc, usuario, para_envio=True)
+
+
+def doc_lib_pasta_downloads():
+    """Pasta Downloads do usuário: PASTA_DOWNLOAD_ATEIE, se foi informada; no Windows, a pasta Downloads registrada no
+    sistema (acompanha redirecionamentos, como OneDrive); senão, a pasta Downloads do perfil do usuário."""
+    if PASTA_DOWNLOAD_ATEIE:
+        return PASTA_DOWNLOAD_ATEIE
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class GUID(ctypes.Structure):
+                _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD),
+                            ("Data4", ctypes.c_ubyte * 8)]
+            # FOLDERID_Downloads = {374DE290-123F-4565-9164-39C4925E467B}
+            guid = GUID(0x374DE290, 0x123F, 0x4565,
+                        (ctypes.c_ubyte * 8)(0x91, 0x64, 0x39, 0xC4, 0x92, 0x5E, 0x46, 0x7B))
+            caminho = ctypes.c_wchar_p()
+            if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(caminho)) == 0:
+                pasta = caminho.value
+                ctypes.windll.ole32.CoTaskMemFree(caminho)
+                if pasta:
+                    return pasta
+        except Exception:
+            pass                      # sem a consulta ao sistema, usa a pasta padrão do perfil abaixo
+    return os.path.join(os.path.expanduser("~"), "Downloads")
+
+
+def doc_lib_copiar_para_downloads(caminho):
+    """Copia o PDF para a pasta Downloads, sem nunca sobrescrever outro arquivo: se já existe um arquivo igual (mesmo
+    nome e mesmo conteúdo) não duplica; se existe outro com o mesmo nome, grava com -2, -3...
+    Devolve (caminho da cópia, None) ou (None, mensagem do erro): falhar aqui não impede o envio do e-mail."""
+    try:
+        pasta = doc_lib_pasta_downloads()
+        os.makedirs(pasta, exist_ok=True)
+        nome, extensao = os.path.splitext(os.path.join(pasta, os.path.basename(caminho)))
+        destino, repeticao = nome + extensao, 1
+        while os.path.exists(destino):
+            if filecmp.cmp(caminho, destino, shallow=False):      # a cópia já está lá: não duplica
+                return destino, None
+            repeticao += 1
+            destino = f"{nome}-{repeticao}{extensao}"
+        shutil.copy2(caminho, destino)
+        return destino, None
+    except OSError as erro:
+        return None, str(erro)
 
 
 def doc_lib_registrar_envio(ateie_id, numeros, destinatarios, assunto, anexo, metodo, usuario):
@@ -13432,12 +13489,16 @@ class PDFAteie(FPDF):
         self.set_text_color(0, 0, 0)
 
 
-def doc_lib_gerar_pdf_ateie(doc, caminho, gerado_por=""):
+def doc_lib_gerar_pdf_ateie(doc, caminho, gerado_por="", para_envio=False):
     """Gera o PDF do ATEIE (layout do documento de referência) em 'caminho'.
 
     ATEIE RESERVADO (ou grupo de reservados): sai o formulário em branco, para uso físico em emissão manual ou de
     emergência. Ficam apenas o número de cada ATEIE (coluna 1) e as Observações padrão; sem a linha vermelha sobre
-    as colunas 6 a 13 e sem o aviso "Aguardando o De Acordo do documento"."""
+    as colunas 6 a 13 e sem o aviso "Aguardando o De Acordo do documento".
+
+    para_envio=True (PDF anexado ao e-mail do botão Encaminhar ATEIE): o mesmo documento, mas sem a linha vermelha
+    sobre as colunas 6 a 13 e sem o aviso "Aguardando o De Acordo do documento", que são marcas de controle interno do
+    COG. O risco e a lista de ATEIE cancelados continuam, pois fazem parte do conteúdo do documento."""
     agora = datetime.now()
     if doc_lib_documento_reservado(doc):
         em_branco = {chave: "" for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO}
@@ -13749,7 +13810,7 @@ def doc_lib_gerar_pdf_ateie(doc, caminho, gerado_por=""):
                 pdf.line(xc[0] + 1, y_linha + altura / 2, X1 - 1, y_linha + altura / 2)
                 pdf.set_draw_color(0, 0, 0)
                 pdf.set_line_width(0.2)
-            elif aguarda_de_acordo(item):                       # linha vermelha nas colunas 6 a 13
+            elif aguarda_de_acordo(item) and not para_envio:    # linha vermelha nas colunas 6 a 13
                 pdf.set_draw_color(176, 0, 0)
                 pdf.set_line_width(0.35)
                 pdf.line(xc[5] + 1, y_linha + altura / 2, X1 - 1, y_linha + altura / 2)
@@ -13779,7 +13840,7 @@ def doc_lib_gerar_pdf_ateie(doc, caminho, gerado_por=""):
             pdf.set_font("DejaVuC", "", 9.0)
         pdf.text(x_nota, y_atual, linha)
         y_atual += 4.0
-    aguardando = any(aguarda_de_acordo(item) for item in intervencoes)
+    aguardando = not para_envio and any(aguarda_de_acordo(item) for item in intervencoes)
     if aguardando:
         y_atual += 1.5 if linhas_nota else 5.0
         if y_atual + 3.0 > PDFAteie.Y_MAXIMO:
@@ -13840,8 +13901,9 @@ def doc_lib_pasta_destino(tipo, ano):
     raise OSError(f"Nenhuma pasta de arquivamento disponível: {ultimo_erro}")
 
 
-def doc_lib_registrar_geracao(doc, caminho, usuario):
-    """Registra o PDF gerado e, na PRIMEIRA geração, EMITE o ATEIE: o documento passa a ser protegido (somente as
+def doc_lib_registrar_geracao(doc, caminho, usuario, tipo=None):
+    """Registra o PDF gerado (tipo "envio" = PDF anexado ao e-mail, que nunca emite o documento) e, na PRIMEIRA
+    geração, EMITE o ATEIE: o documento passa a ser protegido (somente as
     colunas 6 a 13 continuam editáveis) e cada ATEIE não cancelado passa a "Aguarda De Acordo" (ou "Aprovado para Execução", se o "De acordo" já
     estiver preenchido). Um ATEIE RESERVADO não é emitido: o PDF dele é o formulário em branco, só fica registrado
     e o documento continua reservado e editável. Lança DocLibConflito se o
@@ -13857,10 +13919,10 @@ def doc_lib_registrar_geracao(doc, caminho, usuario):
             raise DocLibConflito("Este ATEIE foi alterado por outro usuário enquanto o documento era gerado.\n\n"
                                  "Feche-o e abra-o novamente (GRID ATEIE) antes de gerar o documento.")
         emitido = bool(linha[1])
-        cursor.execute("INSERT INTO doclib_ateie_pdfs (ateie_id, revisao, caminho, gerado_por, gerado_em) "
-                       "VALUES (?, ?, ?, ?, ?)", (doc["id"], doc["revisao"], caminho, usuario, agora_texto))
+        cursor.execute("INSERT INTO doclib_ateie_pdfs (ateie_id, revisao, caminho, gerado_por, gerado_em, tipo) "
+                       "VALUES (?, ?, ?, ?, ?, ?)", (doc["id"], doc["revisao"], caminho, usuario, agora_texto, tipo))
         id_pdf = cursor.lastrowid
-        if not emitido and not doc_lib_documento_reservado(doc):
+        if not emitido and not doc_lib_documento_reservado(doc) and tipo != "envio":
             cursor.execute("UPDATE doclib_ateie SET emitido = 1, emitido_em = ?, emitido_por = ?, "
                            "revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? WHERE id = ?",
                            (agora_texto, usuario, usuario, agora_texto, doc["id"]))
@@ -13878,13 +13940,18 @@ def doc_lib_registrar_geracao(doc, caminho, usuario):
         conexao.close()
 
 
-def doc_lib_arquivar_pdf_ateie(doc, usuario):
+def doc_lib_arquivar_pdf_ateie(doc, usuario, para_envio=False):
     """Gera o PDF do ATEIE, arquiva na pasta do Doc_Lib. (nunca sobrescreve um arquivo anterior), registra o
-    arquivo no banco e, na primeira geração, emite o ATEIE. Retorna (caminho, aviso)."""
+    arquivo no banco e, na primeira geração, emite o ATEIE. Retorna (caminho, aviso).
+
+    para_envio=True gera o PDF que vai anexado ao e-mail (sem a linha vermelha e sem o aviso "Aguardando o De Acordo
+    do documento"), arquivado em ATEIE/Enviados/<ano>; só vale para ATEIE já emitido e não emite nada."""
+    if para_envio and not doc.get("emitido"):
+        raise DocLibRegra("O PDF para envio só pode ser gerado de um ATEIE já emitido (use Gerar Documento antes).")
     agora = datetime.now()
     numeros = [item["numero"] for item in doc["intervencoes"] if item.get("numero")]
     ano = next((item["ano"] for item in doc["intervencoes"] if item.get("ano")), agora.year)
-    pasta, aviso = doc_lib_pasta_destino("ATEIE", ano)
+    pasta, aviso = doc_lib_pasta_destino(os.path.join("ATEIE", "Enviados") if para_envio else "ATEIE", ano)
 
     base = numeros[0] + (f"_a_{numeros[-1]}" if len(numeros) > 1 else "") if numeros else f"id{doc['id']}"
     prefixo = "ATEIE_RESERVADO_" if doc_lib_documento_reservado(doc) else "ATEIE_"
@@ -13896,14 +13963,14 @@ def doc_lib_arquivar_pdf_ateie(doc, usuario):
         caminho = os.path.join(pasta, f"{nome_base}-{repeticao}.pdf")
     caminho_temporario = caminho + ".tmp"
     try:
-        doc_lib_gerar_pdf_ateie(doc, caminho_temporario, usuario)
+        doc_lib_gerar_pdf_ateie(doc, caminho_temporario, usuario, para_envio=para_envio)
         os.replace(caminho_temporario, caminho)
     finally:
         if os.path.exists(caminho_temporario):
             os.remove(caminho_temporario)
 
     try:
-        doc_lib_registrar_geracao(doc, caminho, usuario)
+        doc_lib_registrar_geracao(doc, caminho, usuario, tipo="envio" if para_envio else None)
     except Exception:
         if os.path.exists(caminho):            # documento não registrado/emitido: não deixa arquivo órfão
             os.remove(caminho)
@@ -14793,35 +14860,43 @@ def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
     janela.wait_window()
 
 
-def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario):
-    """Janela de confirmação do botão Encaminhar ATEIE. Mostra remetente, empresa, ATEIE(s), anexo, destinatários e o
-    texto do e-mail. Quando a empresa tem mais de um destinatário possível o usuário escolhe um; empresa sem e-mail
-    cadastrado (por exemplo OUTRA) permite digitar o endereço. Devolve a lista de e-mails confirmados ou None."""
+def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=None, erro_copia=None):
+    """Janela de confirmação do botão Encaminhar ATEIE. Mostra remetente, empresa, ATEIE(s), anexo, onde ficou a cópia
+    do PDF na pasta Downloads (ou o motivo de não ter sido salva), destinatários e o texto do e-mail. Quando a empresa
+    tem mais de um destinatário possível o usuário escolhe um; empresa sem e-mail cadastrado (por exemplo OUTRA)
+    permite digitar o endereço. Devolve a lista de e-mails confirmados ou None."""
     empresa = doc_lib_empresa_do_documento(doc)
     corpo = EMAIL_ATEIE_TEXTO.format(numeros=doc_lib_texto_numeros(numeros))
     estado = {"destinatarios": None}
     janela = Toplevel(parent)
     janela.title("Encaminhar ATEIE")
-    janela.geometry("780x660")                      # cabe em tela de 1366x768
+    janela.geometry("780x710")                      # cabe em tela de 1366x768
     janela.resizable(False, False)
     janela.transient(parent)
     ui_dialogo(janela, "Encaminhar ATEIE", "Envio por e-mail, com o PDF do documento anexado, para análise e De Acordo")
-    cartao = ui_cartao(janela, 84, 500)
+    cartao = ui_cartao(janela, 84, 550)
     cartao.grid_columnconfigure(1, weight=1)
 
-    def rotulo_valor(linha, titulo, texto, negrito=False):
+    def rotulo_valor(linha, titulo, texto, negrito=False, cor=SGA_TEXTO):
         Label(cartao, text=titulo, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
               ).grid(row=linha, column=0, sticky="nw", padx=(20, 10), pady=(12, 0))
-        Label(cartao, text=texto, bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold" if negrito else ""),
+        Label(cartao, text=texto, bg=SGA_CARD, fg=cor, font=(SGA_FONTE, 10, "bold" if negrito else ""),
               wraplength=520, justify="left", anchor="w").grid(row=linha, column=1, sticky="nw", pady=(11, 0))
 
     rotulo_valor(0, "Remetente:", EMAIL_ATEIE_REMETENTE)
     rotulo_valor(1, "Empresa solicitante:", empresa or "(não informada)")
     rotulo_valor(2, "ATEIE(s):", doc_lib_texto_numeros(numeros), negrito=True)
-    rotulo_valor(3, "Anexo:", "PDF do documento ATEIE (versão atual, com status Aguarda De Acordo)")
-    rotulo_valor(4, "Assunto:", f"{EMAIL_ATEIE_ASSUNTO}: {doc_lib_texto_numeros(numeros)}")
+    rotulo_valor(3, "Anexo:", (f"{os.path.basename(anexo)}\n" if anexo else "")
+                 + "PDF do documento sem a linha vermelha e sem o aviso de De Acordo")
+    if copia:
+        rotulo_valor(4, "Cópia salva em:", copia)
+    elif erro_copia:
+        rotulo_valor(4, "Cópia salva em:", f"Não foi possível salvar em Downloads: {erro_copia}", cor=SGA_VERMELHO)
+    else:
+        rotulo_valor(4, "Cópia salva em:", "(não gerada)", cor=SGA_VERMELHO)
+    rotulo_valor(5, "Assunto:", f"{EMAIL_ATEIE_ASSUNTO}: {doc_lib_texto_numeros(numeros)}")
     zona = Frame(cartao, bg=SGA_CARD)
-    zona.grid(row=5, column=0, columnspan=2, sticky="ew", padx=20, pady=(14, 0))
+    zona.grid(row=6, column=0, columnspan=2, sticky="ew", padx=20, pady=(14, 0))
     zona.grid_columnconfigure(1, weight=1)
     escolha = StringVar(value="")
     var_manual = StringVar()
@@ -14874,17 +14949,17 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario):
 
     # destinatários resultantes (atualizados a cada escolha ou digitação)
     Label(cartao, text="Para:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
-          ).grid(row=6, column=0, sticky="nw", padx=(20, 10), pady=(11, 0))
+          ).grid(row=7, column=0, sticky="nw", padx=(20, 10), pady=(11, 0))
     rotulo_para = Label(cartao, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"), wraplength=520,
                         justify="left", anchor="w")
-    rotulo_para.grid(row=6, column=1, sticky="nw", pady=(10, 0))
+    rotulo_para.grid(row=7, column=1, sticky="nw", pady=(10, 0))
 
     Label(cartao, text="Texto do e-mail:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
-          ).grid(row=7, column=0, sticky="nw", padx=(20, 10), pady=(14, 0))
-    previa = criar_area_texto_sga(cartao, wrap=WORD, height=8, width=60)
+          ).grid(row=8, column=0, sticky="nw", padx=(20, 10), pady=(14, 0))
+    previa = criar_area_texto_sga(cartao, wrap=WORD, height=7, width=60)
     previa.insert("1.0", corpo)
     previa.configure(state=DISABLED, bg=DOC_LIB_COR_BLOQUEADO)
-    previa.grid(row=7, column=1, sticky="nw", pady=(12, 0))
+    previa.grid(row=8, column=1, sticky="nw", pady=(12, 0))
 
     def confirmar(evento=None):
         lista, erro = calcular()
@@ -16033,31 +16108,47 @@ class JanelaAteie:
                                    parent=self.janela)
             return
         usuario = obter_nome_usuario_logado()
-        destinatarios = doc_lib_dialogo_encaminhar(self.janela, doc, aguardando, usuario)
+
+        # Ao clicar no botão, junto com a abertura da janela de envio, o PDF que vai anexado ao e-mail (sem a linha
+        # vermelha e sem o aviso de De Acordo) é gerado e uma cópia vai para a pasta Downloads, para o caso de ser
+        # preciso enviar manualmente. A cópia fica lá mesmo que o envio seja cancelado.
+        self.janela.configure(cursor="watch")
+        self.janela.update_idletasks()
+        try:
+            caminho_pdf, aviso = doc_lib_pdf_para_envio(doc, usuario)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except (DocLibRegra, sqlite3.Error, OSError) as erro:
+            messagebox.showerror(titulo, f"Não foi possível preparar o PDF do documento para envio:\n\n{erro}",
+                                 parent=self.janela)
+            return
+        finally:
+            self.janela.configure(cursor="")
+        caminho_copia, erro_copia = doc_lib_copiar_para_downloads(caminho_pdf)
+
+        destinatarios = doc_lib_dialogo_encaminhar(self.janela, doc, aguardando, usuario, caminho_pdf, caminho_copia,
+                                                   erro_copia)
         if not destinatarios:
             return
 
         assunto = f"{EMAIL_ATEIE_ASSUNTO}: {doc_lib_texto_numeros(aguardando)}"
         corpo = EMAIL_ATEIE_TEXTO.format(numeros=doc_lib_texto_numeros(aguardando))
+        manual = caminho_copia or caminho_pdf              # arquivo para enviar à mão se o e-mail falhar
         self.janela.configure(cursor="watch")
         self.janela.update_idletasks()
         try:
-            caminho_pdf, aviso = doc_lib_pdf_para_envio(doc, usuario)
             metodo = doc_lib_enviar_email(destinatarios, assunto, corpo, caminho_pdf)
-        except DocLibEmailErro as erro:
-            messagebox.showerror(titulo, f"O e-mail NÃO foi enviado.\n\n{erro}", parent=self.janela)
-            return
-        except DocLibConflito as erro:
-            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
-            return
-        except (sqlite3.Error, OSError) as erro:
-            messagebox.showerror(titulo, f"O e-mail NÃO foi enviado.\n\nNão foi possível preparar o PDF do "
-                                         f"documento: {erro}", parent=self.janela)
+        except (DocLibEmailErro, OSError) as erro:
+            messagebox.showerror(titulo, f"O e-mail NÃO foi enviado.\n\n{erro}\n\n"
+                                         f"Para enviar manualmente, use o arquivo:\n{manual}", parent=self.janela)
             return
         finally:
             self.janela.configure(cursor="")
         resumo = (f"E-mail enviado ({metodo}).\n\nDe: {EMAIL_ATEIE_REMETENTE}\nPara: {'; '.join(destinatarios)}\n"
                   f"ATEIE(s): {doc_lib_texto_numeros(aguardando)}\nAnexo: {os.path.basename(caminho_pdf)}")
+        if caminho_copia:
+            resumo += f"\nCópia do arquivo enviado: {caminho_copia}"
         try:
             doc_lib_registrar_envio(doc["id"], aguardando, destinatarios, assunto, caminho_pdf, metodo, usuario)
         except sqlite3.Error as erro:
