@@ -8,3 +8,4 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # exclusivo par
 Revisão geral do código em 02/10/2026
 click25 (Doc_Lib. ATEIE) - botao Encaminhar ATEIE: copiar config_email_ateie.exemplo.json para config_email_ateie.json e preencher (SMTP) ou usar o Outlook (Windows) com pip install pywin32. O config_email_ateie.json nao vai para o GitHub.
 click25 - destinatarios do Encaminhar ATEIE: botao Cadastrar e-mails na janela de confirmacao (podem ser incluidos varios e-mails por empresa).
+click25 - Encaminhar ATEIE: ao clicar no botao, uma copia do PDF que vai anexado ao e-mail (sem o risco vermelho e sem o aviso de De Acordo) e salva na pasta Downloads, para envio manual se o e-mail falhar. Para trocar a pasta: PASTA_DOWNLOAD_ATEIE no main.py. O PDF tambem fica arquivado em doc_lib_arquivo/ATEIE/Enviados/<ano>.
