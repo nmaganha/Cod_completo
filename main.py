@@ -15134,6 +15134,7 @@ class JanelaAteie:
                                      "inicio_travado": False, "termino_travado": False}
                                     for _ in range(DOC_LIB_LINHAS_INTERVENCOES)]
         self._doc_gravado = None      # o ATEIE como está gravado no banco (None enquanto for novo)
+        self._ultimo_pendente = None  # "há dados não salvos" na última vez em que os botões foram atualizados
         self._controles = []          # campos travados/liberados em bloco
         self._alvos = {}              # chave de campo -> (widget com contorno ou None, rótulo)
         self._marcados = {}           # widget -> cores originais do contorno
@@ -15163,6 +15164,21 @@ class JanelaAteie:
         self._atualizar_estado()
         self._assinatura_ref = self._assinatura()
         self.janela.after(300, self._avisar_sem_nome_completo)
+        self.janela.after(300, self._vigiar_alteracoes)
+
+    def _vigiar_alteracoes(self):
+        """Reavalia os botões enquanto o usuário digita. Em ATEIE reservado ou já emitido, "há dados não salvos"
+        depende do que está na tela (comparação com a versão gravada) e nenhum campo avisa a janela quando muda,
+        então o estado é conferido a cada 300 ms: Salvar habilita e Gerar Documento desabilita assim que algo é
+        digitado, e voltam ao normal se o usuário desfizer a alteração."""
+        try:
+            if not self.janela.winfo_exists():
+                return
+            if (self.reservado or self.emitido) and self._pendente() != self._ultimo_pendente:
+                self._atualizar_estado()
+            self.janela.after(300, self._vigiar_alteracoes)
+        except TclError:
+            pass                      # janela fechada durante a conferência
 
     def _avisar_sem_nome_completo(self):
         """Usuário sem nome completo cadastrado: "Solicitado por" usará o login até o administrador cadastrar."""
@@ -15821,6 +15837,7 @@ class JanelaAteie:
 
     def _atualizar_estado(self):
         pendente = self._pendente()
+        self._ultimo_pendente = pendente
         doc_lib_estado_botao(self.btn_voltar, True)
         doc_lib_estado_botao(self.btn_salvar, pendente)
         doc_lib_estado_botao(self.btn_editar, self.ateie_id is not None and not self.emitido and self.salvo)
