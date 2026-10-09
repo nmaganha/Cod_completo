@@ -1,4 +1,4 @@
-# Código atualizado em 08-10-26 - Click_25: ATEIE Reservado, Agrupar ATEIEs, Encaminhar ATEIE e cores dos status
+# Código atualizado em 09-10-26 - 1626 - Click_25: ATEIE Reservado, Agrupar ATEIEs, Encaminhar ATEIE e cores dos status
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -12003,7 +12003,7 @@ DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
 # ---- Encaminhar ATEIE (e-mail) -------------------------------------------------------------------------------------
 # Remetente fixo. Como o e-mail é enviado (SMTP ou Outlook) é definido no arquivo local config_email_ateie.json (modelo:
 # config_email_ateie.exemplo.json). Esse arquivo NÃO vai para o GitHub porque pode conter senha.
-EMAIL_ATEIE_REMETENTE = "nmaganha@alupar.com.br"
+EMAIL_ATEIE_REMETENTE = "nivaldo.maganha@hotmail.com"
 ARQUIVO_CONFIG_EMAIL_ATEIE = os.path.join(PASTA_BASE, "config_email_ateie.json")
 # Pasta onde o botão Encaminhar ATEIE guarda uma cópia do PDF que será anexado ao e-mail (para enviar manualmente se
 # o envio falhar). None = pasta Downloads do usuário no Windows. Para usar outra, informe o caminho, por exemplo
@@ -12018,18 +12018,18 @@ EMAIL_ATEIE_TEXTO = ("Prezados,\n\n"
 # receber mais e-mails por empresa na tela "Cadastrar e-mails" (botão Encaminhar ATEIE).
 # (Empresa Solicitante, destinatário a escolher na hora do envio - "" quando não há escolha, e-mail)
 DOC_LIB_DESTINATARIOS_INICIAIS = [
-    ("FOZ DO RIO CLARO ENERGIA SA", "", "nivado.maganha@gmail.com"),
-    ("IJUÍ ENERGIA SA", "", "nivado.maganha@gmail.com"),
-    ("US. PAULISTA LAVRINHAS DE ENERGIA SA", "", "nivado.maganha@gmail.com"),
-    ("FERREIRA GOMES ENERGIA SA", "ENERGISA", "nivado.maganha@gmail.com"),
-    ("FERREIRA GOMES ENERGIA SA", "EDP", "nivado.maganha@homail.com"),
-    ("VERDE 08 ENERGIA SA", "", "nivado.maganha@gmail.com"),
-    ("ENERGIA DOS VENTOS SA", "AXIA", "nivado.maganha@gmail.com"),
-    ("ENERGIA DOS VENTOS SA", "WEG", "nivado.maganha@homail.com"),
-    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO", "nivado.maganha@gmail.com"),
-    ("EÓLICA DO AGRESTE POTIGUAR SA", "CIMY", "nivado.maganha@homail.com"),
-    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY", "nivado.maganha@gmail.com"),
-    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY", "nivado.maganha@homail.com"),
+    ("FOZ DO RIO CLARO ENERGIA SA", "CELEO_REDES", "nivaldo.maganha@gmail.com"),
+    ("IJUÍ ENERGIA SA", "CPFL-RGE", "nivaldo.maganha@gmail.com"),
+    ("US. PAULISTA LAVRINHAS DE ENERGIA SA", "ISA-ENERGIA", "nivaldo.maganha@gmail.com"),
+    ("FERREIRA GOMES ENERGIA SA", "ENERGISA", "nivaldo.maganha@gmail.com"),
+    ("FERREIRA GOMES ENERGIA SA", "ENGIE", "nmaganha@alupar.com.br"),
+    ("VERDE 08 ENERGIA SA", "EQUATORIAL", "nivaldo.maganha@gmail.com"),
+    ("ENERGIA DOS VENTOS SA", "AXIA", "nivaldo.maganha@gmail.com"),
+    ("ENERGIA DOS VENTOS SA", "WEG", "nmaganha@alupar.com.br"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO", "nivaldo.maganha@gmail.com"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "CIMY", "nmaganha@alupar.com.br"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY", "nivaldo.maganha@gmail.com"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY", "nmaganha@alupar.com.br"),
 ]
 
 # Texto padrão do campo "Observações": obrigatório em todos os documentos (entra já preenchido no formulário)
@@ -15221,7 +15221,7 @@ class JanelaAteie:
         self.indice_coluna = {chave: posicao for posicao, (chave, _, _, _) in enumerate(DOC_LIB_COLUNAS_INTERVENCAO)}
 
         self.janela = Toplevel(root)
-        self.janela.title('COG - Doc_Lib. - ATEIE')
+        self.janela.title('COG - DOC_LIB. - ATEIE')
         self.janela.geometry('1240x820')
         self.janela.minsize(1100, 640)
         self.janela.resizable(True, True)
