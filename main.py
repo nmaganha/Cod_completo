@@ -14551,6 +14551,8 @@ class JanelaListaAteie:
     ROTULO = "ATEIE"                     # nome do documento nos textos da janela
     PLURAL = "ATEIEs"
     ARTIGO = "o"                         # "o" ou "a" (a MO é feminina): concordância dos textos
+    COLUNAS_COM_QUEBRA = ()              # colunas que mantêm na tela as quebras de linha digitadas (o texto continua
+                                         # quebrando sozinho quando não cabe na largura da coluna)
     PERMITE_AGRUPAR = True               # a MO tem um número por documento: não há o que agrupar
     COLUNAS = DOC_LIB_COLUNAS_LISTA
 
@@ -14624,11 +14626,16 @@ class JanelaListaAteie:
         caso)."""
         self.registros = self._listar()
         for registro in self.registros:
-            textos = {}
+            textos, exibidos = {}, {}
             for chave, _, _, maiuscula in self.COLUNAS:
                 texto = _doc_lib_uma_linha(registro[chave])
                 textos[chave] = texto.upper() if maiuscula else texto
-            registro["_texto"] = textos
+                exibidos[chave] = textos[chave]
+                if chave in self.COLUNAS_COM_QUEBRA:
+                    linhas = [_doc_lib_uma_linha(linha) for linha in str(registro[chave] or "").splitlines()]
+                    exibidos[chave] = "\n".join(linha.upper() if maiuscula else linha for linha in linhas if linha)
+            registro["_texto"] = textos           # uma linha só: usado na busca e nos filtros
+            registro["_exibir"] = exibidos        # o que a tabela desenha
 
     def recarregar(self):
         """Relê os ATEIE do banco mantendo filtros e busca."""
@@ -14678,7 +14685,7 @@ class JanelaListaAteie:
         """Redesenha a lista conforme os filtros e a busca."""
         visiveis = self.linhas_visiveis()
         self.tabela.preencher([{
-            "valores": [registro["_texto"][c[0]] for c in self.COLUNAS],
+            "valores": [registro["_exibir"][c[0]] for c in self.COLUNAS],
             "cor": DOC_LIB_COR_STATUS.get(registro["status"], SGA_TEXTO),
             "dados": (registro["ateie_id"], registro["ordem"])} for registro in visiveis])
         for chave, _, _, _ in self.COLUNAS:
@@ -19387,6 +19394,7 @@ DOC_LIB_TEXTO_MO_INFORMATIVA = ("Mensagem Operativa meramente informativa, sem n
 DOC_LIB_STATUS_CANCELAVEIS_MO = (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_AGUARDA_DE_ACORDO, STATUS_ATEIE_CONCLUIDO)
 DOC_LIB_TEXTO_MO_RESERVADA = "MO RESERVADA"        # exibido no GRID MO, em Assunto, enquanto a MO está reservada
 DOC_LIB_PAGINAS_DESCRICAO_MO = 30                  # previsão do campo 9 Descrição (texto livre de até 30 páginas)
+DOC_LIB_ESPACO_ANTES_PARAGRAFO = "6p"              # espaço antes de cada parágrafo da Descrição (6 pt; o PDF usa o mesmo valor)
 EMAIL_MO_ASSUNTO = "MO - Para análise e De Acordo"
 EMAIL_MO_TEXTO = ("Prezados,\n\n"
                   "Segue para análise e o De Acordo a(s) MOs números: {numeros}.\n\n"
@@ -19406,7 +19414,7 @@ DOC_LIB_COLUNAS_LISTA_MO = [
     ("classificacao", "Classificação", 110, False),
     ("emitente", "Emitente", 190, True),
     ("destinatario", "Destinatário", 190, True),
-    ("assunto", "Assunto", 300, False),
+    ("assunto", "Assunto", 300, True),
     ("recebido", "Recebido por", 150, False),
     ("email_enviado", "Enviado e-mail", 150, False),
     ("status", "Status", 160, False),
@@ -19564,8 +19572,8 @@ def doc_lib_empresa_emitente_mo(doc, destinatario=False):
 # ---------------------------------------------------
 def doc_lib_normalizar_mo(dados):
     """Devolve uma cópia dos dados com as datas e horas válidas no padrão de cada campo (Data do envio: dd/mm/aa; Data de
-    Recebido por e do De acordo: dd/mm/aaaa; horas: HH:MM). Valores inválidos ficam como foram digitados (a validação os
-    aponta). Na MO meramente informativa o De acordo é ignorado."""
+    Recebido por e do De acordo: dd/mm/aaaa; horas: HH:MM) e o Assunto em caixa alta. Valores inválidos ficam como foram
+    digitados (a validação os aponta)."""
     novo = dict(dados)
     for chave in DOC_LIB_CAMPOS_MO + DOC_LIB_CAMPOS_DE_ACORDO_MO:
         novo[chave] = str(dados.get(chave) or "").strip()
@@ -19577,6 +19585,7 @@ def doc_lib_normalizar_mo(dados):
     for prefixo in ("emitente", "destinatario"):
         if novo[f"{prefixo}_empresa"] != "OUTRA":
             novo[f"{prefixo}_empresa_outra"] = ""
+    novo["assunto"] = novo["assunto"].upper()                 # o Assunto é sempre gravado e impresso em caixa alta
     novo["informativa"] = 1 if dados.get("informativa") else 0
     return novo
 
@@ -19677,7 +19686,7 @@ def doc_lib_diferencas_bloqueadas_mo(atual, dados, emitido=True):
     diferencas = []
     for chave in DOC_LIB_CAMPOS_MO:
         comparar = str.upper if chave in ("emitente_empresa", "emitente_empresa_outra", "destinatario_empresa",
-                                          "destinatario_empresa_outra") else str
+                                          "destinatario_empresa_outra", "assunto") else str
         if comparar(texto(atual.get(chave))) != comparar(texto(dados.get(chave))):
             diferencas.append(_DOC_LIB_NOMES_CAMPOS_MO[chave])
     if bool(atual.get("informativa")) != bool(dados.get("informativa")):
@@ -20019,10 +20028,17 @@ def _doc_lib_geometria_valores_mo(medir):
         limites = [xs[1] - 2.5, xs[2] - 2.5, X1 - 1.5]
         for campo, x, limite in zip(("empresa", "orgao", "nome"), xs, limites):
             geometria[f"{prefixo}_{campo}"] = (x, limite - x)
+    # 5, 6 e 7: títulos na linha de cima e dados na linha de baixo, a partir do fim de cada título (como em 3.1 a 4.3)
+    xs = [inicio_valor(x_ini, numero, texto) for x_ini, numero, texto in ((X0 + 1.0, "5", "Recebido por:"), (115.0, "6", "Data:"),
+                                                                             (162.5, "7", "Hora:"))]
+    for chave, x, limite in zip(("recebido_nome", "recebido_data", "recebido_hora"), xs, (xs[1] - 2.5, xs[2] - 2.5, X1 - 1.5)):
+        geometria[chave] = (x, limite - x)
+    # 8: o texto começa no fim do título, na linha de baixo, e quebra em quantas linhas forem necessárias
+    x = inicio_valor(X0 + 1.0, "8", "Assunto:")
+    geometria["assunto"] = (x, X1 - 1.5 - x)
     for chave, x_ini, numero, texto, limite in (
-            ("recebido_nome", X0 + 1.0, "5", "Recebido por:", 115.0 - 1.5), ("recebido_data", 115.0, "6", "Data:", 162.5 - 1.5),
-            ("recebido_hora", 162.5, "7", "Hora:", X1 - 1.5), ("de_acordo_nome", X0 + 1.0, "10.1", "Nome:", 107.5 - 1.5),
-            ("de_acordo_data", 107.5, "10.2", "Data:", 152.5 - 1.5), ("de_acordo_hora", 152.5, "10.3", "Hora:", X1 - 1.5)):
+            ("de_acordo_nome", X0 + 1.0, "10.1", "Nome:", 107.5 - 1.5), ("de_acordo_data", 107.5, "10.2", "Data:", 152.5 - 1.5),
+            ("de_acordo_hora", 152.5, "10.3", "Hora:", X1 - 1.5)):
         x = inicio_valor(x_ini, numero, texto)
         geometria[chave] = (x, limite - x)
     return geometria
@@ -20067,6 +20083,8 @@ def doc_lib_gerar_pdf_mo(doc, caminho, gerado_por="", para_envio=False):
     ALTURA_DE_ACORDO = 10.2
     ALTURA_OBSERVACOES_MINIMA = 24.3         # espaço do item 9.1 no formulário de referência (cerca de 5 linhas)
     LIMITE_LINHAS_OBSERVACOES = 40           # acima disso as Observações fluem como a Descrição
+    LARGURA_DESCRICAO = LARGURA - 2.0        # texto da Descrição: margem de 1 mm dos dois lados da régua
+    ESPACO_ANTES_PARAGRAFO = 6 * 25.4 / 72   # 6 pt (em mm) antes de cada parágrafo da Descrição
 
     def nova_pagina():
         pdf.add_page()
@@ -20112,30 +20130,32 @@ def doc_lib_gerar_pdf_mo(doc, caminho, gerado_por="", para_envio=False):
         """x onde começa o valor de um campo cujo rótulo (número + nome) começa em x_ini + 1,0."""
         return x_ini + 1.0 + largura_texto(f"{numero}.", "I", 9.0 * 0.62) + largura_texto(nome, "I", 9.0) + 0.1 + 2.0
 
-    def campo_texto(numero, nome, valor, minimo=10.2):
-        """Linha do formulário com rótulo à esquerda e o valor ao lado (quebrando em várias linhas, inclusive entre
-        páginas, se necessário), terminada por uma régua."""
+    def campo_texto(numero, nome, valor, minimo=11.1, x_valor=None, y_titulo=4.4, y_primeira=4.4):
+        """Linha do formulário com o título à esquerda e o valor (quebrando em várias linhas, inclusive entre páginas, se
+        necessário), terminada por uma régua. Por padrão o valor fica ao lado do título; com y_primeira maior que y_titulo
+        ele fica na linha de baixo, começando em x_valor (fim do título), como em 3.1 a 4.3."""
         valor = (valor or "").strip()
-        x_valor = posicao_valor(numero, nome, X0)
+        if x_valor is None:
+            x_valor = posicao_valor(numero, nome, X0)
         pdf.set_font("DejaVuC", "", 9.5)
         linhas = doc_lib_quebrar_linhas(pdf, X1 - x_valor - 1.5, 4.3, valor) if valor else [""]
-        altura_total = max(minimo, 4.4 + (len(linhas) - 1) * 4.3 + 5.6)
+        altura_total = max(minimo, y_primeira + (len(linhas) - 1) * 4.3 + 2.2)
         garantir(altura_total if altura_total <= PDFMO.Y_MAXIMO - PDFMO.Y_CONTEUDO else minimo)
         y_topo = estado["y"]
-        rotulo(X0 + 1.0, y_topo + 4.4, numero, nome)
+        rotulo(X0 + 1.0, y_topo + y_titulo, numero, nome)
         pdf.set_font("DejaVuC", "", 9.5)
         pdf.set_text_color(0, 0, 0)
-        y_base = y_topo + 4.4
+        y_base = y_topo + y_primeira
         for linha in linhas:
             if y_base + 3.6 > PDFMO.Y_MAXIMO:        # texto maior que o espaço restante: continua na página seguinte
                 nova_pagina()
                 y_topo = estado["y"]
-                y_base = y_topo + 4.4
+                y_base = y_topo + y_primeira
                 pdf.set_font("DejaVuC", "", 9.5)
                 pdf.set_text_color(0, 0, 0)
             pdf.text(x_valor, y_base, linha)
             y_base += 4.3
-        estado["y"] = max(y_topo + minimo, y_base - 4.3 + 5.6)
+        estado["y"] = max(y_topo + minimo, y_base - 4.3 + 2.2)
         regua(estado["y"])
 
     def bloco_parte(y_topo, altura, numero_bloco, nome_bloco, prefixo, dados_bloco):
@@ -20154,6 +20174,9 @@ def doc_lib_gerar_pdf_mo(doc, caminho, gerado_por="", para_envio=False):
 
     geometria = _doc_lib_geometria_valores_mo(largura_texto)
     informativa = bool(doc.get("informativa"))
+
+    def caixa_alta(texto):
+        return str(texto or "").upper()
 
     # ---- 2. Data (do envio da MO; o rótulo fica na metade direita, como no formulário de referência) --------------
     y_topo = estado["y"]
@@ -20190,13 +20213,14 @@ def doc_lib_gerar_pdf_mo(doc, caminho, gerado_por="", para_envio=False):
     y_topo = estado["y"]
     for chave, x_ini, numero, nome in (("recebido_nome", X0 + 1.0, "5", "Recebido por:"), ("recebido_data", 115.0, "6", "Data:"),
                                        ("recebido_hora", 162.5, "7", "Hora:")):
-        rotulo(x_ini, y_topo + 4.2, numero, nome)
-        valor_ajustado(geometria[chave][0], y_topo + 4.2, doc.get(chave), geometria[chave][1])
-    estado["y"] = y_topo + 10.4
+        rotulo(x_ini, y_topo + 4.3, numero, nome)                                  # título na linha de cima
+        valor_ajustado(geometria[chave][0], y_topo + 8.9, doc.get(chave), geometria[chave][1])   # dado na linha de baixo
+    estado["y"] = y_topo + 11.1
     regua(estado["y"])
 
-    # ---- 8. Assunto (previsão de duas linhas; cresce se o texto for maior) -------------------------------------------
-    campo_texto("8", "Assunto:", doc.get("assunto"))
+    # ---- 8. Assunto (sempre em caixa alta; título em cima e texto embaixo, a partir do fim do título; previsão de duas
+    # linhas, cresce se o texto for maior) ------------------------------------------------------------------------------
+    campo_texto("8", "Assunto:", caixa_alta(doc.get("assunto")), x_valor=geometria["assunto"][0], y_titulo=4.3, y_primeira=8.9)
 
     # ---- Final do documento: avisos (no rodapé, abaixo do item 10) ----------------------------------------------------
     avisos = []                              # (texto, negrito)
@@ -20230,23 +20254,51 @@ def doc_lib_gerar_pdf_mo(doc, caminho, gerado_por="", para_envio=False):
     rotulo(X0 + 1.0, y_topo + 4.4, "9", "Descrição:")
     estado["texto"] = y_topo + 9.7           # linha de base da primeira linha de texto
 
-    def fluir(linhas, titulo_continuacao):
-        """Escreve as linhas (largura total) a partir de estado["texto"], mudando de página quando acaba o espaço."""
+    def fluir(itens, titulo_continuacao, largura_texto_linha=LARGURA - 3.0):
+        """Escreve as linhas a partir de estado["texto"], mudando de página quando acaba o espaço. Cada item é
+        (linha, justificar, espaco_antes): 'justificar' distribui a folga da linha entre as palavras (largura_texto_linha) e
+        'espaco_antes' é o espaço (mm) deixado acima do item, no início de um parágrafo."""
         pdf.set_font("DejaVuC", "", 9.5)
         pdf.set_text_color(0, 0, 0)
-        for linha in linhas:
-            if estado["texto"] > PDFMO.Y_MAXIMO - 0.8:
+        for linha, justificar, espaco_antes in itens:
+            if estado["texto"] + espaco_antes > PDFMO.Y_MAXIMO - 0.8:
                 nova_pagina()
                 rotulo(X0 + 1.0, estado["y"] + 4.4, *titulo_continuacao)
                 estado["texto"] = estado["y"] + 9.7
                 pdf.set_font("DejaVuC", "", 9.5)
                 pdf.set_text_color(0, 0, 0)
-            pdf.text(X0 + 1.0, estado["texto"], linha)
+            estado["texto"] += espaco_antes
+            palavras = linha.split()
+            if justificar and len(palavras) > 1:
+                recuo = pdf.get_string_width(" " * (len(linha) - len(linha.lstrip(" "))))
+                larguras = [pdf.get_string_width(palavra) for palavra in palavras]
+                espaco = (largura_texto_linha - recuo - sum(larguras)) / (len(palavras) - 1)
+                x = X0 + 1.0 + recuo
+                for palavra, largura_palavra in zip(palavras, larguras):
+                    pdf.text(x, estado["texto"], palavra)
+                    x += largura_palavra + espaco
+            else:
+                pdf.text(X0 + 1.0, estado["texto"], linha)
             estado["texto"] += 4.3
+
+    def itens_simples(linhas):
+        return [(linha, False, 0.0) for linha in linhas]
+
+    def itens_da_descricao(texto):
+        """Descrição justificada (a última linha de cada parágrafo fica alinhada à esquerda) e 6 pt de espaço antes de cada
+        parágrafo (cada quebra de linha digitada abre um novo parágrafo)."""
+        itens = []
+        for paragrafo in texto.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            pdf.set_font("DejaVuC", "", 9.5)
+            linhas = [linha.rstrip() for linha in doc_lib_quebrar_linhas(pdf, LARGURA_DESCRICAO, 4.3, paragrafo)] \
+                if paragrafo.strip() else [""]
+            for indice, linha in enumerate(linhas):
+                itens.append((linha, indice < len(linhas) - 1, ESPACO_ANTES_PARAGRAFO if indice == 0 else 0.0))
+        return itens
 
     descricao = (doc.get("descricao") or "").strip()
     pdf.set_font("DejaVuC", "", 9.5)
-    fluir(doc_lib_quebrar_linhas(pdf, LARGURA - 3.0, 4.3, descricao) if descricao else [], ("9", "Descrição (continuação):"))
+    fluir(itens_da_descricao(descricao) if descricao else [], ("9", "Descrição (continuação):"), LARGURA_DESCRICAO)
     if observacoes_fluem:                    # Observações muito longas: continuam o texto, em vez de ficar no rodapé
         estado["texto"] += 2.0
         if estado["texto"] > PDFMO.Y_MAXIMO - 6.0:
@@ -20255,7 +20307,7 @@ def doc_lib_gerar_pdf_mo(doc, caminho, gerado_por="", para_envio=False):
         rotulo(X0 + 1.0, estado["texto"], "9.1", "Observações:")
         estado["texto"] += 5.3
         pdf.set_font("DejaVuC", "", 9.5)
-        fluir(doc_lib_quebrar_linhas(pdf, LARGURA - 3.0, 4.3, observacoes), ("9.1", "Observações (continuação):"))
+        fluir(itens_simples(doc_lib_quebrar_linhas(pdf, LARGURA - 3.0, 4.3, observacoes)), ("9.1", "Observações (continuação):"))
     # se o texto invadiu o espaço do rodapé desta página, o rodapé (9.1 e 10) vai para uma página própria
     if estado["texto"] - 4.3 + 1.2 > y_observacoes_topo - 0.5:
         nova_pagina()
@@ -20385,6 +20437,7 @@ class JanelaListaMO(JanelaListaAteie):
     ARTIGO = "a"
     PERMITE_AGRUPAR = False
     COLUNAS = DOC_LIB_COLUNAS_LISTA_MO
+    COLUNAS_COM_QUEBRA = ("assunto",)
 
     @staticmethod
     def _listar():
@@ -20626,9 +20679,11 @@ class JanelaMO:
         self._alvos["recebido_hora"] = (self.ent_recebido_hora, rot)
 
         # 8. Assunto (duas linhas) / 9. Descrição (até 30 páginas) / 9.1 Observações (opcional, sem texto padrão)
-        self.txt_assunto = self._campo_texto("assunto", "Assunto", 2)
+        self.txt_assunto = self._campo_texto("assunto", "Assunto", 2, maiusculas=True)
         self.txt_descricao = self._campo_texto("descricao", "Descrição", 16, barra=True,
-                                               dica=f"(texto livre, com previsão de até\n{DOC_LIB_PAGINAS_DESCRICAO_MO} páginas)")
+                                               dica=f"(texto livre, com previsão de até\n{DOC_LIB_PAGINAS_DESCRICAO_MO} páginas; "
+                                                    f"justificado no documento, com 6 pt antes de cada parágrafo)")
+        self.txt_descricao.configure(spacing1=DOC_LIB_ESPACO_ANTES_PARAGRAFO)    # 6 pt antes de cada parágrafo
         self.txt_observacoes = self._campo_texto("observacoes", "Observações", 4, opcional=True, barra=True,
                                                  separador=False)
         self._separador()
@@ -21008,7 +21063,7 @@ class JanelaMO:
             doc_lib_definir_entrada(entrada, doc[chave] or "")
         for widget, chave in ((self.txt_assunto, "assunto"), (self.txt_descricao, "descricao"),
                               (self.txt_observacoes, "observacoes")):
-            self._definir_texto(widget, doc[chave])
+            self._definir_texto(widget, (doc[chave] or "").upper() if chave == "assunto" else doc[chave])
         self.var_informativa.set(1 if doc["informativa"] else 0)
         self._atualizar_numero_provisorio()
 
