@@ -13346,8 +13346,9 @@ def doc_lib_copiar_para_downloads(caminho):
 
 def doc_lib_registrar_envio(ateie_id, numeros, remetente, destinatarios, copias, assunto, anexo, metodo, usuario):
     """Registra o e-mail enviado (quem, quando, de qual remetente, para quem, com cópia para quem, qual PDF) e marca
-    cada ATEIE enviado como "Sim, em dd/mm/aaaa" na coluna "Enviado e-mail" do GRID ATEIE. Não altera a revisão do
-    documento (o PDF anexado continua valendo e a janela do ATEIE aberta não vira "alterada por outro usuário")."""
+    cada ATEIE enviado como "Sim, em dd/mm/aaaa" na coluna "Enviado e-mail" do GRID ATEIE. Um ATEIE que já consta como
+    enviado mantém a data original (o envio fica só no histórico). Não altera a revisão do documento (o PDF anexado
+    continua valendo e a janela do ATEIE aberta não vira "alterada por outro usuário")."""
     agora = datetime.now()
     conexao = doc_lib_conectar()
     try:
@@ -13357,7 +13358,8 @@ def doc_lib_registrar_envio(ateie_id, numeros, remetente, destinatarios, copias,
                          anexo, metodo, usuario, agora.strftime("%d/%m/%Y - %H:%Mh")))
         conexao.executemany(
             "UPDATE doclib_ateie_intervencoes SET email_enviado_em = ?, email_enviado_por = ?, "
-            "email_enviado_origem = 'Sistema' WHERE ateie_id = ? AND numero = ?",
+            "email_enviado_origem = 'Sistema' WHERE ateie_id = ? AND numero = ? "
+            "AND COALESCE(email_enviado_em, '') = ''",
             [(agora.strftime("%d/%m/%Y"), usuario, ateie_id, numero) for numero in numeros])
         conexao.commit()
     finally:
@@ -13375,11 +13377,30 @@ def doc_lib_texto_email_enviado(data):
     return f"Sim, em {data}" if data else "Não"
 
 
+def doc_lib_emails_ja_enviados(ateie_id, numeros):
+    """{número: 'dd/mm/aaaa'} dos ATEIE do documento (entre 'numeros') que já constam como "Enviado e-mail: Sim". Esses
+    ATEIE não podem ser encaminhados nem marcados como enviados de novo."""
+    numeros = list(numeros)
+    if not numeros:
+        return {}
+    conexao = doc_lib_conectar()
+    try:
+        linhas = conexao.execute(
+            f"SELECT numero, email_enviado_em FROM doclib_ateie_intervencoes WHERE ateie_id = ? "
+            f"AND numero IN ({', '.join('?' * len(numeros))}) AND COALESCE(email_enviado_em, '') <> ''",
+            [ateie_id] + numeros).fetchall()
+    finally:
+        conexao.close()
+    return dict(linhas)
+
+
 def doc_lib_definir_email_enviado(selecao, data, usuario):
     """Marcação manual da coluna "Enviado e-mail" do GRID ATEIE (usada quando o envio pelo sistema falhou e o e-mail foi
     enviado à mão). 'selecao' é a lista de (id do documento, linha da tabela); 'data' é dd/mm/aaaa para marcar
-    "Sim, em dd/mm/aaaa" ou None para voltar a "Não". Marcar como enviado só vale para ATEIE com documento gerado e não
-    cancelado (DocLibRegra se algum não puder). Não altera a revisão do documento. Devolve a quantidade de ATEIE."""
+    "Sim, em dd/mm/aaaa" ou None para voltar a "Não". Marcar como enviado só vale para ATEIE com documento gerado, não
+    cancelado e que ainda NÃO conste como enviado: um ATEIE com "Sim" não pode ser marcado de novo (a data original
+    permanece); para corrigir um registro errado é preciso voltá-lo a "Não" (DocLibRegra se algum não puder). Não altera
+    a revisão do documento. Devolve a quantidade de ATEIE."""
     pares = list(dict.fromkeys((int(ateie_id), int(ordem)) for ateie_id, ordem in selecao))
     if not pares:
         raise DocLibRegra("Selecione pelo menos um ATEIE.")
@@ -13387,17 +13408,25 @@ def doc_lib_definir_email_enviado(selecao, data, usuario):
     cursor = conexao.cursor()
     try:
         cursor.execute("BEGIN IMMEDIATE")
+        ja_enviados = []
         for ateie_id, ordem in pares:
-            cursor.execute("SELECT numero, status FROM doclib_ateie_intervencoes WHERE ateie_id = ? AND ordem = ?",
-                           (ateie_id, ordem))
+            cursor.execute("SELECT numero, status, email_enviado_em FROM doclib_ateie_intervencoes "
+                           "WHERE ateie_id = ? AND ordem = ?", (ateie_id, ordem))
             linha = cursor.fetchone()
             if linha is None:
                 raise DocLibConflito("Um dos ATEIEs selecionados não existe mais ou foi agrupado por outro usuário.\n\n"
                                      "Feche e abra novamente o GRID ATEIE para ver a situação atual.")
-            numero, status = linha
+            numero, status, enviado_em = linha
             if data and status in DOC_LIB_STATUS_SEM_ENVIO_EMAIL:
                 raise DocLibRegra(f"O ATEIE {numero} está com status '{status}'. Só é possível marcar o e-mail como "
                                   f"enviado depois que o documento é gerado, e não para ATEIE cancelado.")
+            if data and enviado_em:
+                ja_enviados.append(f"{numero} ({doc_lib_texto_email_enviado(enviado_em)})")
+        if ja_enviados:
+            raise DocLibRegra("Já consta(m) como e-mail enviado: " + ", ".join(ja_enviados) + ".\n\n"
+                              "Um ATEIE com 'Enviado e-mail: Sim' não pode ser marcado como enviado novamente. Para "
+                              "marcar, selecione somente ATEIE com 'Não'. Se o registro estiver errado, use 'Voltar "
+                              "para Não'.")
         for ateie_id, ordem in pares:
             cursor.execute("UPDATE doclib_ateie_intervencoes SET email_enviado_em = ?, email_enviado_por = ?, "
                            "email_enviado_origem = ? WHERE ateie_id = ? AND ordem = ?",
@@ -14744,7 +14773,10 @@ class JanelaListaAteie:
         por_chave = {(registro["ateie_id"], registro["ordem"]): registro for registro in self.registros}
         escolhidos = sorted((por_chave[chave] for chave in selecao if chave in por_chave),
                             key=lambda registro: (registro["ano"], registro["sequencia"]))
-        resposta = doc_lib_dialogo_email_manual(self.janela, [registro["numero"] for registro in escolhidos])
+        resposta = doc_lib_dialogo_email_manual(
+            self.janela, [registro["numero"] for registro in escolhidos],
+            [f"{registro['numero']} ({registro['email_enviado']})" for registro in escolhidos
+             if registro["email_enviado"] != "Não"])
         if resposta is None:
             return
         try:
@@ -14817,9 +14849,11 @@ def doc_lib_escolher_ateie(parent):
     return janela.resultado
 
 
-def doc_lib_dialogo_email_manual(parent, numeros):
+def doc_lib_dialogo_email_manual(parent, numeros, ja_enviados=()):
     """Janela do botão "Marcar e-mail enviado" do GRID ATEIE: pede a data em que o e-mail foi enviado manualmente
     (padrão: hoje) para gravar "Sim, em dd/mm/aaaa", ou permite devolver os ATEIE a "Não".
+    'ja_enviados' = textos "0001/26 (Sim, em dd/mm/aaaa)" dos ATEIE selecionados que já constam como enviados: com
+    algum deles não é possível marcar como enviado (só voltar a "Não", para corrigir um registro errado).
     Devolve {"data": "dd/mm/aaaa"} para marcar como enviado, {"data": None} para voltar a "Não", ou None se cancelar."""
     resultado = {"valor": None}
     janela = Toplevel(parent)
@@ -14832,15 +14866,23 @@ def doc_lib_dialogo_email_manual(parent, numeros):
     Label(cartao, text="ATEIE(s) selecionado(s):", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")
           ).place(x=20, y=14)
     Label(cartao, text=doc_lib_texto_numeros(numeros), bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"),
-          wraplength=560, justify="left", anchor="w").place(x=20, y=36)
-    Label(cartao, text="Data do envio do e-mail:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")
-          ).place(x=20, y=84)
+          wraplength=530, justify="left", anchor="w").place(x=20, y=36)
     entrada = criar_entrada_sga(cartao, width=12)
-    entrada.place(x=20, y=108, width=130, height=30)
-    entrada.insert(0, datetime.now().strftime("%d/%m/%Y"))
-    IconeCalendarioDocLib(cartao, lambda: doc_lib_selecionar_data(janela, entrada)).place(x=160, y=111)
+    if ja_enviados:
+        Label(cartao, text="Já consta(m) como e-mail enviado: " + ", ".join(ja_enviados) + ".\nUm ATEIE com 'Enviado "
+                           "e-mail: Sim' não pode ser marcado como enviado novamente. Se o registro estiver errado, use "
+                           "'Voltar para Não'.", bg=SGA_CARD, fg=SGA_VERMELHO, font=(SGA_FONTE, 9, "bold"),
+              wraplength=530, justify="left", anchor="w").place(x=20, y=80)
+    else:
+        Label(cartao, text="Data do envio do e-mail:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")
+              ).place(x=20, y=84)
+        entrada.place(x=20, y=108, width=130, height=30)
+        entrada.insert(0, datetime.now().strftime("%d/%m/%Y"))
+        IconeCalendarioDocLib(cartao, lambda: doc_lib_selecionar_data(janela, entrada)).place(x=160, y=111)
 
     def marcar_sim(evento=None):
+        if ja_enviados:
+            return
         data = doc_lib_normalizar_data(entrada.get())
         if not data:
             messagebox.showwarning("Marcar e-mail enviado", "Informe a data do envio no formato dd/mm/aaaa.",
@@ -14859,8 +14901,10 @@ def doc_lib_dialogo_email_manual(parent, numeros):
             resultado["valor"] = {"data": None}
             janela.destroy()
 
-    doc_lib_criar_botao(janela, "Marcar como enviado", marcar_sim, "sucesso"
-                        ).place(relx=0.5, x=-280, rely=1.0, y=-22, anchor="sw", width=180, height=42)
+    botao_sim = doc_lib_criar_botao(janela, "Marcar como enviado", marcar_sim, "sucesso")
+    botao_sim.place(relx=0.5, x=-280, rely=1.0, y=-22, anchor="sw", width=180, height=42)
+    if ja_enviados:
+        doc_lib_estado_botao(botao_sim, False)
     doc_lib_criar_botao(janela, "Voltar para 'Não'", marcar_nao, "aviso"
                         ).place(relx=0.5, x=-90, rely=1.0, y=-22, anchor="sw", width=180, height=42)
     doc_lib_criar_botao(janela, "Cancelar", janela.destroy, "neutro"
@@ -14871,7 +14915,8 @@ def doc_lib_dialogo_email_manual(parent, numeros):
         janela.grab_set()
     except TclError:
         pass
-    entrada.focus_set()
+    if not ja_enviados:
+        entrada.focus_set()
     janela.wait_window()
     return resultado["valor"]
 
@@ -16434,15 +16479,34 @@ class JanelaAteie:
                                    "Este ATEIE foi alterado por outro usuário depois de aberto nesta janela.\n\n"
                                    "Feche-o e abra-o novamente (GRID ATEIE) antes de encaminhá-lo.", parent=self.janela)
             return
-        aguardando = [item["numero"] for item in doc["intervencoes"]
-                      if item.get("numero") and item.get("status") == STATUS_ATEIE_AGUARDA_DE_ACORDO]
+        aguardando_de_acordo = [item["numero"] for item in doc["intervencoes"]
+                                if item.get("numero") and item.get("status") == STATUS_ATEIE_AGUARDA_DE_ACORDO]
+        # ATEIE que já constam como "Enviado e-mail: Sim" não são encaminhados novamente
+        enviados = {item["numero"]: item["email_enviado_em"] for item in doc["intervencoes"]
+                    if item.get("numero") and item.get("email_enviado_em")}
+        aguardando = [numero for numero in aguardando_de_acordo if numero not in enviados]
+        ja_encaminhados = [numero for numero in aguardando_de_acordo if numero in enviados]
         if not aguardando:
+            if ja_encaminhados:
+                messagebox.showwarning(
+                    titulo, "O e-mail deste ATEIE já foi enviado e ele não pode ser encaminhado novamente.\n\n"
+                            + "\n".join(f"• {numero}: {doc_lib_texto_email_enviado(enviados[numero])}"
+                                        for numero in ja_encaminhados)
+                            + "\n\nSe o registro estiver errado, volte-o para 'Não' no GRID ATEIE (botão 'Marcar "
+                              "e-mail enviado').", parent=self.janela)
+                return
             situacao = "\n".join(f"• {item['numero']}: {item['status']}" for item in doc["intervencoes"]
                                  if item.get("numero"))
             dica = "" if doc.get("emitido") else "\n\nUse 'Gerar Documento' para emitir o ATEIE."
             messagebox.showwarning(titulo, f"O envio só é permitido para ATEIE com status "
                                            f"'{STATUS_ATEIE_AGUARDA_DE_ACORDO}'.\n\nSituação atual:\n{situacao}{dica}",
                                    parent=self.janela)
+            return
+        if ja_encaminhados and not messagebox.askyesno(
+                titulo, "Já foram encaminhados e não serão incluídos neste envio:\n\n"
+                        + "\n".join(f"• {numero}: {doc_lib_texto_email_enviado(enviados[numero])}"
+                                    for numero in ja_encaminhados)
+                        + f"\n\nEncaminhar somente {doc_lib_texto_numeros(aguardando)}?", parent=self.janela):
             return
         usuario = obter_nome_usuario_logado()
 
@@ -16469,6 +16533,18 @@ class JanelaAteie:
         if not envio:
             return
         remetente, destinatarios, copias = envio["remetente"], envio["destinatarios"], envio["copias"]
+        try:                  # conferência final: outro usuário pode ter encaminhado enquanto esta janela estava aberta
+            agora_enviados = doc_lib_emails_ja_enviados(doc["id"], aguardando)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível conferir o envio dos ATEIE: {erro}", parent=self.janela)
+            return
+        if agora_enviados:
+            messagebox.showwarning(
+                titulo, "O e-mail NÃO foi enviado: o(s) ATEIE abaixo foi(ram) encaminhado(s) por outro usuário "
+                        "enquanto esta janela estava aberta.\n\n"
+                        + "\n".join(f"• {numero}: {doc_lib_texto_email_enviado(data)}"
+                                    for numero, data in agora_enviados.items()), parent=self.janela)
+            return
 
         assunto = f"{EMAIL_ATEIE_ASSUNTO}: {doc_lib_texto_numeros(aguardando)}"
         corpo = EMAIL_ATEIE_TEXTO.format(numeros=doc_lib_texto_numeros(aguardando))
