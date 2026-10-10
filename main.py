@@ -1,4 +1,4 @@
-# Código atualizado em 09-10-26 - 1626 - Click_25: ATEIE Reservado, Agrupar ATEIEs, Encaminhar ATEIE e cores dos status
+# Código atualizado em 10-10-26 - Click_25: Encaminhar ATEIE (remetente à escolha e e-mails em cópia), cadastro de e-mails com edição, coluna Enviado e-mail no GRID ATEIE e hora automática em Pessoal Notificado
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -12001,9 +12001,12 @@ DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "EDP", "ENGIE", "CELEO_REDES", "EN
 DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
 
 # ---- Encaminhar ATEIE (e-mail) -------------------------------------------------------------------------------------
-# Remetente fixo. Como o e-mail é enviado (SMTP ou Outlook) é definido no arquivo local config_email_ateie.json (modelo:
-# config_email_ateie.exemplo.json). Esse arquivo NÃO vai para o GitHub porque pode conter senha.
-EMAIL_ATEIE_REMETENTE = "nivaldo.maganha@hotmail.com"
+# Remetentes (emitentes) do e-mail: o usuário escolhe um deles na janela do Encaminhar ATEIE. O primeiro é o padrão.
+# Para incluir outro emitente basta acrescentá-lo à lista. Como o e-mail é enviado (SMTP ou Outlook) é definido no
+# arquivo local config_email_ateie.json (modelo: config_email_ateie.exemplo.json). Esse arquivo NÃO vai para o GitHub
+# porque pode conter senha.
+EMAIL_ATEIE_REMETENTES = ["nmaganha@alupar.com.br", "jbarros@alupar.com.br"]
+EMAIL_ATEIE_REMETENTE = EMAIL_ATEIE_REMETENTES[0]          # remetente padrão
 ARQUIVO_CONFIG_EMAIL_ATEIE = os.path.join(PASTA_BASE, "config_email_ateie.json")
 # Pasta onde o botão Encaminhar ATEIE guarda uma cópia do PDF que será anexado ao e-mail (para enviar manualmente se
 # o envio falhar). None = pasta Downloads do usuário no Windows. Para usar outra, informe o caminho, por exemplo
@@ -12015,7 +12018,7 @@ EMAIL_ATEIE_TEXTO = ("Prezados,\n\n"
                      "Atenciosamente,\n"
                      "COG-ALUPAR")
 # Destinatários cadastrados na primeira vez em que o banco é preparado; depois disso a lista vale a do banco, que pode
-# receber mais e-mails por empresa na tela "Cadastrar e-mails" (botão Encaminhar ATEIE).
+# receber mais e-mails por empresa (inclusive os e-mails em cópia) na tela "Cadastrar e-mails" (botão Encaminhar ATEIE).
 # (Empresa Solicitante, destinatário a escolher na hora do envio - "" quando não há escolha, e-mail)
 DOC_LIB_DESTINATARIOS_INICIAIS = [
     ("FOZ DO RIO CLARO ENERGIA SA", "CELEO_REDES", "nivaldo.maganha@gmail.com"),
@@ -12334,6 +12337,26 @@ def garantir_banco_doc_lib():
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie_pdfs", "revisao_final", "INTEGER")
     # tipo do PDF: vazio = gerado pelo botão Gerar Documento; "envio" = PDF limpo anexado ao e-mail do Encaminhar ATEIE
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie_pdfs", "tipo", "TEXT")
+    # destinatários: 'para' (destinatário) ou 'copia' (e-mail enviado com cópia); alteração feita em "Editar selecionado"
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie_destinatarios", "tipo", "TEXT NOT NULL DEFAULT 'para'")
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie_destinatarios", "alterado_por", "TEXT")
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie_destinatarios", "alterado_em", "TEXT")
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie_emails", "copias", "TEXT")      # e-mails enviados com cópia
+    # coluna "Enviado e-mail" do GRID ATEIE: data do envio de cada ATEIE (vazio = "Não"), quem registrou e a origem
+    # ("Sistema" = botão Encaminhar ATEIE; "Manual" = marcado no GRID quando o envio automático falhou)
+    cursor.execute("PRAGMA table_info(doclib_ateie_intervencoes)")
+    email_enviado_existia = any(linha[1] == "email_enviado_em" for linha in cursor.fetchall())
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie_intervencoes", "email_enviado_em", "TEXT")
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie_intervencoes", "email_enviado_por", "TEXT")
+    _adicionar_coluna_se_necessario(cursor, "doclib_ateie_intervencoes", "email_enviado_origem", "TEXT")
+    if not email_enviado_existia:          # ATEIEs já encaminhados antes desta coluna passam a constar como enviados
+        for numeros, enviado_em, enviado_por in cursor.execute(
+                "SELECT numeros, enviado_em, enviado_por FROM doclib_ateie_emails ORDER BY id").fetchall():
+            data = str(enviado_em or "").split(" - ")[0].strip()
+            for numero in (parte.strip() for parte in str(numeros or "").split(",")):
+                if numero and data:
+                    cursor.execute("UPDATE doclib_ateie_intervencoes SET email_enviado_em = ?, email_enviado_por = ?, "
+                                   "email_enviado_origem = 'Sistema' WHERE numero = ?", (data, enviado_por, numero))
 
     conexao.commit()
     conexao.close()
@@ -12794,16 +12817,20 @@ def doc_lib_listar_ateie():
         cursor.execute(
             "SELECT i.ateie_id, i.ordem, i.numero, i.ano, i.sequencia, i.status, a.equipamento, a.empresa, "
             "a.empresa_outra, a.local_servico, a.servicos, a.solicitado_por, i.prev_data_inicio, "
-            "i.prev_hora_inicio, i.prev_data_termino, i.prev_hora_termino FROM doclib_ateie_intervencoes i "
+            "i.prev_hora_inicio, i.prev_data_termino, i.prev_hora_termino, i.email_enviado_em "
+            "FROM doclib_ateie_intervencoes i "
             "JOIN doclib_ateie a ON a.id = i.ateie_id ORDER BY i.ano DESC, i.sequencia DESC")
         resultado = []
         for (ateie_id, ordem, numero, ano, sequencia, status, equipamento, empresa, empresa_outra, local,
-             servicos, solicitado_por, data_inicio, hora_inicio, data_termino, hora_termino) in cursor.fetchall():
+             servicos, solicitado_por, data_inicio, hora_inicio, data_termino, hora_termino,
+             email_enviado_em) in cursor.fetchall():
+            enviado = doc_lib_texto_email_enviado(email_enviado_em)       # "Não" ou "Sim, em dd/mm/aaaa"
             if status == STATUS_ATEIE_RESERVADO:     # só o número e a expressão ATEIE RESERVADO; o resto em branco
                 resultado.append({
                     "ateie_id": ateie_id, "ordem": ordem, "numero": numero, "ano": ano, "sequencia": sequencia,
                     "status": status, "equipamento": DOC_LIB_TEXTO_EQUIPAMENTO_RESERVADO, "empresa": "",
-                    "solicitante": "", "prog_inicio": "", "prog_termino": "", "local": "", "servicos": ""})
+                    "solicitante": "", "prog_inicio": "", "prog_termino": "", "local": "", "servicos": "",
+                    "email_enviado": enviado})
                 continue
             resultado.append({
                 "ateie_id": ateie_id, "ordem": ordem, "numero": numero, "ano": ano, "sequencia": sequencia,
@@ -12811,6 +12838,7 @@ def doc_lib_listar_ateie():
                 "empresa": empresa_outra if empresa == "OUTRA" and empresa_outra else empresa,
                 "solicitante": solicitado_por, "prog_inicio": f"{data_inicio} {hora_inicio}",
                 "prog_termino": f"{data_termino} {hora_termino}", "local": local or "", "servicos": servicos or "",
+                "email_enviado": enviado,
             })
         return resultado
     finally:
@@ -13029,58 +13057,103 @@ def doc_lib_empresa_do_documento(doc):
     return " ".join(str(empresa or "").split()).upper()
 
 
+DOC_LIB_TIPOS_DESTINATARIO = {"para": "Para", "copia": "Cópia (Cc)"}     # valor gravado -> texto exibido
+
+
 def doc_lib_listar_destinatarios():
-    """Todos os e-mails cadastrados: [{id, empresa, escolha, email, incluido_por, incluido_em}]. Dentro de cada
-    empresa, na ordem do cadastro (é a ordem em que as opções de destinatário aparecem para escolha)."""
+    """Todos os e-mails cadastrados: [{id, empresa, escolha, email, tipo, incluido_por, incluido_em, alterado_por,
+    alterado_em}]. Dentro de cada empresa, na ordem do cadastro (é a ordem em que as opções de destinatário aparecem
+    para escolha). tipo: 'para' (destinatário) ou 'copia' (recebe o e-mail com cópia)."""
     conexao = doc_lib_conectar()
     try:
-        linhas = conexao.execute("SELECT id, empresa, escolha, email, incluido_por, incluido_em "
-                                 "FROM doclib_ateie_destinatarios ORDER BY empresa, id").fetchall()
+        linhas = conexao.execute("SELECT id, empresa, escolha, email, tipo, incluido_por, incluido_em, alterado_por, "
+                                 "alterado_em FROM doclib_ateie_destinatarios ORDER BY empresa, id").fetchall()
     finally:
         conexao.close()
-    return [dict(zip(("id", "empresa", "escolha", "email", "incluido_por", "incluido_em"), linha))
-            for linha in linhas]
+    return [dict(zip(("id", "empresa", "escolha", "email", "tipo", "incluido_por", "incluido_em", "alterado_por",
+                      "alterado_em"), linha)) for linha in linhas]
 
 
 def doc_lib_destinatarios_da_empresa(empresa):
-    """Destinatários cadastrados para a Empresa Solicitante: (opções, fixos, por_opcao).
-      opções ..... opções que o usuário escolhe na hora do envio (vazio quando a empresa não tem escolha)
-      fixos ...... e-mails que valem em qualquer escolha (cadastrados sem opção)
-      por_opcao .. {opção: [e-mails]}"""
+    """Destinatários cadastrados para a Empresa Solicitante: (opções, para, copia).
+      opções ... opções que o usuário escolhe na hora do envio (vazio quando a empresa não tem escolha)
+      para ..... {opção: [e-mails]} dos destinatários; a chave "" guarda os e-mails que valem em qualquer escolha
+      copia .... {opção: [e-mails]} dos e-mails que recebem o ATEIE com cópia, no mesmo formato"""
     chave = " ".join(str(empresa or "").split()).upper()
-    opcoes, fixos, por_opcao = [], [], {}
+    opcoes, para, copia = [], {}, {}
     for item in doc_lib_listar_destinatarios():
         if item["empresa"].upper() != chave:
             continue
-        if item["escolha"]:
-            if item["escolha"] not in por_opcao:
-                opcoes.append(item["escolha"])
-            por_opcao.setdefault(item["escolha"], []).append(item["email"])
-        else:
-            fixos.append(item["email"])
-    return opcoes, fixos, por_opcao
+        if item["escolha"] and item["escolha"] not in opcoes:
+            opcoes.append(item["escolha"])
+        destino = copia if item["tipo"] == "copia" else para
+        destino.setdefault(item["escolha"], []).append(item["email"])
+    return opcoes, para, copia
 
 
-def doc_lib_incluir_destinatario(empresa, escolha, email, usuario):
-    """Cadastra mais um e-mail para a empresa (e opção). Vários e-mails por empresa/opção são permitidos."""
+def doc_lib_enderecos_do_envio(para, copia, opcao):
+    """(Para, Cc) do envio, a partir do resultado de doc_lib_destinatarios_da_empresa e da opção escolhida: os e-mails
+    da opção mais os que valem em qualquer escolha, sem repetição (quem já está em Para não repete em Cc)."""
+    def unicos(lista):
+        return list(dict.fromkeys(email.lower() for email in lista))
+
+    destinatarios = unicos((para.get(opcao, []) if opcao else []) + para.get("", []))
+    em_copia = [email for email in unicos((copia.get(opcao, []) if opcao else []) + copia.get("", []))
+                if email not in destinatarios]
+    return destinatarios, em_copia
+
+
+def _doc_lib_dados_destinatario(empresa, escolha, email, tipo):
+    """Normaliza e valida os dados de um destinatário. Devolve (empresa, escolha, e-mail, tipo)."""
     empresa = " ".join(str(empresa or "").split()).upper()
     escolha = " ".join(str(escolha or "").split())
     if escolha == DOC_LIB_TEXTO_SEMPRE:
         escolha = ""
     email = str(email or "").strip().lower()
+    tipo = "copia" if str(tipo or "").strip().lower() == "copia" else "para"
     if not empresa:
         raise DocLibRegra("Informe a empresa.")
     if not doc_lib_validar_email(email):
         raise DocLibRegra(f"E-mail inválido: {email or '(vazio)'}")
+    return empresa, escolha, email, tipo
+
+
+def doc_lib_incluir_destinatario(empresa, escolha, email, usuario, tipo="para"):
+    """Cadastra mais um e-mail para a empresa (e opção). Vários e-mails por empresa/opção são permitidos. tipo: 'para'
+    ou 'copia' (o e-mail recebe o ATEIE com cópia)."""
+    empresa, escolha, email, tipo = _doc_lib_dados_destinatario(empresa, escolha, email, tipo)
     conexao = doc_lib_conectar()
     try:
         igual = conexao.execute("SELECT 1 FROM doclib_ateie_destinatarios WHERE UPPER(empresa) = ? AND escolha = ? "
                                 "AND LOWER(email) = ?", (empresa, escolha, email)).fetchone()
         if igual:
             raise DocLibRegra("Este e-mail já está cadastrado para essa empresa e opção.")
-        conexao.execute("INSERT INTO doclib_ateie_destinatarios (empresa, escolha, email, incluido_por, incluido_em) "
-                        "VALUES (?, ?, ?, ?, ?)",
-                        (empresa, escolha, email, usuario, datetime.now().strftime("%d/%m/%Y - %H:%Mh")))
+        conexao.execute("INSERT INTO doclib_ateie_destinatarios (empresa, escolha, email, tipo, incluido_por, "
+                        "incluido_em) VALUES (?, ?, ?, ?, ?, ?)",
+                        (empresa, escolha, email, tipo, usuario, datetime.now().strftime("%d/%m/%Y - %H:%Mh")))
+        conexao.commit()
+    finally:
+        conexao.close()
+
+
+def doc_lib_editar_destinatario(destinatario_id, empresa, escolha, email, usuario, tipo="para"):
+    """Altera o cadastro de um e-mail (empresa, opção, e-mail e tipo) sem precisar removê-lo e incluí-lo de novo.
+    Lança DocLibRegra se os dados forem inválidos, se o e-mail já existir para a empresa e opção ou se o cadastro
+    foi removido por outro usuário."""
+    empresa, escolha, email, tipo = _doc_lib_dados_destinatario(empresa, escolha, email, tipo)
+    conexao = doc_lib_conectar()
+    try:
+        if conexao.execute("SELECT 1 FROM doclib_ateie_destinatarios WHERE id = ?", (destinatario_id,)).fetchone() \
+                is None:
+            raise DocLibRegra("Este e-mail foi removido por outro usuário. Atualize a lista.")
+        igual = conexao.execute("SELECT 1 FROM doclib_ateie_destinatarios WHERE UPPER(empresa) = ? AND escolha = ? "
+                                "AND LOWER(email) = ? AND id <> ?", (empresa, escolha, email, destinatario_id)).fetchone()
+        if igual:
+            raise DocLibRegra("Este e-mail já está cadastrado para essa empresa e opção.")
+        conexao.execute("UPDATE doclib_ateie_destinatarios SET empresa = ?, escolha = ?, email = ?, tipo = ?, "
+                        "alterado_por = ?, alterado_em = ? WHERE id = ?",
+                        (empresa, escolha, email, tipo, usuario, datetime.now().strftime("%d/%m/%Y - %H:%Mh"),
+                         destinatario_id))
         conexao.commit()
     finally:
         conexao.close()
@@ -13112,7 +13185,16 @@ def doc_lib_config_email():
                               f"{ARQUIVO_CONFIG_EMAIL_ATEIE}\n\n{erro}")
 
 
-def _doc_lib_enviar_smtp(destinatarios, assunto, corpo, anexo, config):
+def _doc_lib_config_do_remetente(config, remetente):
+    """Configuração SMTP do remetente: as chaves smtp_* de config["remetentes"][<e-mail do remetente>], quando existem
+    (cada emitente pode ter usuário e senha próprios), valem no lugar das chaves gerais do arquivo."""
+    especificas = {str(chave).strip().lower(): valor for chave, valor in (config.get("remetentes") or {}).items()}
+    especifica = especificas.get(str(remetente).strip().lower())
+    return {**config, **especifica} if isinstance(especifica, dict) else config
+
+
+def _doc_lib_enviar_smtp(remetente, destinatarios, copias, assunto, corpo, anexo, config):
+    config = _doc_lib_config_do_remetente(config, remetente)
     servidor = str(config.get("smtp_servidor") or "").strip()
     if not servidor:
         raise DocLibEmailErro("Informe smtp_servidor no arquivo config_email_ateie.json.")
@@ -13120,8 +13202,10 @@ def _doc_lib_enviar_smtp(destinatarios, assunto, corpo, anexo, config):
     seguranca = str(config.get("smtp_seguranca") or "starttls").lower()
     timeout = int(config.get("smtp_timeout") or 30)
     mensagem = EmailMessage()
-    mensagem["From"] = EMAIL_ATEIE_REMETENTE
+    mensagem["From"] = remetente
     mensagem["To"] = ", ".join(destinatarios)
+    if copias:
+        mensagem["Cc"] = ", ".join(copias)          # send_message envia também para os endereços do Cc
     mensagem["Subject"] = assunto
     mensagem.set_content(corpo)
     with open(anexo, "rb") as arquivo:
@@ -13145,8 +13229,8 @@ def _doc_lib_enviar_smtp(destinatarios, assunto, corpo, anexo, config):
         raise DocLibEmailErro(f"Falha no envio por SMTP ({servidor}:{porta}):\n{erro}")
 
 
-def _doc_lib_enviar_outlook(destinatarios, assunto, corpo, anexo):
-    """Envia pelo Outlook instalado no computador (Windows), usando a conta do remetente."""
+def _doc_lib_enviar_outlook(remetente, destinatarios, copias, assunto, corpo, anexo):
+    """Envia pelo Outlook instalado no computador (Windows), usando a conta do remetente escolhido."""
     try:
         import win32com.client
     except ImportError:
@@ -13156,11 +13240,13 @@ def _doc_lib_enviar_outlook(destinatarios, assunto, corpo, anexo):
         outlook = win32com.client.Dispatch("Outlook.Application")
         contas = outlook.Session.Accounts
         conta = next((contas.Item(i) for i in range(1, contas.Count + 1)
-                      if str(contas.Item(i).SmtpAddress).strip().lower() == EMAIL_ATEIE_REMETENTE.lower()), None)
+                      if str(contas.Item(i).SmtpAddress).strip().lower() == remetente.lower()), None)
         if conta is None:
-            raise DocLibEmailErro(f"A conta {EMAIL_ATEIE_REMETENTE} não está configurada no Outlook deste computador.")
+            raise DocLibEmailErro(f"A conta {remetente} não está configurada no Outlook deste computador.")
         item = outlook.CreateItem(0)
         item.To = "; ".join(destinatarios)
+        if copias:
+            item.CC = "; ".join(copias)
         item.Subject = assunto
         item.Body = corpo
         item.Attachments.Add(os.path.abspath(anexo))
@@ -13172,18 +13258,21 @@ def _doc_lib_enviar_outlook(destinatarios, assunto, corpo, anexo):
         raise DocLibEmailErro(f"Falha no envio pelo Outlook:\n{erro}")
 
 
-def doc_lib_enviar_email(destinatarios, assunto, corpo, anexo):
-    """Envia o e-mail (remetente EMAIL_ATEIE_REMETENTE) com o PDF anexado. O método vem do config_email_ateie.json:
-    "smtp", "outlook" ou "auto" (SMTP se houver smtp_servidor; senão Outlook, no Windows). Devolve o método usado."""
+def doc_lib_enviar_email(remetente, destinatarios, copias, assunto, corpo, anexo):
+    """Envia o e-mail (do remetente escolhido, para os destinatários e com cópia para 'copias') com o PDF anexado. O
+    método vem do config_email_ateie.json: "smtp", "outlook" ou "auto" (SMTP se houver smtp_servidor; senão Outlook, no
+    Windows). Devolve o método usado."""
+    if remetente not in EMAIL_ATEIE_REMETENTES:
+        raise DocLibEmailErro(f"Remetente não autorizado: {remetente}")
     config = doc_lib_config_email()
     metodo = str(config.get("metodo") or "auto").lower()
     if metodo == "auto":
         metodo = "smtp" if config.get("smtp_servidor") else ("outlook" if platform.system() == "Windows" else "")
     if metodo == "smtp":
-        _doc_lib_enviar_smtp(destinatarios, assunto, corpo, anexo, config)
+        _doc_lib_enviar_smtp(remetente, destinatarios, copias, assunto, corpo, anexo, config)
         return "SMTP"
     if metodo == "outlook":
-        _doc_lib_enviar_outlook(destinatarios, assunto, corpo, anexo)
+        _doc_lib_enviar_outlook(remetente, destinatarios, copias, assunto, corpo, anexo)
         return "Outlook"
     raise DocLibEmailErro(
         "O envio de e-mail ainda não foi configurado neste computador.\n\n"
@@ -13255,15 +13344,70 @@ def doc_lib_copiar_para_downloads(caminho):
         return None, str(erro)
 
 
-def doc_lib_registrar_envio(ateie_id, numeros, destinatarios, assunto, anexo, metodo, usuario):
-    """Registra o e-mail enviado (quem, quando, para quem, qual PDF)."""
+def doc_lib_registrar_envio(ateie_id, numeros, remetente, destinatarios, copias, assunto, anexo, metodo, usuario):
+    """Registra o e-mail enviado (quem, quando, de qual remetente, para quem, com cópia para quem, qual PDF) e marca
+    cada ATEIE enviado como "Sim, em dd/mm/aaaa" na coluna "Enviado e-mail" do GRID ATEIE. Não altera a revisão do
+    documento (o PDF anexado continua valendo e a janela do ATEIE aberta não vira "alterada por outro usuário")."""
+    agora = datetime.now()
     conexao = doc_lib_conectar()
     try:
-        conexao.execute("INSERT INTO doclib_ateie_emails (ateie_id, numeros, destinatarios, remetente, assunto, anexo, "
-                        "metodo, enviado_por, enviado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (ateie_id, ", ".join(numeros), "; ".join(destinatarios), EMAIL_ATEIE_REMETENTE, assunto, anexo,
-                         metodo, usuario, datetime.now().strftime("%d/%m/%Y - %H:%Mh")))
+        conexao.execute("INSERT INTO doclib_ateie_emails (ateie_id, numeros, destinatarios, copias, remetente, assunto, "
+                        "anexo, metodo, enviado_por, enviado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (ateie_id, ", ".join(numeros), "; ".join(destinatarios), "; ".join(copias), remetente, assunto,
+                         anexo, metodo, usuario, agora.strftime("%d/%m/%Y - %H:%Mh")))
+        conexao.executemany(
+            "UPDATE doclib_ateie_intervencoes SET email_enviado_em = ?, email_enviado_por = ?, "
+            "email_enviado_origem = 'Sistema' WHERE ateie_id = ? AND numero = ?",
+            [(agora.strftime("%d/%m/%Y"), usuario, ateie_id, numero) for numero in numeros])
         conexao.commit()
+    finally:
+        conexao.close()
+
+
+# ATEIE que ainda não podem ter sido encaminhados por e-mail (sem documento gerado) ou que foram cancelados: o GRID
+# ATEIE não permite marcá-los manualmente como "Enviado e-mail = Sim"
+DOC_LIB_STATUS_SEM_ENVIO_EMAIL = (STATUS_ATEIE_RESERVADO, STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_CANCELADO)
+
+
+def doc_lib_texto_email_enviado(data):
+    """Texto da coluna "Enviado e-mail": "Não" (padrão) ou "Sim, em dd/mm/aaaa"."""
+    data = str(data or "").strip()
+    return f"Sim, em {data}" if data else "Não"
+
+
+def doc_lib_definir_email_enviado(selecao, data, usuario):
+    """Marcação manual da coluna "Enviado e-mail" do GRID ATEIE (usada quando o envio pelo sistema falhou e o e-mail foi
+    enviado à mão). 'selecao' é a lista de (id do documento, linha da tabela); 'data' é dd/mm/aaaa para marcar
+    "Sim, em dd/mm/aaaa" ou None para voltar a "Não". Marcar como enviado só vale para ATEIE com documento gerado e não
+    cancelado (DocLibRegra se algum não puder). Não altera a revisão do documento. Devolve a quantidade de ATEIE."""
+    pares = list(dict.fromkeys((int(ateie_id), int(ordem)) for ateie_id, ordem in selecao))
+    if not pares:
+        raise DocLibRegra("Selecione pelo menos um ATEIE.")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        for ateie_id, ordem in pares:
+            cursor.execute("SELECT numero, status FROM doclib_ateie_intervencoes WHERE ateie_id = ? AND ordem = ?",
+                           (ateie_id, ordem))
+            linha = cursor.fetchone()
+            if linha is None:
+                raise DocLibConflito("Um dos ATEIEs selecionados não existe mais ou foi agrupado por outro usuário.\n\n"
+                                     "Feche e abra novamente o GRID ATEIE para ver a situação atual.")
+            numero, status = linha
+            if data and status in DOC_LIB_STATUS_SEM_ENVIO_EMAIL:
+                raise DocLibRegra(f"O ATEIE {numero} está com status '{status}'. Só é possível marcar o e-mail como "
+                                  f"enviado depois que o documento é gerado, e não para ATEIE cancelado.")
+        for ateie_id, ordem in pares:
+            cursor.execute("UPDATE doclib_ateie_intervencoes SET email_enviado_em = ?, email_enviado_por = ?, "
+                           "email_enviado_origem = ? WHERE ateie_id = ? AND ordem = ?",
+                           (data or None, usuario if data else None, "Manual" if data else None, ateie_id, ordem))
+        cursor.execute("COMMIT")
+        return len(pares)
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
     finally:
         conexao.close()
 
@@ -14133,6 +14277,7 @@ DOC_LIB_COLUNAS_LISTA = [
     ("prog_termino", "Programação Término", 135, False),
     ("local", "Local", 140, True),
     ("servicos", "Serviços a Executar", 205, False),
+    ("email_enviado", "Enviado e-mail", 150, False),
     ("status", "Status", 160, False),
 ]
 
@@ -14372,7 +14517,8 @@ class JanelaListaAteie:
 
         janela = self.janela = Toplevel(parent)
         janela.title("GRID ATEIE")
-        janela.geometry("1400x700")
+        largura = min(1560, max(900, janela.winfo_screenwidth() - 20))     # a nova coluna pede mais largura
+        janela.geometry(f"{largura}x700")
         janela.minsize(900, 500)
         janela.transient(parent)
         ui_dialogo(janela, "GRID ATEIE", "Selecione o ATEIE e clique em Abrir (ou dê duplo clique). Clique no título "
@@ -14399,11 +14545,13 @@ class JanelaListaAteie:
 
         self.busca_var.trace_add("write", lambda *args: self.aplicar())
         doc_lib_criar_botao(janela, "Abrir", self.abrir, "primario"
-                            ).place(relx=0.5, x=-225, rely=1.0, y=-20, anchor="sw", width=120, height=40)
+                            ).place(relx=0.5, x=-340, rely=1.0, y=-20, anchor="sw", width=120, height=40)
         doc_lib_criar_botao(janela, "Agrupar ATEIEs", self.agrupar, "aviso"
-                            ).place(relx=0.5, x=-95, rely=1.0, y=-20, anchor="sw", width=170, height=40)
+                            ).place(relx=0.5, x=-210, rely=1.0, y=-20, anchor="sw", width=170, height=40)
+        doc_lib_criar_botao(janela, "Marcar e-mail enviado", self.marcar_email_enviado, "agendar"
+                            ).place(relx=0.5, x=-30, rely=1.0, y=-20, anchor="sw", width=230, height=40)
         doc_lib_criar_botao(janela, "Voltar", janela.destroy, "neutro"
-                            ).place(relx=0.5, x=85, rely=1.0, y=-20, anchor="sw", width=120, height=40)
+                            ).place(relx=0.5, x=210, rely=1.0, y=-20, anchor="sw", width=120, height=40)
         self.aplicar()
         self.entrada_busca.focus_set()
 
@@ -14425,8 +14573,11 @@ class JanelaListaAteie:
 
     @staticmethod
     def valor_filtro(registro, chave):
-        """Valor do registro usado no filtro da coluna (nas colunas de programação filtra-se pela data)."""
+        """Valor do registro usado no filtro da coluna (nas colunas de programação filtra-se pela data e, em
+        "Enviado e-mail", por Sim ou Não)."""
         texto = registro["_texto"][chave]
+        if chave == "email_enviado":
+            return texto.split(",")[0]
         return texto.split(" ")[0] if chave in ("prog_inicio", "prog_termino") else texto
 
     def valores_distintos(self, chave):
@@ -14435,6 +14586,8 @@ class JanelaListaAteie:
         valores.discard("")
         if chave == "status":
             return [status for status in DOC_LIB_STATUS_ATEIE if status in valores]
+        if chave == "email_enviado":
+            return [valor for valor in ("Sim", "Não") if valor in valores]
         if chave == "numero":
             return sorted(valores, key=lambda n: (n.split("/")[-1], n), reverse=True)
         if chave in ("prog_inicio", "prog_termino"):
@@ -14578,6 +14731,34 @@ class JanelaListaAteie:
         self.resultado = escolha
         self.janela.destroy()
 
+    def marcar_email_enviado(self):
+        """Marca na coluna "Enviado e-mail" os ATEIEs selecionados (Ctrl+clique ou Shift+clique para vários) como
+        "Sim, em dd/mm/aaaa", com a data informada, ou os devolve a "Não". Serve para o envio feito manualmente
+        quando o envio pelo sistema falha (o botão Encaminhar ATEIE já marca sozinho os ATEIEs que envia)."""
+        selecao = self.tabela.dados_selecionados()
+        if not selecao:
+            messagebox.showwarning("Marcar e-mail enviado", "Selecione na lista o(s) ATEIE(s) cujo e-mail foi enviado.\n\n"
+                                                           "Use Ctrl+clique (ou Shift+clique) para selecionar vários.",
+                                   parent=self.janela)
+            return
+        por_chave = {(registro["ateie_id"], registro["ordem"]): registro for registro in self.registros}
+        escolhidos = sorted((por_chave[chave] for chave in selecao if chave in por_chave),
+                            key=lambda registro: (registro["ano"], registro["sequencia"]))
+        resposta = doc_lib_dialogo_email_manual(self.janela, [registro["numero"] for registro in escolhidos])
+        if resposta is None:
+            return
+        try:
+            doc_lib_definir_email_enviado(selecao, resposta["data"], obter_nome_usuario_logado())
+        except (DocLibRegra, DocLibConflito) as erro:
+            messagebox.showwarning("Marcar e-mail enviado", str(erro), parent=self.janela)
+            if isinstance(erro, DocLibConflito):
+                self.recarregar()
+            return
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível gravar a marcação do e-mail: {erro}", parent=self.janela)
+            return
+        self.recarregar()
+
     def agrupar(self):
         """Agrupa os ATEIEs reservados selecionados (Ctrl+clique ou Shift+clique) em um único documento: um só PDF,
         com todos os números, que preservam a numeração original. Máximo de DOC_LIB_LIMITE_AGRUPAMENTO ATEIEs."""
@@ -14634,6 +14815,65 @@ def doc_lib_escolher_ateie(parent):
         pass
     janela.janela.wait_window()
     return janela.resultado
+
+
+def doc_lib_dialogo_email_manual(parent, numeros):
+    """Janela do botão "Marcar e-mail enviado" do GRID ATEIE: pede a data em que o e-mail foi enviado manualmente
+    (padrão: hoje) para gravar "Sim, em dd/mm/aaaa", ou permite devolver os ATEIE a "Não".
+    Devolve {"data": "dd/mm/aaaa"} para marcar como enviado, {"data": None} para voltar a "Não", ou None se cancelar."""
+    resultado = {"valor": None}
+    janela = Toplevel(parent)
+    janela.title("Marcar e-mail enviado")
+    janela.geometry("620x330")
+    janela.resizable(False, False)
+    janela.transient(parent)
+    ui_dialogo(janela, "Marcar e-mail enviado", "Para o e-mail enviado manualmente quando o sistema de envio falhou")
+    cartao = ui_cartao(janela, 84, 150)
+    Label(cartao, text="ATEIE(s) selecionado(s):", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")
+          ).place(x=20, y=14)
+    Label(cartao, text=doc_lib_texto_numeros(numeros), bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"),
+          wraplength=560, justify="left", anchor="w").place(x=20, y=36)
+    Label(cartao, text="Data do envio do e-mail:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")
+          ).place(x=20, y=84)
+    entrada = criar_entrada_sga(cartao, width=12)
+    entrada.place(x=20, y=108, width=130, height=30)
+    entrada.insert(0, datetime.now().strftime("%d/%m/%Y"))
+    IconeCalendarioDocLib(cartao, lambda: doc_lib_selecionar_data(janela, entrada)).place(x=160, y=111)
+
+    def marcar_sim(evento=None):
+        data = doc_lib_normalizar_data(entrada.get())
+        if not data:
+            messagebox.showwarning("Marcar e-mail enviado", "Informe a data do envio no formato dd/mm/aaaa.",
+                                   parent=janela)
+            return
+        if datetime.strptime(data, "%d/%m/%Y").date() > datetime.now().date():
+            messagebox.showwarning("Marcar e-mail enviado", "A data do envio não pode ser posterior a hoje.",
+                                   parent=janela)
+            return
+        resultado["valor"] = {"data": data}
+        janela.destroy()
+
+    def marcar_nao():
+        if messagebox.askyesno("Marcar e-mail enviado", "Voltar o(s) ATEIE selecionado(s) para 'Enviado e-mail: Não'?",
+                               parent=janela):
+            resultado["valor"] = {"data": None}
+            janela.destroy()
+
+    doc_lib_criar_botao(janela, "Marcar como enviado", marcar_sim, "sucesso"
+                        ).place(relx=0.5, x=-280, rely=1.0, y=-22, anchor="sw", width=180, height=42)
+    doc_lib_criar_botao(janela, "Voltar para 'Não'", marcar_nao, "aviso"
+                        ).place(relx=0.5, x=-90, rely=1.0, y=-22, anchor="sw", width=180, height=42)
+    doc_lib_criar_botao(janela, "Cancelar", janela.destroy, "neutro"
+                        ).place(relx=0.5, x=100, rely=1.0, y=-22, anchor="sw", width=180, height=42)
+    janela.bind("<Return>", marcar_sim)
+    janela.bind("<Escape>", lambda evento: janela.destroy())
+    try:
+        janela.grab_set()
+    except TclError:
+        pass
+    entrada.focus_set()
+    janela.wait_window()
+    return resultado["valor"]
 
 
 def doc_lib_dialogo_documento_gerado(parent, caminho, aviso=None, lembrete=None):
@@ -14760,97 +15000,159 @@ def doc_lib_dialogo_reserva(parent, usuario, nome_completo=""):
 def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
     """Janela "Cadastrar e-mails": e-mails de cada Empresa Solicitante usados pelo botão Encaminhar ATEIE. Pode haver
     vários e-mails por empresa e, nas empresas com mais de um destinatário possível, por opção (a opção é escolhida
-    na hora do envio; "(todos os envios)" vale em qualquer escolha)."""
+    na hora do envio; "(todos os envios)" vale em qualquer escolha). Cada e-mail é "Para" (destinatário) ou "Cópia (Cc)"
+    (recebe o ATEIE com cópia). O e-mail selecionado pode ser editado, sem precisar removê-lo e incluí-lo de novo."""
     janela = Toplevel(parent)
     janela.title("Cadastrar e-mails - Encaminhar ATEIE")
-    janela.geometry("1060x620")
-    janela.minsize(1040, 520)
+    janela.geometry("1240x620")
+    janela.minsize(1140, 520)
     janela.transient(parent)
-    ui_dialogo(janela, "E-mails do Encaminhar ATEIE", "Destinatários por Empresa Solicitante. Nas empresas com mais de "
-                                                      "um destinatário possível, a opção é escolhida na hora do envio.")
+    ui_dialogo(janela, "E-mails do Encaminhar ATEIE", "Destinatários e e-mails em cópia por Empresa Solicitante. Nas "
+                                                      "empresas com mais de um destinatário possível, a opção é "
+                                                      "escolhida na hora do envio.")
     quadro = Frame(janela, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
     quadro.place(x=24, y=80, relwidth=1.0, width=-48, relheight=1.0, height=-80 - 190)
-    arvore = ttk.Treeview(quadro, columns=("empresa", "escolha", "email", "incluido"), show="headings",
-                          selectmode="browse")
-    for chave, titulo, largura in (("empresa", "Empresa Solicitante", 320), ("escolha", "Destinatário (opção)", 150),
-                                   ("email", "E-mail", 250), ("incluido", "Incluído por / em", 240)):
+    arvore = ttk.Treeview(quadro, columns=("empresa", "escolha", "tipo", "email", "incluido", "alterado"),
+                          show="headings", selectmode="browse")
+    for chave, titulo, largura in (("empresa", "Empresa Solicitante", 250), ("escolha", "Destinatário (opção)", 150),
+                                   ("tipo", "Tipo", 80), ("email", "E-mail", 230),
+                                   ("incluido", "Incluído por / em", 230), ("alterado", "Alterado por / em", 235)):
         arvore.heading(chave, text=titulo, anchor="w")
         arvore.column(chave, width=largura, anchor="w")
     rolagem = Scrollbar(quadro, orient=VERTICAL, command=arvore.yview)
     arvore.configure(yscrollcommand=rolagem.set)
     rolagem.pack(side=RIGHT, fill=Y)
     arvore.pack(side=LEFT, fill=BOTH, expand=True)
-    ids = {}
+    itens = {}                          # linha da lista -> cadastro (dict de doc_lib_listar_destinatarios)
+    edicao = {"id": None}               # id do e-mail em edição (None = o formulário está incluindo um e-mail novo)
 
-    def carregar():
+    def carregar(selecionar_id=None):
         arvore.delete(*arvore.get_children())
-        ids.clear()
+        itens.clear()
         for item in doc_lib_listar_destinatarios():
+            incluido = f"{item['incluido_por'] or ''} - {item['incluido_em'] or ''}"
+            alterado = f"{item['alterado_por'] or ''} - {item['alterado_em']}" if item["alterado_em"] else ""
             iid = arvore.insert("", END, values=(item["empresa"], item["escolha"] or DOC_LIB_TEXTO_SEMPRE,
-                                                 item["email"], f"{item['incluido_por'] or ''} - "
-                                                                f"{item['incluido_em'] or ''}"))
-            ids[iid] = item["id"]
+                                                 DOC_LIB_TIPOS_DESTINATARIO.get(item["tipo"], item["tipo"]),
+                                                 item["email"], incluido, alterado))
+            itens[iid] = item
+            if item["id"] == selecionar_id:
+                arvore.selection_set(iid)
+                arvore.see(iid)
 
     formulario = Frame(janela, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
     formulario.place(x=24, rely=1.0, y=-180, relwidth=1.0, width=-48, height=104)
     empresas = [e for e in DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE if e != "OUTRA"]
+    textos_tipo = list(DOC_LIB_TIPOS_DESTINATARIO.values())
+    valor_do_tipo = {texto: valor for valor, texto in DOC_LIB_TIPOS_DESTINATARIO.items()}
     var_empresa, var_opcao, var_email = StringVar(value=empresa_inicial), StringVar(value=DOC_LIB_TEXTO_SEMPRE), \
         StringVar()
-    for texto, x in (("Empresa Solicitante", 16), ("Destinatário (opção)", 336), ("E-mail", 526)):
+    var_tipo = StringVar(value=textos_tipo[0])
+    for texto, x in (("Empresa Solicitante", 16), ("Destinatário (opção)", 300), ("Tipo", 464), ("E-mail", 588)):
         Label(formulario, text=texto, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")).place(x=x, y=8)
     combo_empresa = ttk.Combobox(formulario, textvariable=var_empresa, values=empresas, font=(SGA_FONTE, 10))
-    combo_empresa.place(x=16, y=32, width=300, height=30)
+    combo_empresa.place(x=16, y=32, width=270, height=30)
     combo_opcao = ttk.Combobox(formulario, textvariable=var_opcao, values=[DOC_LIB_TEXTO_SEMPRE],
                                font=(SGA_FONTE, 10))
-    combo_opcao.place(x=336, y=32, width=170, height=30)
+    combo_opcao.place(x=300, y=32, width=150, height=30)
+    combo_tipo = ttk.Combobox(formulario, textvariable=var_tipo, values=textos_tipo, state="readonly",
+                              font=(SGA_FONTE, 10))
+    combo_tipo.place(x=464, y=32, width=110, height=30)
     entrada_email = criar_entrada_sga(formulario, textvariable=var_email)
-    entrada_email.place(x=526, y=32, width=260, height=30)
-    Label(formulario, text="Para incluir outro e-mail na mesma empresa e opção, repita os dados e digite o novo "
-                           "e-mail. Para uma empresa que não está na lista (OUTRA), digite o nome da empresa.",
-          bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8), wraplength=900, justify="left", anchor="w"
-          ).place(x=16, y=70)
+    entrada_email.place(x=588, y=32, relwidth=1.0, width=-588 - 186, height=30)
+    texto_dica = ("Para incluir outro e-mail na mesma empresa e opção, repita os dados e digite o novo e-mail. "
+                  "Use o tipo 'Cópia (Cc)' para os e-mails que só recebem o ATEIE com cópia. Para uma empresa que "
+                  "não está na lista (OUTRA), digite o nome da empresa.")
+    texto_dica_edicao = ("Editando o e-mail selecionado: altere os dados acima e clique em 'Salvar alteração' "
+                         "(ou em 'Cancelar edição').")
+    rotulo_dica = Label(formulario, text=texto_dica, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8),
+                        wraplength=800, justify="left", anchor="w")
+    rotulo_dica.place(x=16, y=70)
 
     def atualizar_opcoes(*args):
         opcoes, _, _ = doc_lib_destinatarios_da_empresa(var_empresa.get())
         combo_opcao.configure(values=[DOC_LIB_TEXTO_SEMPRE] + opcoes)
 
-    def adicionar(evento=None):
+    def sair_da_edicao():
+        edicao["id"] = None
+        botao_gravar.config(text="Adicionar")
+        botao_cancelar_edicao.place_forget()
+        rotulo_dica.config(text=texto_dica)
+
+    def gravar(evento=None):
         try:
-            doc_lib_incluir_destinatario(var_empresa.get(), var_opcao.get(), var_email.get(), usuario)
+            if edicao["id"] is None:
+                doc_lib_incluir_destinatario(var_empresa.get(), var_opcao.get(), var_email.get(), usuario,
+                                             valor_do_tipo.get(var_tipo.get(), "para"))
+            else:
+                doc_lib_editar_destinatario(edicao["id"], var_empresa.get(), var_opcao.get(), var_email.get(), usuario,
+                                            valor_do_tipo.get(var_tipo.get(), "para"))
         except DocLibRegra as erro:
             messagebox.showwarning("Cadastrar e-mails", str(erro), parent=janela)
             return
         except sqlite3.Error as erro:
-            messagebox.showerror("Erro", f"Não foi possível cadastrar o e-mail: {erro}", parent=janela)
+            messagebox.showerror("Erro", f"Não foi possível gravar o e-mail: {erro}", parent=janela)
             return
+        alterado = edicao["id"]
         var_email.set("")
-        carregar()
+        sair_da_edicao()
+        carregar(alterado)
         atualizar_opcoes()
+
+    def editar(evento=None):
+        selecionado = arvore.selection()
+        if not selecionado:
+            messagebox.showwarning("Cadastrar e-mails", "Selecione na lista o e-mail a editar.", parent=janela)
+            return
+        item = itens[selecionado[0]]
+        edicao["id"] = item["id"]
+        var_empresa.set(item["empresa"])
+        var_opcao.set(item["escolha"] or DOC_LIB_TEXTO_SEMPRE)
+        var_tipo.set(DOC_LIB_TIPOS_DESTINATARIO.get(item["tipo"], textos_tipo[0]))
+        var_email.set(item["email"])
+        botao_gravar.config(text="Salvar alteração")
+        botao_cancelar_edicao.place(relx=1.0, x=-166, y=70, width=150, height=26)
+        rotulo_dica.config(text=texto_dica_edicao)
+        entrada_email.focus_set()
+        entrada_email.icursor(END)
+
+    def cancelar_edicao():
+        var_email.set("")
+        sair_da_edicao()
 
     def remover():
         selecionado = arvore.selection()
         if not selecionado:
             messagebox.showwarning("Cadastrar e-mails", "Selecione na lista o e-mail a remover.", parent=janela)
             return
-        empresa, opcao, email, _ = arvore.item(selecionado[0], "values")
-        if not messagebox.askyesno("Remover e-mail", f"Remover {email}\n({empresa} - {opcao}) do Encaminhar ATEIE?",
+        item = itens[selecionado[0]]
+        if not messagebox.askyesno("Remover e-mail", f"Remover {item['email']}\n({item['empresa']} - "
+                                                     f"{item['escolha'] or DOC_LIB_TEXTO_SEMPRE}) do Encaminhar ATEIE?",
                                    parent=janela):
             return
         try:
-            doc_lib_remover_destinatario(ids[selecionado[0]])
+            doc_lib_remover_destinatario(item["id"])
         except sqlite3.Error as erro:
             messagebox.showerror("Erro", f"Não foi possível remover o e-mail: {erro}", parent=janela)
             return
+        if edicao["id"] == item["id"]:
+            cancelar_edicao()
         carregar()
         atualizar_opcoes()
 
-    doc_lib_criar_botao(formulario, "Adicionar", adicionar, "sucesso").place(x=806, y=30, width=110, height=34)
+    botao_gravar = doc_lib_criar_botao(formulario, "Adicionar", gravar, "sucesso")
+    botao_gravar.place(relx=1.0, x=-166, y=30, width=150, height=34)
+    botao_cancelar_edicao = doc_lib_criar_botao(formulario, "Cancelar edição", cancelar_edicao, "neutro",
+                                                fonte=(SGA_FONTE, 9, "bold"))
     var_empresa.trace_add("write", atualizar_opcoes)
-    entrada_email.bind("<Return>", adicionar)
+    entrada_email.bind("<Return>", gravar)
+    arvore.bind("<Double-1>", editar)
+    doc_lib_criar_botao(janela, "Editar selecionado", editar, "aviso"
+                        ).place(relx=0.5, x=-285, rely=1.0, y=-22, anchor="sw", width=200, height=42)
     doc_lib_criar_botao(janela, "Remover selecionado", remover, "perigo"
-                        ).place(relx=0.5, x=-215, rely=1.0, y=-22, anchor="sw", width=200, height=42)
+                        ).place(relx=0.5, x=-70, rely=1.0, y=-22, anchor="sw", width=200, height=42)
     doc_lib_criar_botao(janela, "Fechar", janela.destroy, "neutro"
-                        ).place(relx=0.5, x=15, rely=1.0, y=-22, anchor="sw", width=140, height=42)
+                        ).place(relx=0.5, x=145, rely=1.0, y=-22, anchor="sw", width=140, height=42)
     carregar()
     atualizar_opcoes()
     try:
@@ -14860,21 +15162,26 @@ def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
     janela.wait_window()
 
 
+# remetente escolhido por último na janela do Encaminhar ATEIE: vale como sugestão nos envios seguintes desta sessão
+_DOC_LIB_ULTIMO_REMETENTE = {"valor": EMAIL_ATEIE_REMETENTE}
+
+
 def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=None, erro_copia=None):
-    """Janela de confirmação do botão Encaminhar ATEIE. Mostra remetente, empresa, ATEIE(s), anexo, onde ficou a cópia
-    do PDF na pasta Downloads (ou o motivo de não ter sido salva), destinatários e o texto do e-mail. Quando a empresa
-    tem mais de um destinatário possível o usuário escolhe um; empresa sem e-mail cadastrado (por exemplo OUTRA)
-    permite digitar o endereço. Devolve a lista de e-mails confirmados ou None."""
+    """Janela de confirmação do botão Encaminhar ATEIE. Mostra o remetente (a escolher entre EMAIL_ATEIE_REMETENTES),
+    empresa, ATEIE(s), anexo, onde ficou a cópia do PDF na pasta Downloads (ou o motivo de não ter sido salva),
+    destinatários, e-mails em cópia e o texto do e-mail. Quando a empresa tem mais de um destinatário possível o
+    usuário escolhe um; empresa sem e-mail cadastrado (por exemplo OUTRA) permite digitar o endereço.
+    Devolve {"remetente", "destinatarios", "copias"} ou None se o envio for cancelado."""
     empresa = doc_lib_empresa_do_documento(doc)
     corpo = EMAIL_ATEIE_TEXTO.format(numeros=doc_lib_texto_numeros(numeros))
-    estado = {"destinatarios": None}
+    estado = {"envio": None}
     janela = Toplevel(parent)
     janela.title("Encaminhar ATEIE")
-    janela.geometry("780x710")                      # cabe em tela de 1366x768
+    janela.geometry("780x700")                      # cabe em tela de 1366x768
     janela.resizable(False, False)
     janela.transient(parent)
     ui_dialogo(janela, "Encaminhar ATEIE", "Envio por e-mail, com o PDF do documento anexado, para análise e De Acordo")
-    cartao = ui_cartao(janela, 84, 550)
+    cartao = ui_cartao(janela, 84, 530)
     cartao.grid_columnconfigure(1, weight=1)
 
     def rotulo_valor(linha, titulo, texto, negrito=False, cor=SGA_TEXTO):
@@ -14883,7 +15190,17 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
         Label(cartao, text=texto, bg=SGA_CARD, fg=cor, font=(SGA_FONTE, 10, "bold" if negrito else ""),
               wraplength=520, justify="left", anchor="w").grid(row=linha, column=1, sticky="nw", pady=(11, 0))
 
-    rotulo_valor(0, "Remetente:", EMAIL_ATEIE_REMETENTE)
+    # remetente (emitente): o usuário escolhe de qual endereço o e-mail sai
+    var_remetente = StringVar(value=_DOC_LIB_ULTIMO_REMETENTE["valor"]
+                              if _DOC_LIB_ULTIMO_REMETENTE["valor"] in EMAIL_ATEIE_REMETENTES
+                              else EMAIL_ATEIE_REMETENTE)
+    Label(cartao, text="Remetente:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
+          ).grid(row=0, column=0, sticky="nw", padx=(20, 10), pady=(12, 0))
+    quadro_remetente = Frame(cartao, bg=SGA_CARD)
+    quadro_remetente.grid(row=0, column=1, sticky="w", pady=(6, 0))
+    for endereco in EMAIL_ATEIE_REMETENTES:
+        Radiobutton(quadro_remetente, text=endereco, variable=var_remetente, value=endereco, tristatevalue="-",
+                    font=(SGA_FONTE, 10, "bold"), bg=SGA_CARD).pack(side=LEFT, padx=(0, 20))
     rotulo_valor(1, "Empresa solicitante:", empresa or "(não informada)")
     rotulo_valor(2, "ATEIE(s):", doc_lib_texto_numeros(numeros), negrito=True)
     rotulo_valor(3, "Anexo:", (f"{os.path.basename(anexo)}\n" if anexo else "")
@@ -14902,31 +15219,34 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
     var_manual = StringVar()
 
     def calcular():
-        """(lista de e-mails, mensagem de erro)."""
-        opcoes, fixos, por_opcao = doc_lib_destinatarios_da_empresa(empresa)
-        if opcoes:
-            if not escolha.get():
-                return [], "Escolha o destinatário."
-            lista = por_opcao.get(escolha.get(), []) + fixos
-        elif fixos:
-            lista = list(fixos)
-        else:
-            lista = [parte for parte in re.split(r"[;,\s]+", var_manual.get().strip()) if parte]
-            invalidos = [parte for parte in lista if not doc_lib_validar_email(parte)]
-            if not lista:
-                return [], "Informe o e-mail do destinatário."
+        """(destinatários, e-mails em cópia, mensagem de erro)."""
+        opcoes, para, copias = doc_lib_destinatarios_da_empresa(empresa)
+        if opcoes and not escolha.get():
+            return [], [], "Escolha o destinatário."
+        lista, em_copia = doc_lib_enderecos_do_envio(para, copias, escolha.get() if opcoes else "")
+        if not opcoes and not lista:            # empresa sem destinatário cadastrado: vale o e-mail digitado
+            digitados = [parte for parte in re.split(r"[;,\s]+", var_manual.get().strip()) if parte]
+            invalidos = [parte for parte in digitados if not doc_lib_validar_email(parte)]
+            if not digitados:
+                return [], em_copia, "Informe o e-mail do destinatário."
             if invalidos:
-                return [], "E-mail inválido: " + ", ".join(invalidos)
-        return list(dict.fromkeys(item.lower() for item in lista)), ""
+                return [], em_copia, "E-mail inválido: " + ", ".join(invalidos)
+            lista = list(dict.fromkeys(item.lower() for item in digitados))
+            em_copia = [item for item in em_copia if item not in lista]
+        elif not lista:
+            return [], em_copia, "O destinatário escolhido não tem e-mail cadastrado como 'Para'. Use 'Cadastrar e-mails'."
+        return lista, em_copia, ""
 
     def mostrar_para(*args):
-        lista, erro = calcular()
+        lista, em_copia, erro = calcular()
         rotulo_para.config(text="; ".join(lista) if lista else erro, fg=SGA_TEXTO if lista else SGA_VERMELHO)
+        rotulo_copia.config(text="; ".join(em_copia) if em_copia else "(nenhum e-mail em cópia cadastrado)",
+                            fg=SGA_TEXTO if em_copia else SGA_TEXTO_SUAVE)
 
     def montar_zona():
         for filho in zona.winfo_children():
             filho.destroy()
-        opcoes, fixos, _ = doc_lib_destinatarios_da_empresa(empresa)
+        opcoes, para, _ = doc_lib_destinatarios_da_empresa(empresa)
         linha = 0
         if escolha.get() not in opcoes:
             escolha.set("")
@@ -14939,7 +15259,7 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
                 Radiobutton(opcoes_quadro, text=opcao, variable=escolha, value=opcao, tristatevalue="-",
                             command=mostrar_para, font=(SGA_FONTE, 10), bg=SGA_CARD).pack(side=LEFT, padx=(0, 20))
             linha += 1
-        elif not fixos:
+        elif not para.get(""):
             Label(zona, text="Empresa sem e-mail cadastrado. Informe o(s) e-mail(s) (separe por ponto e vírgula) ou "
                              "use 'Cadastrar e-mails':", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9),
                   wraplength=700, justify="left", anchor="w").grid(row=linha, column=0, columnspan=2, sticky="w")
@@ -14953,20 +15273,26 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
     rotulo_para = Label(cartao, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"), wraplength=520,
                         justify="left", anchor="w")
     rotulo_para.grid(row=7, column=1, sticky="nw", pady=(10, 0))
+    Label(cartao, text="Com cópia (Cc):", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
+          ).grid(row=8, column=0, sticky="nw", padx=(20, 10), pady=(11, 0))
+    rotulo_copia = Label(cartao, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"), wraplength=520,
+                         justify="left", anchor="w")
+    rotulo_copia.grid(row=8, column=1, sticky="nw", pady=(10, 0))
 
     Label(cartao, text="Texto do e-mail:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
-          ).grid(row=8, column=0, sticky="nw", padx=(20, 10), pady=(14, 0))
-    previa = criar_area_texto_sga(cartao, wrap=WORD, height=7, width=60)
+          ).grid(row=9, column=0, sticky="nw", padx=(20, 10), pady=(14, 0))
+    previa = criar_area_texto_sga(cartao, wrap=WORD, height=6, width=60)
     previa.insert("1.0", corpo)
     previa.configure(state=DISABLED, bg=DOC_LIB_COR_BLOQUEADO)
-    previa.grid(row=8, column=1, sticky="nw", pady=(12, 0))
+    previa.grid(row=9, column=1, sticky="nw", pady=(12, 0))
 
     def confirmar(evento=None):
-        lista, erro = calcular()
+        lista, em_copia, erro = calcular()
         if not lista:
             messagebox.showwarning("Encaminhar ATEIE", erro, parent=janela)
             return
-        estado["destinatarios"] = lista
+        _DOC_LIB_ULTIMO_REMETENTE["valor"] = var_remetente.get()
+        estado["envio"] = {"remetente": var_remetente.get(), "destinatarios": lista, "copias": em_copia}
         janela.destroy()
 
     def cadastrar():
@@ -14987,7 +15313,7 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
     except TclError:
         pass
     janela.wait_window()
-    return estado["destinatarios"]
+    return estado["envio"]
 
 
 class LinhasDinamicasDocLib:
@@ -14996,13 +15322,17 @@ class LinhasDinamicasDocLib:
     deixa de permitir novas inclusões quando o limite é atingido.
 
     Colunas do tipo "empresa" são um Combobox com a lista de empresas do ATEIE; em OUTRA aparece um campo para
-    digitar o nome (o mesmo mecanismo de "Empresa Solicitante")."""
+    digitar o nome (o mesmo mecanismo de "Empresa Solicitante").
 
-    def __init__(self, ateie, pai, colunas, limite, empresas=None):
+    hora_automatica=True: ao escolher a data no calendário da linha, o campo "Hora" da mesma linha recebe a hora atual
+    (se estiver vazio), podendo ser alterado depois pelo usuário."""
+
+    def __init__(self, ateie, pai, colunas, limite, empresas=None, hora_automatica=False):
         self.ateie = ateie
         self.pai = pai
         self.colunas = colunas
         self.limite = limite
+        self.hora_automatica = hora_automatica
         self.empresas = empresas or DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE    # opções das colunas do tipo "empresa"
         self.linhas = []
         self.bloqueado = False        # todas as linhas travadas
@@ -15035,7 +15365,8 @@ class LinhasDinamicasDocLib:
                 quadro = Frame(self.pai, bg=SGA_CARD)
                 entrada = criar_entrada_sga(quadro, width=11)
                 entrada.pack(side=LEFT, fill=X, expand=True)
-                icone = IconeCalendarioDocLib(quadro, lambda e=entrada: self.ateie.abrir_calendario(e, False))
+                icone = IconeCalendarioDocLib(quadro, lambda e=entrada, l=linha: self.ateie.abrir_calendario(
+                    e, False, l["campos"].get("hora") if self.hora_automatica else None))
                 icone.pack(side=LEFT, padx=(4, 0))
                 linha["icones"].append(icone)
                 celula = quadro
@@ -15359,7 +15690,7 @@ class JanelaAteie:
         bloco = Frame(card, bg=SGA_CARD)
         bloco.grid(row=self._linha, column=0, columnspan=2, sticky="ew", padx=12, pady=(2, 10))
         self.lista_pessoal = LinhasDinamicasDocLib(self, bloco, DOC_LIB_COLUNAS_PESSOAL, DOC_LIB_LIMITE_PESSOAL,
-                                                   DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE)
+                                                   DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE, hora_automatica=True)
         self._linha += 1
 
         self._montar_tabela()
@@ -15581,11 +15912,16 @@ class JanelaAteie:
         if atualiza_numeracao:
             self._atualizar_numeracao_provisoria()
 
-    def abrir_calendario(self, entrada, ano_curto):
+    def abrir_calendario(self, entrada, ano_curto, entrada_hora=None):
+        """Abre o calendário do campo de data. Com 'entrada_hora' (campo "Hora" de Pessoal Notificado), depois de
+        escolhida a data o campo recebe a hora atual quando está vazio (o usuário pode alterá-la em seguida)."""
         self._limpar_marca(entrada)
-        doc_lib_selecionar_data(self.janela, entrada, ano_curto, lambda: self._apos_escolher_data(entrada))
+        doc_lib_selecionar_data(self.janela, entrada, ano_curto, lambda: self._apos_escolher_data(entrada, entrada_hora))
 
-    def _apos_escolher_data(self, entrada):
+    def _apos_escolher_data(self, entrada, entrada_hora=None):
+        if entrada_hora is not None and str(entrada_hora.cget("state")) == "normal" and not entrada_hora.get().strip():
+            doc_lib_definir_entrada(entrada_hora, datetime.now().strftime("%H:%M"))
+            self._limpar_marca(entrada_hora)
         if entrada in self._celulas_programadas():
             self._atualizar_numeracao_provisoria()
         self._ao_alterar_execucao()
@@ -16079,9 +16415,10 @@ class JanelaAteie:
             f"branco, abra o ATEIE reservado no GRID e use 'Gerar Documento'.", parent=self.janela)
 
     def encaminhar(self):
-        """Botão Encaminhar ATEIE: depois de confirmar numa janela, envia por e-mail (remetente EMAIL_ATEIE_REMETENTE),
-        com o PDF do documento anexado, o(s) ATEIE com status "Aguarda De Acordo". O destinatário vem da tabela por
-        Empresa Solicitante (com escolha do usuário nas empresas que têm mais de uma opção)."""
+        """Botão Encaminhar ATEIE: depois de confirmar numa janela, envia por e-mail (do remetente escolhido entre
+        EMAIL_ATEIE_REMETENTES), com o PDF do documento anexado, o(s) ATEIE com status "Aguarda De Acordo". O
+        destinatário e os e-mails em cópia vêm da tabela por Empresa Solicitante (com escolha do usuário nas empresas
+        que têm mais de uma opção). Depois do envio cada ATEIE passa a "Sim, em dd/mm/aaaa" em "Enviado e-mail"."""
         titulo = "Encaminhar ATEIE"
         if self.ateie_id is None or self._pendente():
             messagebox.showwarning(titulo, "Salve o ATEIE e gere o documento antes de encaminhá-lo.\n\nO envio só é "
@@ -16127,10 +16464,11 @@ class JanelaAteie:
             self.janela.configure(cursor="")
         caminho_copia, erro_copia = doc_lib_copiar_para_downloads(caminho_pdf)
 
-        destinatarios = doc_lib_dialogo_encaminhar(self.janela, doc, aguardando, usuario, caminho_pdf, caminho_copia,
-                                                   erro_copia)
-        if not destinatarios:
+        envio = doc_lib_dialogo_encaminhar(self.janela, doc, aguardando, usuario, caminho_pdf, caminho_copia,
+                                           erro_copia)
+        if not envio:
             return
+        remetente, destinatarios, copias = envio["remetente"], envio["destinatarios"], envio["copias"]
 
         assunto = f"{EMAIL_ATEIE_ASSUNTO}: {doc_lib_texto_numeros(aguardando)}"
         corpo = EMAIL_ATEIE_TEXTO.format(numeros=doc_lib_texto_numeros(aguardando))
@@ -16138,21 +16476,27 @@ class JanelaAteie:
         self.janela.configure(cursor="watch")
         self.janela.update_idletasks()
         try:
-            metodo = doc_lib_enviar_email(destinatarios, assunto, corpo, caminho_pdf)
+            metodo = doc_lib_enviar_email(remetente, destinatarios, copias, assunto, corpo, caminho_pdf)
         except (DocLibEmailErro, OSError) as erro:
             messagebox.showerror(titulo, f"O e-mail NÃO foi enviado.\n\n{erro}\n\n"
-                                         f"Para enviar manualmente, use o arquivo:\n{manual}", parent=self.janela)
+                                         f"Para enviar manualmente, use o arquivo:\n{manual}\n\n"
+                                         f"Depois de enviar à mão, marque o e-mail como enviado no GRID ATEIE "
+                                         f"(botão 'Marcar e-mail enviado').", parent=self.janela)
             return
         finally:
             self.janela.configure(cursor="")
-        resumo = (f"E-mail enviado ({metodo}).\n\nDe: {EMAIL_ATEIE_REMETENTE}\nPara: {'; '.join(destinatarios)}\n"
-                  f"ATEIE(s): {doc_lib_texto_numeros(aguardando)}\nAnexo: {os.path.basename(caminho_pdf)}")
+        resumo = (f"E-mail enviado ({metodo}).\n\nDe: {remetente}\nPara: {'; '.join(destinatarios)}\n"
+                  + (f"Cc: {'; '.join(copias)}\n" if copias else "")
+                  + f"ATEIE(s): {doc_lib_texto_numeros(aguardando)}\nAnexo: {os.path.basename(caminho_pdf)}")
         if caminho_copia:
             resumo += f"\nCópia do arquivo enviado: {caminho_copia}"
         try:
-            doc_lib_registrar_envio(doc["id"], aguardando, destinatarios, assunto, caminho_pdf, metodo, usuario)
+            doc_lib_registrar_envio(doc["id"], aguardando, remetente, destinatarios, copias, assunto, caminho_pdf,
+                                    metodo, usuario)
+            resumo += f"\n\nGRID ATEIE, Enviado e-mail: Sim, em {datetime.now().strftime('%d/%m/%Y')}"
         except sqlite3.Error as erro:
-            resumo += f"\n\nAtenção: o e-mail foi enviado, mas o envio não pôde ser registrado no banco: {erro}"
+            resumo += (f"\n\nAtenção: o e-mail foi enviado, mas o envio não pôde ser registrado no banco: {erro}\n"
+                       f"Marque o e-mail como enviado no GRID ATEIE (botão 'Marcar e-mail enviado').")
         if aviso:
             resumo += f"\n\n{aviso}"
         messagebox.showinfo(titulo, resumo, parent=self.janela)
