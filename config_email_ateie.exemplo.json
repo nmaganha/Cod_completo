@@ -1,5 +1,5 @@
 {
-  "_ajuda": "Copie este arquivo para config_email_ateie.json (mesma pasta do main.py) e preencha. O config_email_ateie.json NAO vai para o GitHub (esta no .gitignore) porque pode ter senha. O remetente e sempre nmaganha@alupar.com.br.",
+  "_ajuda": "Copie este arquivo para config_email_ateie.json (mesma pasta do main.py) e preencha. O config_email_ateie.json NAO vai para o GitHub (esta no .gitignore) porque pode ter senha. O remetente e escolhido na janela do Encaminhar ATEIE (nmaganha@alupar.com.br ou jbarros@alupar.com.br; lista EMAIL_ATEIE_REMETENTES no main.py).",
   "_metodo": "auto = SMTP se smtp_servidor estiver preenchido; senao Outlook (Windows, precisa de: pip install pywin32). Use \"smtp\" ou \"outlook\" para forcar um deles.",
   "_smtp_seguranca": "starttls (porta 587, o mais comum), ssl (porta 465) ou nenhuma (rele interno sem criptografia, por exemplo porta 25).",
   "metodo": "auto",
@@ -8,5 +8,12 @@
   "smtp_seguranca": "starttls",
   "smtp_usuario": "nmaganha@alupar.com.br",
   "smtp_senha": "COLOQUE_A_SENHA_AQUI",
-  "smtp_timeout": 30
+  "smtp_timeout": 30,
+  "_remetentes": "Opcional: usuario e senha SMTP proprios de um remetente. Para usar, renomeie \"remetentes_exemplo\" para \"remetentes\". Sem isso, todos os remetentes entram no servidor com smtp_usuario/smtp_senha acima (o servidor precisa permitir enviar em nome do outro endereco).",
+  "remetentes_exemplo": {
+    "jbarros@alupar.com.br": {
+      "smtp_usuario": "jbarros@alupar.com.br",
+      "smtp_senha": "COLOQUE_A_SENHA_AQUI"
+    }
+  }
 }
