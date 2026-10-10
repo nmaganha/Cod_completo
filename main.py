@@ -1,4 +1,4 @@
-# Código atualizado em 10-10-26 - Click_25: AI (Autorização para Impedimento de Equipamento de Interligação) implantado no menu Doc_Lib.; ATEIE: remetente à escolha, e-mails em cópia, coluna Enviado e-mail
+# Código atualizado em 10-10-26 - Click_25: MO (Mensagem Operativa) e AI (Autorização para Impedimento de Equipamento de Interligação) implantados no menu Doc_Lib.; ATEIE: remetente à escolha, e-mails em cópia, coluna Enviado e-mail
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -12359,6 +12359,7 @@ def garantir_banco_doc_lib():
                                    "email_enviado_origem = 'Sistema' WHERE numero = ?", (data, enviado_por, numero))
 
     _garantir_tabelas_doc_lib_ai(cursor)         # tabelas do AI (Click_25)
+    _garantir_tabelas_doc_lib_mo(cursor)         # tabelas da MO (Click_25)
 
     conexao.commit()
     conexao.close()
@@ -12515,6 +12516,9 @@ def _doc_lib_ultimo_numero(cursor, tipo, ano):
         ultimo = max(ultimo, cursor.fetchone()[0] or 0)
     elif tipo == "AI":                  # o AI tem numeração própria (0001/26...), independente da do ATEIE
         cursor.execute("SELECT MAX(sequencia) FROM doclib_ai_intervencoes WHERE ano = ?", (ano,))
+        ultimo = max(ultimo, cursor.fetchone()[0] or 0)
+    elif tipo == "MO":                  # a MO também tem a sua numeração (um número por documento)
+        cursor.execute("SELECT MAX(sequencia) FROM doclib_mo WHERE ano = ?", (ano,))
         ultimo = max(ultimo, cursor.fetchone()[0] or 0)
     return ultimo
 
@@ -14246,7 +14250,7 @@ def doc_lib_bloquear_widget(widget, bloquear):
                              bg=DOC_LIB_COR_BLOQUEADO if bloquear else "white")
         elif classe == "TCombobox":
             widget.configure(state="disabled" if bloquear else "readonly")
-        elif classe in ("Radiobutton", "Button"):
+        elif classe in ("Radiobutton", "Checkbutton", "Button"):
             widget.configure(state=DISABLED if bloquear else NORMAL)
         elif hasattr(widget, "definir_habilitado"):
             widget.definir_habilitado(not bloquear)
@@ -14540,12 +14544,14 @@ class JanelaListaAteie:
     cada coluna quebra em mais de uma linha quando é maior que a largura; Equipamento de Interligação, Empresa e
     Local aparecem sempre em caixa alta.
 
-    A janela do AI (JanelaListaAI) usa esta mesma classe, trocando os atributos abaixo e os três métodos de acesso
-    ao banco (_listar, _agrupar_reservados e _definir_email_enviado)."""
+    As janelas do AI (JanelaListaAI) e da MO (JanelaListaMO) usam esta mesma classe, trocando os atributos abaixo e
+    os três métodos de acesso ao banco (_listar, _agrupar_reservados e _definir_email_enviado)."""
 
     SEM_FILTRO = "(Todos)"
     ROTULO = "ATEIE"                     # nome do documento nos textos da janela
     PLURAL = "ATEIEs"
+    ARTIGO = "o"                         # "o" ou "a" (a MO é feminina): concordância dos textos
+    PERMITE_AGRUPAR = True               # a MO tem um número por documento: não há o que agrupar
     COLUNAS = DOC_LIB_COLUNAS_LISTA
 
     @staticmethod
@@ -14573,10 +14579,11 @@ class JanelaListaAteie:
         janela.geometry(f"{largura}x700")
         janela.minsize(900, 500)
         janela.transient(parent)
+        dica_agrupar = (f" Para agrupar {self.PLURAL} reservados, selecione-os com Ctrl+clique (ou Shift+clique) e "
+                        f"clique em Agrupar {self.PLURAL}." if self.PERMITE_AGRUPAR else "")
         ui_dialogo(janela, f"GRID {self.ROTULO}",
-                   f"Selecione o {self.ROTULO} e clique em Abrir (ou dê duplo clique). Clique no título de uma coluna "
-                   f"para filtrar. Para agrupar {self.PLURAL} reservados, selecione-os com Ctrl+clique (ou "
-                   f"Shift+clique) e clique em Agrupar {self.PLURAL}.")
+                   f"Selecione {self.ARTIGO} {self.ROTULO} e clique em Abrir (ou dê duplo clique). Clique no título de "
+                   f"uma coluna para filtrar.{dica_agrupar}")
 
         barra_busca = Frame(janela, bg=SGA_FUNDO)
         barra_busca.place(x=24, y=78, relwidth=1.0, width=-48, height=34)
@@ -14597,14 +14604,17 @@ class JanelaListaAteie:
         self.contador.place(x=24, rely=1.0, y=-30, anchor="sw")
 
         self.busca_var.trace_add("write", lambda *args: self.aplicar())
-        doc_lib_criar_botao(janela, "Abrir", self.abrir, "primario"
-                            ).place(relx=0.5, x=-340, rely=1.0, y=-20, anchor="sw", width=120, height=40)
-        doc_lib_criar_botao(janela, f"Agrupar {self.PLURAL}", self.agrupar, "aviso"
-                            ).place(relx=0.5, x=-210, rely=1.0, y=-20, anchor="sw", width=170, height=40)
-        doc_lib_criar_botao(janela, "Marcar e-mail enviado", self.marcar_email_enviado, "agendar"
-                            ).place(relx=0.5, x=-30, rely=1.0, y=-20, anchor="sw", width=230, height=40)
-        doc_lib_criar_botao(janela, "Voltar", janela.destroy, "neutro"
-                            ).place(relx=0.5, x=210, rely=1.0, y=-20, anchor="sw", width=120, height=40)
+        botoes = [("Abrir", self.abrir, "primario", 120)]
+        if self.PERMITE_AGRUPAR:
+            botoes.append((f"Agrupar {self.PLURAL}", self.agrupar, "aviso", 170))
+        botoes += [("Marcar e-mail enviado", self.marcar_email_enviado, "agendar", 230),
+                   ("Voltar", janela.destroy, "neutro", 120)]
+        x_botao = -(sum(b[3] for b in botoes) + 10 * (len(botoes) - 1)) // 2 - 5      # botões centralizados
+        for texto_botao, comando, estilo_botao, largura_botao in botoes:
+            doc_lib_criar_botao(janela, texto_botao, comando, estilo_botao
+                                ).place(relx=0.5, x=x_botao, rely=1.0, y=-20, anchor="sw", width=largura_botao,
+                                        height=40)
+            x_botao += largura_botao + 10
         self.aplicar()
         self.entrada_busca.focus_set()
 
@@ -14644,7 +14654,7 @@ class JanelaListaAteie:
             return [valor for valor in ("Sim", "Não") if valor in valores]
         if chave == "numero":
             return sorted(valores, key=lambda n: (n.split("/")[-1], n), reverse=True)
-        if chave in ("prog_inicio", "prog_termino"):
+        if chave in ("prog_inicio", "prog_termino", "data"):
             return sorted(valores, key=lambda d: d.split("/")[::-1], reverse=True)
         return sorted(valores, key=lambda v: v.lower())
 
@@ -14773,14 +14783,19 @@ class JanelaListaAteie:
             except TclError:
                 pass
 
+    def _um(self):
+        """Artigo indefinido (um/uma) do documento, conforme o gênero."""
+        return "uma" if self.ARTIGO == "a" else "um"
+
     def abrir(self, evento=None):
         escolha = self.tabela.dados_selecionado()
         if escolha is None:
-            messagebox.showwarning("Atenção", f"Selecione um {self.ROTULO} na lista.", parent=self.janela)
+            messagebox.showwarning("Atenção", f"Selecione {self._um()} {self.ROTULO} na lista.", parent=self.janela)
             return
         if len(self.tabela.dados_selecionados()) > 1:
-            messagebox.showwarning("Atenção", f"Há mais de um {self.ROTULO} selecionado. Selecione apenas um para "
-                                              f"abrir.", parent=self.janela)
+            messagebox.showwarning("Atenção", f"Há mais de {self._um()} {self.ROTULO} "
+                                              f"{'selecionada' if self.ARTIGO == 'a' else 'selecionado'}. Selecione "
+                                              f"apenas {self._um()} para abrir.", parent=self.janela)
             return
         self.resultado = escolha
         self.janela.destroy()
@@ -14791,9 +14806,9 @@ class JanelaListaAteie:
         quando o envio pelo sistema falha (o botão Encaminhar já marca sozinho os documentos que envia)."""
         selecao = self.tabela.dados_selecionados()
         if not selecao:
-            messagebox.showwarning("Marcar e-mail enviado", f"Selecione na lista o(s) {self.ROTULO}(s) cujo e-mail "
-                                                           f"foi enviado.\n\nUse Ctrl+clique (ou Shift+clique) para "
-                                                           f"selecionar vários.", parent=self.janela)
+            messagebox.showwarning("Marcar e-mail enviado", f"Selecione na lista {self.ARTIGO}(s) {self.ROTULO}(s) "
+                                                           f"cujo e-mail foi enviado.\n\nUse Ctrl+clique (ou "
+                                                           f"Shift+clique) para selecionar vários.", parent=self.janela)
             return
         por_chave = {(registro["ateie_id"], registro["ordem"]): registro for registro in self.registros}
         escolhidos = sorted((por_chave[chave] for chave in selecao if chave in por_chave),
@@ -14801,7 +14816,7 @@ class JanelaListaAteie:
         resposta = doc_lib_dialogo_email_manual(
             self.janela, [registro["numero"] for registro in escolhidos],
             [f"{registro['numero']} ({registro['email_enviado']})" for registro in escolhidos
-             if registro["email_enviado"] != "Não"])
+             if registro["email_enviado"] != "Não"], rotulo=self.ROTULO, artigo=self.ARTIGO)
         if resposta is None:
             return
         try:
@@ -14876,10 +14891,11 @@ def doc_lib_escolher_ateie(parent):
     return janela.resultado
 
 
-def doc_lib_dialogo_email_manual(parent, numeros, ja_enviados=()):
-    """Janela do botão "Marcar e-mail enviado" do GRID ATEIE: pede a data em que o e-mail foi enviado manualmente
-    (padrão: hoje) para gravar "Sim, em dd/mm/aaaa", ou permite devolver os ATEIE a "Não".
-    'ja_enviados' = textos "0001/26 (Sim, em dd/mm/aaaa)" dos ATEIE selecionados que já constam como enviados: com
+def doc_lib_dialogo_email_manual(parent, numeros, ja_enviados=(), rotulo="ATEIE", artigo="o"):
+    """Janela do botão "Marcar e-mail enviado" do GRID (ATEIE, AI ou MO; 'rotulo' e 'artigo' ajustam os textos): pede a
+    data em que o e-mail foi enviado manualmente (padrão: hoje) para gravar "Sim, em dd/mm/aaaa", ou permite devolver os
+    documentos a "Não".
+    'ja_enviados' = textos "0001/26 (Sim, em dd/mm/aaaa)" dos documentos selecionados que já constam como enviados: com
     algum deles não é possível marcar como enviado (só voltar a "Não", para corrigir um registro errado).
     Devolve {"data": "dd/mm/aaaa"} para marcar como enviado, {"data": None} para voltar a "Não", ou None se cancelar."""
     resultado = {"valor": None}
@@ -14890,15 +14906,16 @@ def doc_lib_dialogo_email_manual(parent, numeros, ja_enviados=()):
     janela.transient(parent)
     ui_dialogo(janela, "Marcar e-mail enviado", "Para o e-mail enviado manualmente quando o sistema de envio falhou")
     cartao = ui_cartao(janela, 84, 150)
-    Label(cartao, text="ATEIE(s) selecionado(s):", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")
-          ).place(x=20, y=14)
+    feminino = artigo == "a"
+    Label(cartao, text=f"{rotulo}(s) {'selecionada(s)' if feminino else 'selecionado(s)'}:", bg=SGA_CARD,
+          fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")).place(x=20, y=14)
     Label(cartao, text=doc_lib_texto_numeros(numeros), bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"),
           wraplength=530, justify="left", anchor="w").place(x=20, y=36)
     entrada = criar_entrada_sga(cartao, width=12)
     if ja_enviados:
-        Label(cartao, text="Já consta(m) como e-mail enviado: " + ", ".join(ja_enviados) + ".\nUm ATEIE com 'Enviado "
-                           "e-mail: Sim' não pode ser marcado como enviado novamente. Se o registro estiver errado, use "
-                           "'Voltar para Não'.", bg=SGA_CARD, fg=SGA_VERMELHO, font=(SGA_FONTE, 9, "bold"),
+        Label(cartao, text="Já consta(m) como e-mail enviado: " + ", ".join(ja_enviados) + ".\n" + ("Uma" if feminino else "Um") + f" {rotulo} com 'Enviado e-mail: Sim' não pode ser marcad"
+                           f"{'a' if feminino else 'o'} como enviad{'a' if feminino else 'o'} novamente. Se o registro "
+                           f"estiver errado, use 'Voltar para Não'.", bg=SGA_CARD, fg=SGA_VERMELHO, font=(SGA_FONTE, 9, "bold"),
               wraplength=530, justify="left", anchor="w").place(x=20, y=80)
     else:
         Label(cartao, text="Data do envio do e-mail:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")
@@ -14923,8 +14940,9 @@ def doc_lib_dialogo_email_manual(parent, numeros, ja_enviados=()):
         janela.destroy()
 
     def marcar_nao():
-        if messagebox.askyesno("Marcar e-mail enviado", "Voltar o(s) ATEIE selecionado(s) para 'Enviado e-mail: Não'?",
-                               parent=janela):
+        if messagebox.askyesno("Marcar e-mail enviado", f"Voltar {artigo}(s) {rotulo} "
+                                                        f"{'selecionada(s)' if feminino else 'selecionado(s)'} para "
+                                                        f"'Enviado e-mail: Não'?", parent=janela):
             resultado["valor"] = {"data": None}
             janela.destroy()
 
@@ -15242,14 +15260,17 @@ _DOC_LIB_ULTIMO_REMETENTE = {"valor": EMAIL_ATEIE_REMETENTE}
 
 
 def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=None, erro_copia=None,
-                               rotulo="ATEIE", assunto=None, texto=None):
+                               rotulo="ATEIE", assunto=None, texto=None, opcao_inicial="",
+                               rotulo_empresa="Empresa solicitante:", subtitulo=None, descricao_anexo=None):
     """Janela de confirmação do botão Encaminhar ATEIE. Mostra o remetente (a escolher entre EMAIL_ATEIE_REMETENTES),
     empresa, ATEIE(s), anexo, onde ficou a cópia do PDF na pasta Downloads (ou o motivo de não ter sido salva),
     destinatários, e-mails em cópia e o texto do e-mail. Quando a empresa tem mais de um destinatário possível o
     usuário escolhe um; empresa sem e-mail cadastrado (por exemplo OUTRA) permite digitar o endereço.
     Devolve {"remetente", "destinatarios", "copias"} ou None se o envio for cancelado.
     rotulo, assunto e texto trocam o nome do documento, o assunto e o texto do e-mail (padrão: os do ATEIE); o Encaminhar
-    AI usa a mesma janela."""
+    AI e o Encaminhar MO usam a mesma janela. opcao_inicial = destinatário já escolhido (a MO sugere a empresa do campo
+    4.1 Destinatário quando ela é uma das opções cadastradas); rotulo_empresa = título da linha da empresa; subtitulo e
+    descricao_anexo trocam o subtítulo da janela e a descrição do anexo (padrão: os do ATEIE)."""
     empresa = doc_lib_empresa_do_documento(doc)
     corpo = (texto or EMAIL_ATEIE_TEXTO).format(numeros=doc_lib_texto_numeros(numeros))
     estado = {"envio": None}
@@ -15258,7 +15279,8 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
     janela.geometry("780x700")                      # cabe em tela de 1366x768
     janela.resizable(False, False)
     janela.transient(parent)
-    ui_dialogo(janela, f"Encaminhar {rotulo}", "Envio por e-mail, com o PDF do documento anexado, para análise e De Acordo")
+    ui_dialogo(janela, f"Encaminhar {rotulo}",
+               subtitulo or "Envio por e-mail, com o PDF do documento anexado, para análise e De Acordo")
     cartao = ui_cartao(janela, 84, 530)
     cartao.grid_columnconfigure(1, weight=1)
 
@@ -15279,10 +15301,10 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
     for endereco in EMAIL_ATEIE_REMETENTES:
         Radiobutton(quadro_remetente, text=endereco, variable=var_remetente, value=endereco, tristatevalue="-",
                     font=(SGA_FONTE, 10, "bold"), bg=SGA_CARD).pack(side=LEFT, padx=(0, 20))
-    rotulo_valor(1, "Empresa solicitante:", empresa or "(não informada)")
+    rotulo_valor(1, rotulo_empresa, empresa or "(não informada)")
     rotulo_valor(2, f"{rotulo}(s):", doc_lib_texto_numeros(numeros), negrito=True)
     rotulo_valor(3, "Anexo:", (f"{os.path.basename(anexo)}\n" if anexo else "")
-                 + "PDF do documento sem a linha vermelha e sem o aviso de De Acordo")
+                 + (descricao_anexo or "PDF do documento sem a linha vermelha e sem o aviso de De Acordo"))
     if copia:
         rotulo_valor(4, "Cópia salva em:", copia)
     elif erro_copia:
@@ -15293,7 +15315,7 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
     zona = Frame(cartao, bg=SGA_CARD)
     zona.grid(row=6, column=0, columnspan=2, sticky="ew", padx=20, pady=(14, 0))
     zona.grid_columnconfigure(1, weight=1)
-    escolha = StringVar(value="")
+    escolha = StringVar(value=opcao_inicial or "")
     var_manual = StringVar()
 
     def calcular():
@@ -19343,6 +19365,1993 @@ class JanelaAI:
         self.janela.destroy()
 
 
+# =====================================================================================================================
+# MO - MENSAGEM OPERATIVA (Doc_Lib. - Click_25)
+# =====================================================================================================================
+# A MO segue os mesmos conceitos e critérios do ATEIE e do AI (salvar, editar, gerar o documento, que passa a ser
+# protegido, De acordo, cancelamento com justificativa, MO-Reservado, Encaminhar MO por e-mail, coluna "Enviado e-mail",
+# GRID), com as diferenças do documento:
+#   - cada documento tem UM número (0001/26, crescente e reiniciado a cada ano), sem a tabela de linhas numeradas;
+#   - campos: 1 MO Nº COG, 2 Data (do envio, dd/mm/aa), 3 Classificação, 3 Emitente (3.1 Empresa, 3.2 Órgão, 3.3 Nome do
+#     usuário logado), 4 Destinatário (4.1 Empresa, 4.2 Órgão, 4.3 Nome), 5 Recebido por, 6 Data, 7 Hora, 8 Assunto,
+#     9 Descrição (até 30 páginas), 9.1 Observações (opcional) e 10 De acordo (10.1 Nome, 10.2 Data, 10.3 Hora);
+#   - 10 De acordo: uma só linha, ou a opção "Mensagem Operativa meramente informativa, sem necessidade de obtenção do De
+#     Acordo" (uma coisa ou outra, nunca as duas); o PDF traz sempre o item 10 no rodapé, com os subitens 10.1 a 10.3 ou
+#     com a mensagem informativa.
+# Status da MO: Em análise (salva, documento ainda não gerado), Aguarda De Acordo (gerada, precisa do De Acordo e ele
+# ainda não foi preenchido), Concluído (gerada e com o De Acordo preenchido, ou meramente informativa), Cancelado e
+# Reservado. Os status, as datas/horas, o cadastro de e-mails e os componentes visuais são os mesmos do ATEIE e do AI.
+DOC_LIB_CLASSIFICACOES_MO = ["Programado", "Urgência", "Emergência"]
+DOC_LIB_TEXTO_MO_INFORMATIVA = ("Mensagem Operativa meramente informativa, sem necessidade de obtenção do De Acordo")
+# a MO pode ser cancelada em qualquer momento depois de salva (o número cancelado nunca é reaproveitado)
+DOC_LIB_STATUS_CANCELAVEIS_MO = (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_AGUARDA_DE_ACORDO, STATUS_ATEIE_CONCLUIDO)
+DOC_LIB_TEXTO_MO_RESERVADA = "MO RESERVADA"        # exibido no GRID MO, em Assunto, enquanto a MO está reservada
+DOC_LIB_PAGINAS_DESCRICAO_MO = 30                  # previsão do campo 9 Descrição (texto livre de até 30 páginas)
+EMAIL_MO_ASSUNTO = "MO - Para análise e De Acordo"
+EMAIL_MO_TEXTO = ("Prezados,\n\n"
+                  "Segue para análise e o De Acordo a(s) MOs números: {numeros}.\n\n"
+                  "Atenciosamente,\n"
+                  "COG-ALUPAR")
+EMAIL_MO_ASSUNTO_INFORMATIVA = "MO - Para conhecimento"
+EMAIL_MO_TEXTO_INFORMATIVA = ("Prezados,\n\n"
+                              "Segue, para conhecimento, a(s) MOs números: {numeros}.\n\n"
+                              + DOC_LIB_TEXTO_MO_INFORMATIVA + ".\n\n"
+                              "Atenciosamente,\n"
+                              "COG-ALUPAR")
+
+# Colunas da janela "GRID MO": (campo, título, largura em pixels, exibir sempre em caixa alta)
+DOC_LIB_COLUNAS_LISTA_MO = [
+    ("numero", "N° MO", 105, False),
+    ("data", "Data", 90, False),
+    ("classificacao", "Classificação", 110, False),
+    ("emitente", "Emitente", 190, True),
+    ("destinatario", "Destinatário", 190, True),
+    ("assunto", "Assunto", 300, False),
+    ("recebido", "Recebido por", 150, False),
+    ("email_enviado", "Enviado e-mail", 150, False),
+    ("status", "Status", 160, False),
+]
+
+# campos de texto do documento que ficam protegidos depois da emissão (menos o De acordo)
+DOC_LIB_CAMPOS_MO = ("data_envio", "classificacao", "emitente_empresa", "emitente_empresa_outra", "emitente_orgao",
+                     "emitente_nome", "destinatario_empresa", "destinatario_empresa_outra", "destinatario_orgao",
+                     "destinatario_nome", "recebido_nome", "recebido_data", "recebido_hora", "assunto", "descricao",
+                     "observacoes")
+DOC_LIB_CAMPOS_DE_ACORDO_MO = ("de_acordo_nome", "de_acordo_data", "de_acordo_hora")
+_DOC_LIB_NOMES_CAMPOS_MO = {
+    "data_envio": "Data", "classificacao": "Classificação", "emitente_empresa": "Emitente, Empresa",
+    "emitente_empresa_outra": "Emitente, Empresa (OUTRA)", "emitente_orgao": "Emitente, Órgão",
+    "emitente_nome": "Emitente, Nome", "destinatario_empresa": "Destinatário, Empresa",
+    "destinatario_empresa_outra": "Destinatário, Empresa (OUTRA)", "destinatario_orgao": "Destinatário, Órgão",
+    "destinatario_nome": "Destinatário, Nome", "recebido_nome": "Recebido por", "recebido_data": "Recebido por, Data",
+    "recebido_hora": "Recebido por, Hora", "assunto": "Assunto", "descricao": "Descrição",
+    "observacoes": "Observações", "informativa": "Mensagem Operativa meramente informativa"}
+
+
+# ---------------------------------------------------
+# BANCO DE DADOS DA MO
+# ---------------------------------------------------
+def _garantir_tabelas_doc_lib_mo(cursor):
+    """Cria as tabelas da MO (se não existirem). Um documento = uma linha de doclib_mo, com o seu número:
+      doclib_mo          - a MO inteira (campos do formulário, De acordo, status, cancelamento, "Enviado e-mail")
+      doclib_mo_pdfs     - cada PDF gerado e arquivado
+      doclib_mo_emails   - e-mails enviados pelo botão Encaminhar MO
+    A numeração usa doclib_numeracao (tipo "MO"); o cadastro de e-mails por empresa é o mesmo do ATEIE e do AI."""
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_mo (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        numero TEXT UNIQUE NOT NULL,
+                        ano INTEGER NOT NULL,
+                        sequencia INTEGER NOT NULL,
+                        data_envio TEXT,
+                        classificacao TEXT NOT NULL,
+                        emitente_empresa TEXT NOT NULL,
+                        emitente_empresa_outra TEXT,
+                        emitente_orgao TEXT,
+                        emitente_nome TEXT,
+                        destinatario_empresa TEXT NOT NULL,
+                        destinatario_empresa_outra TEXT,
+                        destinatario_orgao TEXT,
+                        destinatario_nome TEXT,
+                        recebido_nome TEXT,
+                        recebido_data TEXT,
+                        recebido_hora TEXT,
+                        assunto TEXT NOT NULL,
+                        descricao TEXT NOT NULL,
+                        observacoes TEXT,
+                        informativa INTEGER NOT NULL DEFAULT 0,
+                        de_acordo_nome TEXT,
+                        de_acordo_data TEXT,
+                        de_acordo_hora TEXT,
+                        status TEXT NOT NULL DEFAULT 'Em análise',
+                        cancelada_por TEXT,
+                        data_cancelamento TEXT,
+                        justificativa_cancelamento TEXT,
+                        email_enviado_em TEXT,
+                        email_enviado_por TEXT,
+                        email_enviado_origem TEXT,
+                        revisao INTEGER NOT NULL DEFAULT 1,
+                        emitido INTEGER NOT NULL DEFAULT 0,
+                        emitido_em TEXT,
+                        emitido_por TEXT,
+                        criado_por TEXT,
+                        criado_em TEXT,
+                        atualizado_por TEXT,
+                        atualizado_em TEXT,
+                        reservado_por TEXT,
+                        reservado_em TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_mo_pdfs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        mo_id INTEGER NOT NULL,
+                        revisao INTEGER,
+                        caminho TEXT NOT NULL,
+                        gerado_por TEXT,
+                        gerado_em TEXT,
+                        revisao_final INTEGER,
+                        tipo TEXT,
+                        FOREIGN KEY(mo_id) REFERENCES doclib_mo(id))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_mo_emails (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        mo_id INTEGER NOT NULL,
+                        numeros TEXT NOT NULL,
+                        destinatarios TEXT NOT NULL,
+                        copias TEXT,
+                        remetente TEXT,
+                        assunto TEXT,
+                        anexo TEXT,
+                        metodo TEXT,
+                        enviado_por TEXT,
+                        enviado_em TEXT)''')
+
+
+def doc_lib_documento_reservado_mo(doc):
+    """True se a MO ainda está reservada (só tem o número): o PDF dela é um formulário em branco, não emite o documento
+    e ela continua editável até ser preenchida e salva."""
+    return (doc or {}).get("status") == STATUS_ATEIE_RESERVADO
+
+
+def doc_lib_de_acordo_mo_completo(doc):
+    """"De acordo" da MO preenchido por inteiro (nome, data e hora)."""
+    return all(str((doc or {}).get(campo) or "").strip() for campo in DOC_LIB_CAMPOS_DE_ACORDO_MO)
+
+
+def doc_lib_calcular_status_mo(doc, emitido):
+    """Status automático da MO, em função do que já aconteceu com ela:
+      Cancelado ............ foi cancelada (nunca volta atrás)
+      Reservado ............ número reservado e ainda sem o preenchimento (data, classificação, assunto e descrição)
+      Em análise ........... salva, mas o documento ainda não foi gerado
+      Concluído ............ documento gerado e meramente informativa, ou com o "De acordo" preenchido (nome, data e hora)
+      Aguarda De Acordo .... documento gerado, que precisa do "De acordo", ainda sem ele"""
+    if doc.get("status") == STATUS_ATEIE_CANCELADO:
+        return STATUS_ATEIE_CANCELADO
+    if doc.get("status") == STATUS_ATEIE_RESERVADO \
+            and not any(str(doc.get(chave) or "").strip() for chave in ("data_envio", "classificacao", "assunto", "descricao")):
+        return STATUS_ATEIE_RESERVADO
+    if not emitido:
+        return STATUS_ATEIE_EM_ANALISE
+    if doc.get("informativa") or doc_lib_de_acordo_mo_completo(doc):
+        return STATUS_ATEIE_CONCLUIDO
+    return STATUS_ATEIE_AGUARDA_DE_ACORDO
+
+
+def _doc_lib_ler_mo(conexao, mo_id):
+    """Lê a MO completa (um dicionário com as colunas de doclib_mo) usando a conexão informada, ou None."""
+    cursor = conexao.cursor()
+    cursor.row_factory = sqlite3.Row
+    cursor.execute("SELECT * FROM doclib_mo WHERE id = ?", (mo_id,))
+    linha = cursor.fetchone()
+    return dict(linha) if linha is not None else None
+
+
+def doc_lib_carregar_mo(mo_id):
+    """Devolve a MO completa ou None."""
+    conexao = doc_lib_conectar()
+    try:
+        return _doc_lib_ler_mo(conexao, mo_id)
+    finally:
+        conexao.close()
+
+
+def doc_lib_empresa_emitente_mo(doc, destinatario=False):
+    """Nome da empresa do Emitente (ou do Destinatário) da MO (na opção OUTRA, o nome digitado), em caixa alta."""
+    prefixo = "destinatario" if destinatario else "emitente"
+    empresa = doc.get(f"{prefixo}_empresa_outra") if doc.get(f"{prefixo}_empresa") == "OUTRA" \
+        and doc.get(f"{prefixo}_empresa_outra") else doc.get(f"{prefixo}_empresa")
+    return " ".join(str(empresa or "").split()).upper()
+
+
+# ---------------------------------------------------
+# NORMALIZAÇÃO E VALIDAÇÃO DA MO
+# ---------------------------------------------------
+def doc_lib_normalizar_mo(dados):
+    """Devolve uma cópia dos dados com as datas e horas válidas no padrão de cada campo (Data do envio: dd/mm/aa; Data de
+    Recebido por e do De acordo: dd/mm/aaaa; horas: HH:MM). Valores inválidos ficam como foram digitados (a validação os
+    aponta). Na MO meramente informativa o De acordo é ignorado."""
+    novo = dict(dados)
+    for chave in DOC_LIB_CAMPOS_MO + DOC_LIB_CAMPOS_DE_ACORDO_MO:
+        novo[chave] = str(dados.get(chave) or "").strip()
+    novo["data_envio"] = doc_lib_normalizar_data(novo["data_envio"], True) or novo["data_envio"]
+    for chave in ("recebido_data", "de_acordo_data"):
+        novo[chave] = doc_lib_normalizar_data(novo[chave]) or novo[chave]
+    for chave in ("recebido_hora", "de_acordo_hora"):
+        novo[chave] = doc_lib_normalizar_hora(novo[chave]) or novo[chave]
+    for prefixo in ("emitente", "destinatario"):
+        if novo[f"{prefixo}_empresa"] != "OUTRA":
+            novo[f"{prefixo}_empresa_outra"] = ""
+    novo["informativa"] = 1 if dados.get("informativa") else 0
+    return novo
+
+
+def doc_lib_validar_mo(dados, atual=None):
+    """Valida a MO (antes de salvar e antes de gerar o documento). 'atual' é o documento como está gravado (quando já
+    existe; um documento emitido não é revalidado nos campos que não mudam mais).
+
+    Retorna uma lista de (chaves_dos_campos, mensagem); lista vazia = documento válido.
+    Opcionais: Observações e o "De acordo" (ele é preenchido quando a outra empresa responde). Os demais campos são
+    obrigatórios. "Mensagem Operativa meramente informativa" e o "De acordo" são excludentes: uma coisa ou outra, nunca
+    as duas."""
+    erros = []
+
+    def vazio(valor):
+        return not str(valor or "").strip()
+
+    if vazio(dados.get("data_envio")):
+        erros.append((("data_envio",), "Data: informe a data do envio da MO (DD/MM/AA)."))
+    elif not doc_lib_normalizar_data(dados.get("data_envio")):
+        erros.append((("data_envio",), "Data: data inválida (use DD/MM/AA)."))
+    if vazio(dados.get("classificacao")):
+        erros.append((("classificacao",), "Classificação: selecione Programado, Urgência ou Emergência."))
+    for prefixo, titulo in (("emitente", "Emitente"), ("destinatario", "Destinatário")):
+        if vazio(dados.get(f"{prefixo}_empresa")):
+            erros.append(((f"{prefixo}_empresa",), f"{titulo}, Empresa: selecione a empresa."))
+        elif dados.get(f"{prefixo}_empresa") == "OUTRA" and vazio(dados.get(f"{prefixo}_empresa_outra")):
+            erros.append(((f"{prefixo}_empresa_outra",), f"{titulo}, Empresa (OUTRA): informe o nome da empresa."))
+        if vazio(dados.get(f"{prefixo}_orgao")):
+            erros.append(((f"{prefixo}_orgao",), f"{titulo}, Órgão: preencha o campo."))
+    if vazio(dados.get("emitente_nome")):
+        erros.append((("emitente_nome",), "Emitente, Nome: usuário não identificado (faça login novamente)."))
+    if vazio(dados.get("destinatario_nome")):
+        erros.append((("destinatario_nome",), "Destinatário, Nome: preencha o campo."))
+    if vazio(dados.get("recebido_nome")):
+        erros.append((("recebido_nome",), "Recebido por: preencha o nome."))
+    for chave, rotulo in (("recebido_data", "Recebido por, Data"), ("recebido_hora", "Recebido por, Hora")):
+        if vazio(dados.get(chave)):
+            erros.append(((chave,), f"{rotulo}: preencha o campo."))
+    if not vazio(dados.get("recebido_data")) and not doc_lib_normalizar_data(dados.get("recebido_data")):
+        erros.append((("recebido_data",), "Recebido por, Data: data inválida (use DD/MM/AAAA)."))
+    if not vazio(dados.get("recebido_hora")) and not doc_lib_normalizar_hora(dados.get("recebido_hora")):
+        erros.append((("recebido_hora",), "Recebido por, Hora: hora inválida (use HH:MM)."))
+    if vazio(dados.get("assunto")):
+        erros.append((("assunto",), "Assunto: preencha o campo."))
+    if vazio(dados.get("descricao")):
+        erros.append((("descricao",), "Descrição: preencha o campo."))
+
+    # os campos de uma linha do documento não são abreviados: o texto precisa caber no espaço do formulário
+    ja_apontados = {chave for chaves, _ in erros for chave in chaves}
+    for chave, titulo, valor in (
+            ("emitente_empresa_outra", "Emitente, Empresa (OUTRA)", dados.get("emitente_empresa_outra")),
+            ("emitente_orgao", "Emitente, Órgão", dados.get("emitente_orgao")),
+            ("destinatario_empresa_outra", "Destinatário, Empresa (OUTRA)", dados.get("destinatario_empresa_outra")),
+            ("destinatario_orgao", "Destinatário, Órgão", dados.get("destinatario_orgao")),
+            ("destinatario_nome", "Destinatário, Nome", dados.get("destinatario_nome")),
+            ("recebido_nome", "Recebido por", dados.get("recebido_nome")),
+            ("de_acordo_nome", "De acordo, Nome", dados.get("de_acordo_nome"))):
+        if chave in ja_apontados or vazio(valor):
+            continue
+        cabe, maximo = doc_lib_valor_cabe_mo(chave.removesuffix("_outra"), valor)
+        if not cabe:
+            erros.append(((chave,), f"{titulo}: texto longo demais para o espaço do documento (máximo de cerca de "
+                                    f"{maximo} caracteres). Abrevie."))
+
+    campos_de_acordo = [campo for campo in DOC_LIB_CAMPOS_DE_ACORDO_MO if not vazio(dados.get(campo))]
+    if dados.get("informativa"):
+        if campos_de_acordo:
+            erros.append((tuple(campos_de_acordo) + ("informativa",),
+                          "De acordo: a MO meramente informativa não tem De acordo. Desmarque a opção ou apague os "
+                          "dados do De acordo (uma coisa ou outra, nunca as duas)."))
+    elif campos_de_acordo:
+        faltando = [(campo, rotulo) for campo, rotulo in (("de_acordo_nome", "o nome"), ("de_acordo_data", "a data"),
+                                                          ("de_acordo_hora", "a hora")) if vazio(dados.get(campo))]
+        if faltando:
+            erros.append((tuple(campo for campo, _ in faltando),
+                          "De acordo: preencha " + ", ".join(rotulo for _, rotulo in faltando) + "."))
+        if not vazio(dados.get("de_acordo_data")) and not doc_lib_normalizar_data(dados.get("de_acordo_data")):
+            erros.append((("de_acordo_data",), "De acordo, Data: data inválida (use DD/MM/AAAA)."))
+        if not vazio(dados.get("de_acordo_hora")) and not doc_lib_normalizar_hora(dados.get("de_acordo_hora")):
+            erros.append((("de_acordo_hora",), "De acordo, Hora: hora inválida (use HH:MM)."))
+    return erros
+
+
+def doc_lib_diferencas_bloqueadas_mo(atual, dados, emitido=True):
+    """Lista o que, nos dados recebidos, difere do gravado e NÃO pode ser alterado (mesmas regras do ATEIE e do AI).
+
+    MO já EMITIDA (documento gerado): todos os campos ficam protegidos, inclusive "Recebido por" e a opção da mensagem
+    informativa. Só o "De acordo" pode ser preenchido (nome, data e hora juntos), uma única vez e apenas se a MO não é
+    meramente informativa; depois de salvo ele não muda mais.
+    MO ainda NÃO emitida: nada é protegido. Lista vazia = nada protegido foi alterado."""
+    if not emitido:
+        return []
+
+    def texto(valor):
+        return str(valor or "").strip()
+
+    diferencas = []
+    for chave in DOC_LIB_CAMPOS_MO:
+        comparar = str.upper if chave in ("emitente_empresa", "emitente_empresa_outra", "destinatario_empresa",
+                                          "destinatario_empresa_outra") else str
+        if comparar(texto(atual.get(chave))) != comparar(texto(dados.get(chave))):
+            diferencas.append(_DOC_LIB_NOMES_CAMPOS_MO[chave])
+    if bool(atual.get("informativa")) != bool(dados.get("informativa")):
+        diferencas.append(_DOC_LIB_NOMES_CAMPOS_MO["informativa"])
+    if any(texto(atual.get(c)) != texto(dados.get(c)) for c in DOC_LIB_CAMPOS_DE_ACORDO_MO):
+        if doc_lib_de_acordo_mo_completo(atual):
+            diferencas.append("De acordo (já registrado, não pode mais ser alterado)")
+        elif atual.get("informativa"):
+            diferencas.append("De acordo (a MO é meramente informativa)")
+        elif not doc_lib_de_acordo_mo_completo(dados):
+            diferencas.append("De acordo (informe nome, data e hora)")
+    return diferencas
+
+
+# ---------------------------------------------------
+# GRAVAÇÃO, LEITURA, CANCELAMENTO E RESERVA DA MO
+# ---------------------------------------------------
+def doc_lib_salvar_mo(dados, usuario):
+    """Grava a MO (nova ou já existente) em uma única transação e devolve o id. Mesmas regras do ATEIE e do AI:
+
+    - MO nova: recebe aqui o próximo número do ano (um número por documento) e entra com o status "Em análise".
+    - MO já numerada: mantém o número; só os dados são atualizados. MO cancelada: não é alterada (DocLibBloqueado).
+    - MO RESERVADA sendo preenchida: mantém o número; "Emitente, Nome" passa a ser o de quem registra o documento (a
+      reserva fica registrada em reservado_por e reservado_em).
+    - Documento já EMITIDO (gerado): todos os campos ficam protegidos; só o "De acordo" pode ser preenchido, uma vez, e
+      não numa MO meramente informativa (DocLibBloqueado se houver tentativa).
+    - O status é recalculado a cada gravação (doc_lib_calcular_status_mo).
+    - Lança DocLibConflito se outra pessoa salvou o documento depois que ele foi aberto."""
+    dados = doc_lib_normalizar_mo(dados)
+    agora = datetime.now()
+    agora_texto = agora.strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        mo_id = dados.get("id")
+        emitido = False
+        atual = None
+        if mo_id is not None:
+            atual = _doc_lib_ler_mo(conexao, mo_id)
+            if atual is None or atual["revisao"] != dados.get("revisao"):
+                raise DocLibConflito("Esta MO foi alterada por outro usuário depois de aberta nesta janela.\n\n"
+                                     "Feche-a e abra-a novamente (GRID MO) para ver a versão atual.")
+            if atual["status"] == STATUS_ATEIE_CANCELADO:
+                raise DocLibBloqueado("Esta MO está cancelada e não pode mais ser alterada.")
+            emitido = bool(atual["emitido"])
+        bloqueadas = doc_lib_diferencas_bloqueadas_mo(atual or {}, dados, emitido)
+        if bloqueadas:
+            raise DocLibBloqueado("Esta MO já foi emitida (documento gerado). Só pode ser preenchido o De acordo (nome, "
+                                  "data e hora, uma única vez).\n\nAlterações recusadas: " + "; ".join(bloqueadas) + ".")
+
+        colunas_campos = list(DOC_LIB_CAMPOS_MO) + ["informativa"] + list(DOC_LIB_CAMPOS_DE_ACORDO_MO)
+        if mo_id is None:
+            sequencia = _doc_lib_consumir_numero(cursor, "MO", agora.year)
+            numero = doc_lib_formatar_numero(sequencia, agora.year)
+            cursor.execute(
+                f"INSERT INTO doclib_mo (numero, ano, sequencia, {', '.join(colunas_campos)}, status, revisao, emitido, "
+                f"criado_por, criado_em, atualizado_por, atualizado_em) VALUES (?, ?, ?, "
+                f"{', '.join('?' * len(colunas_campos))}, ?, 1, 0, ?, ?, ?, ?)",
+                [numero, agora.year, sequencia] + [dados.get(c, "") for c in colunas_campos]
+                + [STATUS_ATEIE_EM_ANALISE, usuario, agora_texto, usuario, agora_texto])
+            mo_id = cursor.lastrowid
+        elif emitido:
+            cursor.execute("UPDATE doclib_mo SET de_acordo_nome = ?, de_acordo_data = ?, de_acordo_hora = ?, "
+                           "revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? WHERE id = ?",
+                           (dados["de_acordo_nome"], dados["de_acordo_data"], dados["de_acordo_hora"], usuario,
+                            agora_texto, mo_id))
+        else:
+            cursor.execute(
+                f"UPDATE doclib_mo SET {', '.join(f'{c} = ?' for c in colunas_campos)}, revisao = revisao + 1, "
+                f"atualizado_por = ?, atualizado_em = ? WHERE id = ?",
+                [dados.get(c, "") for c in colunas_campos] + [usuario, agora_texto, mo_id])
+
+        novo = _doc_lib_ler_mo(conexao, mo_id)
+        status = doc_lib_calcular_status_mo(novo, emitido)
+        if status != novo["status"]:
+            cursor.execute("UPDATE doclib_mo SET status = ? WHERE id = ?", (status, mo_id))
+        cursor.execute("COMMIT")
+        return mo_id
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_listar_mo():
+    """Um registro por MO, da mais recente para a mais antiga, no formato que o GRID espera (a chave "ateie_id" é o id do
+    documento, nome herdado do GRID ATEIE; a MO tem uma só "linha", a de ordem 1)."""
+    conexao = doc_lib_conectar()
+    conexao.row_factory = sqlite3.Row
+    try:
+        linhas = conexao.execute("SELECT * FROM doclib_mo ORDER BY ano DESC, sequencia DESC").fetchall()
+    finally:
+        conexao.close()
+    resultado = []
+    for linha in linhas:
+        doc = dict(linha)
+        registro = {"ateie_id": doc["id"], "ordem": 1, "numero": doc["numero"], "ano": doc["ano"],
+                    "sequencia": doc["sequencia"], "status": doc["status"],
+                    "email_enviado": doc_lib_texto_email_enviado(doc["email_enviado_em"])}
+        if doc["status"] == STATUS_ATEIE_RESERVADO:      # só o número e a expressão MO RESERVADA; o resto em branco
+            registro.update(data="", classificacao="", emitente="", destinatario="", assunto=DOC_LIB_TEXTO_MO_RESERVADA,
+                            recebido="")
+        else:
+            registro.update(data=doc["data_envio"] or "", classificacao=doc["classificacao"] or "",
+                            emitente=doc_lib_empresa_emitente_mo(doc), destinatario=doc_lib_empresa_emitente_mo(doc, True),
+                            assunto=doc["assunto"] or "", recebido=doc["recebido_nome"] or "")
+        resultado.append(registro)
+    return resultado
+
+
+def doc_lib_cancelar_mo(mo_id, usuario, justificativa, revisao_esperada):
+    """Cancela a MO: o número cancelado fica registrado e nunca é reaproveitado. Só não cancela a MO reservada e a que já está
+    cancelada (ValueError). Devolve a nova revisão do documento. DocLibConflito se a MO mudou desde que foi aberta."""
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT revisao, status FROM doclib_mo WHERE id = ?", (mo_id,))
+        linha = cursor.fetchone()
+        if linha is None or linha[0] != revisao_esperada:
+            raise DocLibConflito("Esta MO foi alterada por outro usuário depois de aberta nesta janela.\n\n"
+                                 "Feche-a e abra-a novamente (GRID MO) para ver a versão atual.")
+        if linha[1] == STATUS_ATEIE_CANCELADO:
+            raise ValueError("Esta MO já está cancelada.")
+        if linha[1] not in DOC_LIB_STATUS_CANCELAVEIS_MO:
+            raise ValueError(f"Uma MO com status '{linha[1]}' não pode ser cancelada.")
+        cursor.execute("UPDATE doclib_mo SET status = ?, cancelada_por = ?, data_cancelamento = ?, "
+                       "justificativa_cancelamento = ?, revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? "
+                       "WHERE id = ?", (STATUS_ATEIE_CANCELADO, usuario, agora_texto, justificativa, usuario,
+                                        agora_texto, mo_id))
+        cursor.execute("SELECT revisao FROM doclib_mo WHERE id = ?", (mo_id,))
+        nova_revisao = cursor.fetchone()[0]
+        cursor.execute("COMMIT")
+        return nova_revisao
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_reservar_mo(quantidade, usuario, nome_completo=""):
+    """Reserva 'quantidade' (1 a DOC_LIB_LIMITE_RESERVA) números de MO, na sequência do último número emitido ou reservado do
+    ano. Cada número vira uma MO com status Reservado, só com o número; todos os demais campos ficam em branco para o
+    preenchimento posterior. Tudo em uma única transação: ou são reservados todos os números pedidos, ou nenhum.
+    Devolve [{"ateie_id": ..., "numero": ...}] na ordem da numeração. Lança DocLibRegra se a quantidade for inválida."""
+    try:
+        quantidade = int(str(quantidade).strip())
+    except (TypeError, ValueError):
+        raise DocLibRegra("Informe a quantidade de números a reservar (número inteiro).")
+    if not 1 <= quantidade <= DOC_LIB_LIMITE_RESERVA:
+        raise DocLibRegra(f"A quantidade de números a reservar deve estar entre 1 e {DOC_LIB_LIMITE_RESERVA}.")
+    agora = datetime.now()
+    agora_texto = agora.strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        reservados = []
+        for _ in range(quantidade):
+            sequencia = _doc_lib_consumir_numero(cursor, "MO", agora.year)
+            numero = doc_lib_formatar_numero(sequencia, agora.year)
+            cursor.execute(
+                "INSERT INTO doclib_mo (numero, ano, sequencia, data_envio, classificacao, emitente_empresa, "
+                "destinatario_empresa, assunto, descricao, emitente_nome, status, revisao, emitido, criado_por, "
+                "criado_em, atualizado_por, atualizado_em, reservado_por, reservado_em) "
+                "VALUES (?, ?, ?, '', '', '', '', '', '', ?, ?, 1, 0, ?, ?, ?, ?, ?, ?)",
+                (numero, agora.year, sequencia, nome_completo or usuario, STATUS_ATEIE_RESERVADO, usuario, agora_texto,
+                 usuario, agora_texto, usuario, agora_texto))
+            reservados.append({"ateie_id": cursor.lastrowid, "numero": numero})
+        cursor.execute("COMMIT")
+        return reservados
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+# ---------------------------------------------------
+# ENCAMINHAR MO POR E-MAIL (envio, remetente e destinatários são os do ATEIE e do AI)
+# ---------------------------------------------------
+def doc_lib_registrar_envio_mo(mo_id, remetente, destinatarios, copias, assunto, anexo, metodo, usuario):
+    """Registra o e-mail enviado (quem, quando, de qual remetente, para quem, com cópia para quem, qual PDF) e marca a MO
+    como "Sim, em dd/mm/aaaa" na coluna "Enviado e-mail" do GRID MO. Uma MO que já consta como enviada mantém a data
+    original (o envio fica só no histórico). Não altera a revisão do documento."""
+    agora = datetime.now()
+    conexao = doc_lib_conectar()
+    try:
+        numero = conexao.execute("SELECT numero FROM doclib_mo WHERE id = ?", (mo_id,)).fetchone()[0]
+        conexao.execute("INSERT INTO doclib_mo_emails (mo_id, numeros, destinatarios, copias, remetente, assunto, anexo, "
+                        "metodo, enviado_por, enviado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (mo_id, numero, "; ".join(destinatarios), "; ".join(copias), remetente, assunto, anexo, metodo,
+                         usuario, agora.strftime("%d/%m/%Y - %H:%Mh")))
+        conexao.execute("UPDATE doclib_mo SET email_enviado_em = ?, email_enviado_por = ?, "
+                        "email_enviado_origem = 'Sistema' WHERE id = ? AND COALESCE(email_enviado_em, '') = ''",
+                        (agora.strftime("%d/%m/%Y"), usuario, mo_id))
+        conexao.commit()
+    finally:
+        conexao.close()
+
+
+def doc_lib_email_enviado_mo(mo_id):
+    """'dd/mm/aaaa' da data em que a MO consta como "Enviado e-mail: Sim", ou "" se ainda não foi enviada. Uma MO com
+    "Sim" não pode ser encaminhada nem marcada como enviada de novo."""
+    conexao = doc_lib_conectar()
+    try:
+        linha = conexao.execute("SELECT email_enviado_em FROM doclib_mo WHERE id = ?", (mo_id,)).fetchone()
+    finally:
+        conexao.close()
+    return str((linha or [""])[0] or "")
+
+
+def doc_lib_definir_email_enviado_mo(selecao, data, usuario):
+    """Marcação manual da coluna "Enviado e-mail" do GRID MO (usada quando o envio pelo sistema falhou e o e-mail foi
+    enviado à mão). 'selecao' é a lista de (id do documento, linha da tabela); 'data' é dd/mm/aaaa para marcar "Sim, em
+    dd/mm/aaaa" ou None para voltar a "Não". Marcar como enviada só vale para MO com documento gerado, não cancelada e que
+    ainda NÃO conste como enviada: uma MO com "Sim" não pode ser marcada de novo (a data original permanece); para corrigir
+    um registro errado é preciso voltá-la a "Não" (DocLibRegra se alguma não puder). Devolve a quantidade de MO."""
+    pares = list(dict.fromkeys((int(mo_id), int(ordem)) for mo_id, ordem in selecao))
+    if not pares:
+        raise DocLibRegra("Selecione pelo menos uma MO.")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        ja_enviadas = []
+        for mo_id, _ in pares:
+            cursor.execute("SELECT numero, status, email_enviado_em FROM doclib_mo WHERE id = ?", (mo_id,))
+            linha = cursor.fetchone()
+            if linha is None:
+                raise DocLibConflito("Uma das MOs selecionadas não existe mais.\n\n"
+                                     "Feche e abra novamente o GRID MO para ver a situação atual.")
+            numero, status, enviado_em = linha
+            if data and status in DOC_LIB_STATUS_SEM_ENVIO_EMAIL:
+                raise DocLibRegra(f"A MO {numero} está com status '{status}'. Só é possível marcar o e-mail como "
+                                  f"enviado depois que o documento é gerado, e não para MO cancelada.")
+            if data and enviado_em:
+                ja_enviadas.append(f"{numero} ({doc_lib_texto_email_enviado(enviado_em)})")
+        if ja_enviadas:
+            raise DocLibRegra("Já consta(m) como e-mail enviado: " + ", ".join(ja_enviadas) + ".\n\n"
+                              "Uma MO com 'Enviado e-mail: Sim' não pode ser marcada como enviada novamente. Para marcar, "
+                              "selecione somente MO com 'Não'. Se o registro estiver errado, use 'Voltar para Não'.")
+        for mo_id, _ in pares:
+            cursor.execute("UPDATE doclib_mo SET email_enviado_em = ?, email_enviado_por = ?, email_enviado_origem = ? "
+                           "WHERE id = ?", (data or None, usuario if data else None, "Manual" if data else None, mo_id))
+        cursor.execute("COMMIT")
+        return len(pares)
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+# ---------------------------------------------------
+# GERAÇÃO DO DOCUMENTO MO EM PDF
+# ---------------------------------------------------
+class PDFMO(PDFAteie):
+    """Folha A4 da MO: mesmo logotipo, réguas e rodapé do ATEIE e do AI, com o título "MENSAGEM OPERATIVA – MO" e, em todas
+    as páginas, o campo 1 (MO Nº COG-0001/26). Geometria do formulário de referência da MO."""
+    X0 = 11.2
+    X1 = 201.4
+    Y_REGUA_TOPO = 12.7
+    Y_REGUA_TITULO = 29.6
+    Y_CONTEUDO = 30.4
+    Y_REGUA_BASE = 274.8
+    Y_MAXIMO = 273.0
+
+    def __init__(self, rodape_texto="", numero="", cancelada=False):
+        super().__init__(rodape_texto)
+        self.numero = numero
+        self.cancelada = cancelada
+
+    def header(self):
+        self.set_draw_color(0, 0, 0)
+        self.set_line_width(0.8)
+        self.line(self.X0, self.Y_REGUA_TOPO, self.X1, self.Y_REGUA_TOPO)
+        if os.path.exists(LOGO_ATEIE):
+            self.image(LOGO_ATEIE, x=12.5, y=13.9, w=32.5)         # o mesmo logotipo do ATEIE e do AI
+        self.set_text_color(0, 0, 0)
+        self.set_font("DejaVuC", "B", 11)
+        self.set_xy(46.7, 19.0)
+        self.cell(119.2, 5.2, "MENSAGEM OPERATIVA – MO", align="C")
+        # 1. MO Nº COG-0001/26 (número pequeno e rebaixado + texto em negrito e itálico)
+        x = 151.0
+        self.set_font("DejaVuC", "I", 9.0 * 0.62)
+        self.text(x, 24.8, "1.")
+        x += self.get_string_width("1.") + 0.3
+        texto = f"MO Nº COG-{self.numero}"
+        self.set_font("DejaVuC", "BI", 10)
+        if self.cancelada:
+            self.set_text_color(176, 0, 0)
+        self.text(x, 24.0, texto)
+        if self.cancelada:                                             # MO cancelada: número riscado em vermelho
+            self.set_draw_color(176, 0, 0)
+            self.set_line_width(0.35)
+            self.line(x - 1.0, 22.7, x + self.get_string_width(texto) + 1.0, 22.7)
+            self.set_draw_color(0, 0, 0)
+        self.set_text_color(0, 0, 0)
+        self.line(self.X0, self.Y_REGUA_TITULO, self.X1, self.Y_REGUA_TITULO)
+        self.set_line_width(0.2)
+
+
+DOC_LIB_FONTE_MINIMA_MO = 6.0       # menor corpo (pt) a que um valor de uma linha chega antes de ser abreviado no PDF
+_doc_lib_medidor_mo = []            # PDFMO usado só para medir textos (as fontes são carregadas uma única vez)
+
+
+def _doc_lib_medir_texto_mo(texto, estilo, tamanho):
+    """Largura (mm) do texto no PDF da MO."""
+    if not _doc_lib_medidor_mo:
+        _doc_lib_medidor_mo.append(PDFMO(""))
+    medidor = _doc_lib_medidor_mo[0]
+    medidor.set_font("DejaVuC", estilo, tamanho)
+    return medidor.get_string_width(texto)
+
+
+def _doc_lib_geometria_valores_mo(medir):
+    """(x inicial, largura disponível, em mm) de cada valor de UMA linha do formulário da MO. 'medir(texto, estilo, tamanho)'
+    devolve a largura do texto. Os valores começam logo depois do fim do descritivo de cada título; nos blocos Emitente e
+    Destinatário (valores na linha inferior) cada um pode ir até o início do valor seguinte. É a mesma geometria que desenha
+    o PDF e que confere, ao salvar, se o texto cabe no campo sem ser abreviado."""
+    X0, X1 = PDFMO.X0, PDFMO.X1
+
+    def inicio_valor(x_ini, numero, texto):
+        return x_ini + medir(f"{numero}.", "I", 9.0 * 0.62) + 0.1 + medir(texto, "I", 9.0) + 1.5
+
+    geometria = {}
+    for numero_bloco, prefixo in (("3", "emitente"), ("4", "destinatario")):
+        xs = [inicio_valor(x_ini, f"{numero_bloco}.{indice}", nome)
+              for indice, (x_ini, nome) in enumerate(((X0 + 1.0, "Empresa:"), (87.5, "Órgão:"), (135.0, "Nome:")), start=1)]
+        limites = [xs[1] - 2.5, xs[2] - 2.5, X1 - 1.5]
+        for campo, x, limite in zip(("empresa", "orgao", "nome"), xs, limites):
+            geometria[f"{prefixo}_{campo}"] = (x, limite - x)
+    for chave, x_ini, numero, texto, limite in (
+            ("recebido_nome", X0 + 1.0, "5", "Recebido por:", 115.0 - 1.5), ("recebido_data", 115.0, "6", "Data:", 162.5 - 1.5),
+            ("recebido_hora", 162.5, "7", "Hora:", X1 - 1.5), ("de_acordo_nome", X0 + 1.0, "10.1", "Nome:", 107.5 - 1.5),
+            ("de_acordo_data", 107.5, "10.2", "Data:", 152.5 - 1.5), ("de_acordo_hora", 152.5, "10.3", "Hora:", X1 - 1.5)):
+        x = inicio_valor(x_ini, numero, texto)
+        geometria[chave] = (x, limite - x)
+    return geometria
+
+
+def doc_lib_valor_cabe_mo(chave, texto):
+    """(cabe, máximo aproximado de caracteres) do texto no campo do documento da MO identificado pela chave (por exemplo
+    "emitente_orgao")."""
+    texto = " ".join(str(texto or "").split())
+    if not texto:
+        return True, 0
+    largura = _doc_lib_geometria_valores_mo(_doc_lib_medir_texto_mo)[chave][1]
+    necessario = _doc_lib_medir_texto_mo(texto, "", DOC_LIB_FONTE_MINIMA_MO)
+    return necessario <= largura, int(len(texto) * largura / necessario)
+
+
+def doc_lib_gerar_pdf_mo(doc, caminho, gerado_por="", para_envio=False):
+    """Gera o PDF da MO (layout do documento de referência) em 'caminho'. Mesmo tratamento do ATEIE e do AI:
+
+    MO RESERVADA: sai o formulário em branco, para uso físico em emissão manual ou de emergência. Fica apenas o número
+    (campo 1); sem o aviso "Aguardando o De Acordo do documento".
+
+    para_envio=True (PDF anexado ao e-mail do botão Encaminhar MO): o mesmo documento, mas sem o aviso "Aguardando o De
+    Acordo do documento", que é marca de controle interno do COG.
+
+    A Descrição (campo 9) ocupa o espaço entre o Assunto e o rodapé e continua nas páginas seguintes, quantas forem
+    necessárias (a previsão é de até 30 páginas). No rodapé da última página ficam sempre o campo 9.1 Observações e o campo
+    10 De acordo, com os subitens 10.1 a 10.3 ou, na MO meramente informativa, com a mensagem de que não há necessidade de
+    obtenção do De Acordo. MO cancelada: número riscado em vermelho e as informações do cancelamento no final."""
+    agora = datetime.now()
+    reservada = doc_lib_documento_reservado_mo(doc)
+    cancelada = doc.get("status") == STATUS_ATEIE_CANCELADO
+    if reservada:
+        doc = dict(doc, **{campo: "" for campo in DOC_LIB_CAMPOS_MO + DOC_LIB_CAMPOS_DE_ACORDO_MO}, informativa=0)
+    pdf = PDFMO(f"Gerado pelo sistema COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}",
+                numero=doc.get("numero") or "", cancelada=cancelada)
+    pdf.add_page()
+    X0, X1 = PDFMO.X0, PDFMO.X1
+    LARGURA = X1 - X0
+    estado = {"y": PDFMO.Y_CONTEUDO}
+    Y_DE_ACORDO_FIM = 268.1                  # fim do bloco do item 10 (régua) no formulário de referência
+    ALTURA_DE_ACORDO = 10.2
+    ALTURA_OBSERVACOES_MINIMA = 24.3         # espaço do item 9.1 no formulário de referência (cerca de 5 linhas)
+    LIMITE_LINHAS_OBSERVACOES = 40           # acima disso as Observações fluem como a Descrição
+
+    def nova_pagina():
+        pdf.add_page()
+        estado["y"] = PDFMO.Y_CONTEUDO
+
+    def garantir(altura):
+        """Abre nova página se não houver 'altura' mm livres na atual."""
+        if estado["y"] + altura > PDFMO.Y_MAXIMO:
+            nova_pagina()
+
+    def regua(y, x_ini=X0, x_fim=X1, espessura=0.2):
+        pdf.set_line_width(espessura)
+        pdf.line(x_ini, y, x_fim, y)
+
+    def largura_texto(texto, estilo, tamanho):
+        pdf.set_font("DejaVuC", estilo, tamanho)
+        return pdf.get_string_width(texto)
+
+    def rotulo(x, y_base, numero, texto, tamanho=9.0):
+        """Rótulo do campo: número pequeno e rebaixado (subescrito) + texto em itálico. Devolve o x final."""
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("DejaVuC", "I", tamanho * 0.62)
+        pdf.text(x, y_base + 0.8, f"{numero}.")
+        x += pdf.get_string_width(f"{numero}.") + 0.1
+        pdf.set_font("DejaVuC", "I", tamanho)
+        pdf.text(x, y_base, texto)
+        return x + pdf.get_string_width(texto)
+
+    def valor_ajustado(x, y_base, texto, largura, tamanho=9.5, minimo=DOC_LIB_FONTE_MINIMA_MO, estilo=""):
+        """Valor em uma linha: reduz a fonte até caber e, no limite, abrevia com reticências."""
+        texto = " ".join(str(texto or "").split())
+        tam = tamanho
+        pdf.set_font("DejaVuC", estilo, tam)
+        while tam > minimo and pdf.get_string_width(texto) > largura:
+            tam -= 0.5
+            pdf.set_font("DejaVuC", estilo, tam)
+        while len(texto) > 1 and pdf.get_string_width(texto) > largura:
+            texto = texto[:-2] + "…"
+        pdf.set_text_color(0, 0, 0)
+        pdf.text(x, y_base, texto)
+
+    def posicao_valor(numero, nome, x_ini):
+        """x onde começa o valor de um campo cujo rótulo (número + nome) começa em x_ini + 1,0."""
+        return x_ini + 1.0 + largura_texto(f"{numero}.", "I", 9.0 * 0.62) + largura_texto(nome, "I", 9.0) + 0.1 + 2.0
+
+    def campo_texto(numero, nome, valor, minimo=10.2):
+        """Linha do formulário com rótulo à esquerda e o valor ao lado (quebrando em várias linhas, inclusive entre
+        páginas, se necessário), terminada por uma régua."""
+        valor = (valor or "").strip()
+        x_valor = posicao_valor(numero, nome, X0)
+        pdf.set_font("DejaVuC", "", 9.5)
+        linhas = doc_lib_quebrar_linhas(pdf, X1 - x_valor - 1.5, 4.3, valor) if valor else [""]
+        altura_total = max(minimo, 4.4 + (len(linhas) - 1) * 4.3 + 5.6)
+        garantir(altura_total if altura_total <= PDFMO.Y_MAXIMO - PDFMO.Y_CONTEUDO else minimo)
+        y_topo = estado["y"]
+        rotulo(X0 + 1.0, y_topo + 4.4, numero, nome)
+        pdf.set_font("DejaVuC", "", 9.5)
+        pdf.set_text_color(0, 0, 0)
+        y_base = y_topo + 4.4
+        for linha in linhas:
+            if y_base + 3.6 > PDFMO.Y_MAXIMO:        # texto maior que o espaço restante: continua na página seguinte
+                nova_pagina()
+                y_topo = estado["y"]
+                y_base = y_topo + 4.4
+                pdf.set_font("DejaVuC", "", 9.5)
+                pdf.set_text_color(0, 0, 0)
+            pdf.text(x_valor, y_base, linha)
+            y_base += 4.3
+        estado["y"] = max(y_topo + minimo, y_base - 4.3 + 5.6)
+        regua(estado["y"])
+
+    def bloco_parte(y_topo, altura, numero_bloco, nome_bloco, prefixo, dados_bloco):
+        """Bloco Emitente (3) ou Destinatário (4): título e, abaixo, 3.1/3.2/3.3 (ou 4.1/4.2/4.3) com os valores
+        alinhados um pouco abaixo dos títulos, na linha inferior, a partir do fim do descritivo de cada título."""
+        rotulo(X0 + 1.0, y_topo + 3.4, numero_bloco, nome_bloco)
+        y_titulos, y_valores = y_topo + 8.4, y_topo + 13.0
+        colunas = ((X0 + 1.0, f"{numero_bloco}.1", "Empresa:", "empresa"), (87.5, f"{numero_bloco}.2", "Órgão:", "orgao"),
+                   (135.0, f"{numero_bloco}.3", "Nome:", "nome"))
+        for (x_ini, numero_sub, nome_sub, campo), valor in zip(colunas, dados_bloco):
+            rotulo(x_ini, y_titulos, numero_sub, nome_sub)
+            x_valor, largura_valor = geometria[f"{prefixo}_{campo}"]
+            valor_ajustado(x_valor, y_valores, valor, largura_valor)
+        estado["y"] = y_topo + altura
+        regua(estado["y"])
+
+    geometria = _doc_lib_geometria_valores_mo(largura_texto)
+    informativa = bool(doc.get("informativa"))
+
+    # ---- 2. Data (do envio da MO; o rótulo fica na metade direita, como no formulário de referência) --------------
+    y_topo = estado["y"]
+    data_texto = doc.get("data_envio") or ""
+    pdf.set_font("DejaVuC", "", 9.5)
+    largura_rotulo = largura_texto("2.", "I", 9.0 * 0.62) + largura_texto("Data:", "I", 9.0) + 0.1
+    x_rotulo = max(X0 + 1.0, min(144.7, X1 - 1.5 - largura_rotulo - 2.0 - largura_texto(data_texto, "", 9.5)))
+    x_fim = rotulo(x_rotulo, y_topo + 4.9, "2", "Data:")
+    valor_ajustado(x_fim + 2.0, y_topo + 4.9, data_texto, X1 - 1.5 - (x_fim + 2.0))
+    estado["y"] = y_topo + 7.0
+    regua(estado["y"])
+
+    # ---- 3. Classificação ([ ] antes de cada opção) ----------------------------------------------------------------
+    y_topo = estado["y"]
+    rotulo(X0 + 1.0, y_topo + 4.4, "3", "Classificação:")
+    for texto, x_caixa in (("Programado", 83.6), ("Urgência", 123.3), ("Emergência", 162.0)):
+        marcado = doc.get("classificacao") == texto
+        pdf.set_font("DejaVuC", "B" if marcado else "", 9.5)
+        pdf.set_text_color(0, 0, 0)
+        pdf.text(x_caixa, y_topo + 4.4, "[X]" if marcado else "[ ]")
+        x_texto = x_caixa + pdf.get_string_width("[X]") + 1.5
+        pdf.set_font("DejaVuC", "", 9.5)
+        pdf.text(x_texto, y_topo + 4.4, texto)
+    estado["y"] = y_topo + 10.2
+    regua(estado["y"])
+
+    # ---- 3. Emitente e 4. Destinatário -------------------------------------------------------------------------------
+    bloco_parte(estado["y"], 15.2, "3", "Emitente:", "emitente",
+                (doc_lib_empresa_emitente_mo(doc), doc.get("emitente_orgao"), doc.get("emitente_nome")))
+    bloco_parte(estado["y"], 15.3, "4", "Destinatário:", "destinatario",
+                (doc_lib_empresa_emitente_mo(doc, True), doc.get("destinatario_orgao"), doc.get("destinatario_nome")))
+
+    # ---- 5. Recebido por / 6. Data / 7. Hora --------------------------------------------------------------------------
+    y_topo = estado["y"]
+    for chave, x_ini, numero, nome in (("recebido_nome", X0 + 1.0, "5", "Recebido por:"), ("recebido_data", 115.0, "6", "Data:"),
+                                       ("recebido_hora", 162.5, "7", "Hora:")):
+        rotulo(x_ini, y_topo + 4.2, numero, nome)
+        valor_ajustado(geometria[chave][0], y_topo + 4.2, doc.get(chave), geometria[chave][1])
+    estado["y"] = y_topo + 10.4
+    regua(estado["y"])
+
+    # ---- 8. Assunto (previsão de duas linhas; cresce se o texto for maior) -------------------------------------------
+    campo_texto("8", "Assunto:", doc.get("assunto"))
+
+    # ---- Final do documento: avisos (no rodapé, abaixo do item 10) ----------------------------------------------------
+    avisos = []                              # (texto, negrito)
+    pdf.set_font("DejaVuC", "", 8.5)
+    if cancelada:
+        descricao_cancelamento = (f"MO cancelada em {doc.get('data_cancelamento')} por {doc.get('cancelada_por')}. "
+                                  f"Justificativa: {doc.get('justificativa_cancelamento')}")
+        linhas_cancelamento = doc_lib_quebrar_linhas(pdf, LARGURA - 5.0, 3.8, descricao_cancelamento)
+        if len(linhas_cancelamento) > 8:                   # limita o espaço tomado do rodapé
+            linhas_cancelamento = linhas_cancelamento[:8]
+            linhas_cancelamento[-1] = linhas_cancelamento[-1].rstrip()[:-1] + "…"
+        avisos = [(linha, False) for linha in linhas_cancelamento]
+    elif not para_envio and not reservada and doc.get("emitido") and not informativa \
+            and not doc_lib_de_acordo_mo_completo(doc):
+        avisos = [("Aguardando o De Acordo do documento", True)]
+    y_de_acordo_fim = Y_DE_ACORDO_FIM - max(0, len(avisos) - 1) * 3.8
+    y_de_acordo_topo = y_de_acordo_fim - ALTURA_DE_ACORDO
+
+    # ---- Observações (9.1): no rodapé, acima do item 10 -----------------------------------------------------------------
+    observacoes = (doc.get("observacoes") or "").strip()
+    x_observacoes = posicao_valor("9.1", "Observações:", X0)
+    pdf.set_font("DejaVuC", "", 9.5)
+    linhas_observacoes = doc_lib_quebrar_linhas(pdf, X1 - x_observacoes - 1.5, 4.3, observacoes) if observacoes else []
+    observacoes_fluem = len(linhas_observacoes) > LIMITE_LINHAS_OBSERVACOES
+    altura_observacoes = 0.0 if observacoes_fluem else max(ALTURA_OBSERVACOES_MINIMA,
+                                                           4.4 + max(0, len(linhas_observacoes) - 1) * 4.3 + 5.6)
+    y_observacoes_topo = y_de_acordo_topo - altura_observacoes
+
+    # ---- 9. Descrição: do fim do Assunto até o rodapé, e nas páginas seguintes, quantas forem necessárias ------------
+    y_topo = estado["y"]
+    rotulo(X0 + 1.0, y_topo + 4.4, "9", "Descrição:")
+    estado["texto"] = y_topo + 9.7           # linha de base da primeira linha de texto
+
+    def fluir(linhas, titulo_continuacao):
+        """Escreve as linhas (largura total) a partir de estado["texto"], mudando de página quando acaba o espaço."""
+        pdf.set_font("DejaVuC", "", 9.5)
+        pdf.set_text_color(0, 0, 0)
+        for linha in linhas:
+            if estado["texto"] > PDFMO.Y_MAXIMO - 0.8:
+                nova_pagina()
+                rotulo(X0 + 1.0, estado["y"] + 4.4, *titulo_continuacao)
+                estado["texto"] = estado["y"] + 9.7
+                pdf.set_font("DejaVuC", "", 9.5)
+                pdf.set_text_color(0, 0, 0)
+            pdf.text(X0 + 1.0, estado["texto"], linha)
+            estado["texto"] += 4.3
+
+    descricao = (doc.get("descricao") or "").strip()
+    pdf.set_font("DejaVuC", "", 9.5)
+    fluir(doc_lib_quebrar_linhas(pdf, LARGURA - 3.0, 4.3, descricao) if descricao else [], ("9", "Descrição (continuação):"))
+    if observacoes_fluem:                    # Observações muito longas: continuam o texto, em vez de ficar no rodapé
+        estado["texto"] += 2.0
+        if estado["texto"] > PDFMO.Y_MAXIMO - 6.0:
+            nova_pagina()
+            estado["texto"] = estado["y"] + 4.4
+        rotulo(X0 + 1.0, estado["texto"], "9.1", "Observações:")
+        estado["texto"] += 5.3
+        pdf.set_font("DejaVuC", "", 9.5)
+        fluir(doc_lib_quebrar_linhas(pdf, LARGURA - 3.0, 4.3, observacoes), ("9.1", "Observações (continuação):"))
+    # se o texto invadiu o espaço do rodapé desta página, o rodapé (9.1 e 10) vai para uma página própria
+    if estado["texto"] - 4.3 + 1.2 > y_observacoes_topo - 0.5:
+        nova_pagina()
+
+    # ---- 9.1 Observações e 10 De acordo, sempre no rodapé da última página ---------------------------------------------
+    if not observacoes_fluem:
+        pdf.set_text_color(0, 0, 0)
+        rotulo(X0 + 1.0, y_observacoes_topo + 4.4, "9.1", "Observações:")
+        pdf.set_font("DejaVuC", "", 9.5)
+        for indice, linha in enumerate(linhas_observacoes):
+            pdf.text(x_observacoes, y_observacoes_topo + 4.4 + indice * 4.3, linha)
+    regua(y_de_acordo_topo)
+    rotulo(X0 + 1.0, y_de_acordo_topo + 3.4, "10", "De acordo:")
+    y_linha = y_de_acordo_topo + 8.5
+    if informativa:
+        pdf.set_font("DejaVuC", "", 9.0)
+        pdf.set_text_color(0, 0, 0)
+        pdf.text(X0 + 1.0, y_linha, DOC_LIB_TEXTO_MO_INFORMATIVA + ".")
+    else:
+        for chave, x_ini, numero, nome in (("de_acordo_nome", X0 + 1.0, "10.1", "Nome:"), ("de_acordo_data", 107.5, "10.2", "Data:"),
+                                           ("de_acordo_hora", 152.5, "10.3", "Hora:")):
+            rotulo(x_ini, y_linha, numero, nome)
+            valor_ajustado(geometria[chave][0], y_linha, doc.get(chave), geometria[chave][1])
+    regua(y_de_acordo_fim)
+    for indice, (linha, negrito) in enumerate(avisos):
+        pdf.set_font("DejaVuC", "B" if negrito else "", 8.5)
+        pdf.set_text_color(176, 0, 0)
+        pdf.text(X0 + 1.0, y_de_acordo_fim + 4.1 + indice * 3.8, linha)
+    pdf.set_text_color(0, 0, 0)
+    pdf.output(caminho)
+
+
+def doc_lib_registrar_geracao_mo(doc, caminho, usuario, tipo=None):
+    """Registra o PDF gerado (tipo "envio" = PDF anexado ao e-mail, que nunca emite o documento) e, na PRIMEIRA geração, EMITE
+    a MO: o documento passa a ser protegido (só o De acordo pode ser preenchido) e o status passa a "Aguarda De Acordo" (ou
+    "Concluído", se a MO é meramente informativa ou se o De acordo já estiver preenchido). Uma MO RESERVADA ou CANCELADA não
+    é emitida: o PDF só fica registrado. Lança DocLibConflito se o documento mudou desde que foi lido. Devolve a revisão
+    atual do documento."""
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT revisao, emitido, status FROM doclib_mo WHERE id = ?", (doc["id"],))
+        linha = cursor.fetchone()
+        if linha is None or linha[0] != doc["revisao"]:
+            raise DocLibConflito("Esta MO foi alterada por outro usuário enquanto o documento era gerado.\n\n"
+                                 "Feche-a e abra-a novamente (GRID MO) antes de gerar o documento.")
+        emitido, status = bool(linha[1]), linha[2]
+        cursor.execute("INSERT INTO doclib_mo_pdfs (mo_id, revisao, caminho, gerado_por, gerado_em, tipo) "
+                       "VALUES (?, ?, ?, ?, ?, ?)", (doc["id"], doc["revisao"], caminho, usuario, agora_texto, tipo))
+        id_pdf = cursor.lastrowid
+        if not emitido and status not in (STATUS_ATEIE_RESERVADO, STATUS_ATEIE_CANCELADO) and tipo != "envio":
+            cursor.execute("UPDATE doclib_mo SET emitido = 1, emitido_em = ?, emitido_por = ?, revisao = revisao + 1, "
+                           "atualizado_por = ?, atualizado_em = ? WHERE id = ?",
+                           (agora_texto, usuario, usuario, agora_texto, doc["id"]))
+            novo = _doc_lib_ler_mo(conexao, doc["id"])
+            cursor.execute("UPDATE doclib_mo SET status = ? WHERE id = ?", (doc_lib_calcular_status_mo(novo, True), doc["id"]))
+        cursor.execute("SELECT revisao FROM doclib_mo WHERE id = ?", (doc["id"],))
+        revisao = cursor.fetchone()[0]
+        cursor.execute("UPDATE doclib_mo_pdfs SET revisao_final = ? WHERE id = ?", (revisao, id_pdf))
+        cursor.execute("COMMIT")
+        return revisao
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_arquivar_pdf_mo(doc, usuario, para_envio=False):
+    """Gera o PDF da MO, arquiva na pasta do Doc_Lib. (nunca sobrescreve um arquivo anterior), registra o arquivo no banco e,
+    na primeira geração, emite a MO. Retorna (caminho, aviso).
+
+    para_envio=True gera o PDF que vai anexado ao e-mail (sem o aviso "Aguardando o De Acordo do documento"), arquivado em
+    MO/Enviados/<ano>; só vale para MO já emitida e não emite nada."""
+    if para_envio and not doc.get("emitido"):
+        raise DocLibRegra("O PDF para envio só pode ser gerado de uma MO já emitida (use Gerar Documento antes).")
+    agora = datetime.now()
+    pasta, aviso = doc_lib_pasta_destino(os.path.join("MO", "Enviados") if para_envio else "MO", doc.get("ano") or agora.year)
+    prefixo = "MO_RESERVADA_" if doc_lib_documento_reservado_mo(doc) else "MO_"
+    nome_base = f"{prefixo}{(doc.get('numero') or 'id' + str(doc['id'])).replace('/', '-')}_{agora.strftime('%Y%m%d-%H%M%S')}"
+    caminho = os.path.join(pasta, nome_base + ".pdf")
+    repeticao = 1
+    while os.path.exists(caminho):          # duas gerações no mesmo segundo: nunca sobrescreve o PDF anterior
+        repeticao += 1
+        caminho = os.path.join(pasta, f"{nome_base}-{repeticao}.pdf")
+    caminho_temporario = caminho + ".tmp"
+    try:
+        doc_lib_gerar_pdf_mo(doc, caminho_temporario, usuario, para_envio=para_envio)
+        os.replace(caminho_temporario, caminho)
+    finally:
+        if os.path.exists(caminho_temporario):
+            os.remove(caminho_temporario)
+    try:
+        doc_lib_registrar_geracao_mo(doc, caminho, usuario, tipo="envio" if para_envio else None)
+    except Exception:
+        if os.path.exists(caminho):            # documento não registrado/emitido: não deixa arquivo órfão
+            os.remove(caminho)
+        raise
+    return caminho, aviso
+
+
+def doc_lib_pdf_para_envio_mo(doc, usuario):
+    """PDF a anexar no e-mail do Encaminhar MO: o documento SEM o aviso "Aguardando o De Acordo do documento" (marca de
+    controle interno que não deve ir para a outra empresa). Reaproveita o PDF desse tipo já arquivado enquanto o documento não
+    mudou (mesma revisão); se não houver, ou se o arquivo não existir mais, gera e arquiva um novo em MO/Enviados/<ano>.
+    Devolve (caminho, aviso)."""
+    conexao = doc_lib_conectar()
+    try:
+        linha = conexao.execute("SELECT caminho FROM doclib_mo_pdfs WHERE mo_id = ? AND tipo = 'envio' "
+                                "AND revisao_final = ? ORDER BY id DESC LIMIT 1",
+                                (doc["id"], doc["revisao"])).fetchone()
+    finally:
+        conexao.close()
+    if linha and os.path.isfile(linha[0]):
+        return linha[0], None
+    return doc_lib_arquivar_pdf_mo(doc, usuario, para_envio=True)
+
+
+class JanelaListaMO(JanelaListaAteie):
+    """Janela "GRID MO": a mesma do GRID ATEIE (JanelaListaAteie), lendo as MOs. Mesmos filtros, busca, seleção múltipla,
+    Marcar e-mail enviado e coluna Enviado e-mail. A MO tem um número por documento: não há o que agrupar."""
+    ROTULO = "MO"
+    PLURAL = "MOs"
+    ARTIGO = "a"
+    PERMITE_AGRUPAR = False
+    COLUNAS = DOC_LIB_COLUNAS_LISTA_MO
+
+    @staticmethod
+    def _listar():
+        return doc_lib_listar_mo()
+
+    @staticmethod
+    def _definir_email_enviado(selecao, data, usuario):
+        return doc_lib_definir_email_enviado_mo(selecao, data, usuario)
+
+
+def doc_lib_escolher_mo(parent):
+    """Abre a janela "GRID MO" e devolve (id do documento, linha da tabela) da MO escolhida, ou None se o usuário voltar
+    sem escolher."""
+    janela = JanelaListaMO(parent)
+    try:
+        janela.janela.grab_set()
+    except TclError:
+        pass
+    janela.janela.wait_window()
+    return janela.resultado
+
+
+class JanelaMO:
+    """Janela da MO (Doc_Lib. - Click_25): cadastro, edição, salvamento e geração da Mensagem Operativa. Segue o mesmo
+    conceito da janela do ATEIE (JanelaAteie) e do AI (JanelaAI), com os campos da MO: 1 MO Nº COG (automático), 2 Data
+    (envio), Classificação, 3 Emitente (3.1 Empresa, 3.2 Órgão, 3.3 Nome do usuário logado), 4 Destinatário (4.1 Empresa,
+    4.2 Órgão, 4.3 Nome), 5 Recebido por (Nome, Data, Hora), 8 Assunto, 9 Descrição, 9.1 Observações e 10 De acordo (10.1 a
+    10.3) ou a opção "Mensagem Operativa meramente informativa".
+
+    Estados dos botões:
+      - janela nova ........ Voltar e Salvar habilitados; Editar e Gerar Documento desabilitados
+      - depois de Salvar ... campos travados; Editar e Gerar Documento habilitados; Salvar desabilitado
+      - depois de Editar ... campos liberados; Gerar Documento desabilitado até um novo Salvar
+      - depois de Gerar .... MO emitida: só o De acordo pode ser preenchido (uma vez)
+    """
+
+    def __init__(self):
+        self.mo_id = None
+        self.revisao = None
+        self.numero = ""              # número da MO (vazio enquanto ela é nova; depois do primeiro Salvar nunca muda)
+        self.status = ""
+        self.salvo = False            # versão atual gravada e campos travados (documento ainda não emitido)
+        self.emitido = False          # documento já gerado: só o De acordo continua editável
+        self.reservado = False        # MO reservada aberta para preenchimento: editável, PDF em branco, não emite
+        self.cancelada = False        # MO cancelada: nada mais pode ser alterado
+        self.numero_previsto = ""     # número que a MO nova vai receber ao ser salva (ainda não consumido)
+        # "Emitente, Nome" mostra o nome completo do usuário logado
+        self.usuario = obter_nome_usuario_logado()
+        self.emitente_nome = obter_nome_completo_usuario(self.usuario)
+        self._doc_gravado = None      # a MO como está gravada no banco (None enquanto for nova)
+        self._ultimo_pendente = None  # "há dados não salvos" na última vez em que os botões foram atualizados
+        self._controles = []          # campos travados/liberados em bloco (todos, menos o De acordo)
+        self._alvos = {}              # chave de campo -> (widget com contorno ou None, rótulo)
+        self._marcados = {}           # widget -> cores originais do contorno
+        self._rotulos_marcados = {}   # rótulo -> cor original
+        self._empresas = {}           # "emitente"/"destinatario" -> (combobox, rótulo do nome, entrada do nome)
+
+        self.janela = Toplevel(root)
+        self.janela.title('COG - DOC_LIB. - MO')
+        self.janela.geometry('1240x820')
+        self.janela.minsize(1100, 640)
+        self.janela.resizable(True, True)
+        self.janela['bg'] = SGA_FUNDO
+        self.janela.protocol("WM_DELETE_WINDOW", self.voltar)
+        estilo = ttk.Style(self.janela)       # contorno vermelho do Combobox com pendência
+        estilo.configure("DocLibErro.TCombobox", bordercolor=SGA_VERMELHO, lightcolor=SGA_VERMELHO,
+                         darkcolor=SGA_VERMELHO)
+        estilo.map("DocLibErro.TCombobox", bordercolor=[("focus", SGA_VERMELHO), ("active", SGA_VERMELHO)])
+
+        self._montar_cabecalho()
+        self._montar_formulario()
+        self._montar_rodape()
+        self._atualizar_numero_provisorio()
+        self._aplicar_bloqueios()
+        self._atualizar_estado()
+        self._assinatura_ref = self._assinatura()
+        self.janela.after(300, self._avisar_sem_nome_completo)
+        self.janela.after(300, self._vigiar_alteracoes)
+
+    def _vigiar_alteracoes(self):
+        """Reavalia os botões enquanto o usuário digita. Em MO reservada ou já emitida, "há dados não salvos"
+        depende do que está na tela (comparação com a versão gravada) e nenhum campo avisa a janela quando muda,
+        então o estado é conferido a cada 300 ms: Salvar habilita e Gerar Documento desabilita assim que algo é
+        digitado, e voltam ao normal se o usuário desfizer a alteração."""
+        try:
+            if not self.janela.winfo_exists():
+                return
+            if (self.reservado or self.emitido) and self._pendente() != self._ultimo_pendente:
+                self._atualizar_estado()
+            self.janela.after(300, self._vigiar_alteracoes)
+        except TclError:
+            pass                      # janela fechada durante a conferência
+
+    def _avisar_sem_nome_completo(self):
+        """Usuário sem nome completo cadastrado: "Emitente, Nome" usará o login até o administrador cadastrar."""
+        if self.mo_id is None and not buscar_nome_completo(self.usuario):
+            messagebox.showwarning(
+                "Nome completo não cadastrado",
+                f"O usuário '{self.usuario}' não tem nome completo cadastrado, por isso o campo 'Emitente, Nome' "
+                f"mostrará o próprio login.\n\nPeça ao administrador para cadastrar o nome "
+                f"(menu ADMIN > Nomes dos Usuários).", parent=self.janela)
+
+    # ------------------------------------------------------------------ montagem da janela
+
+    def _montar_cabecalho(self):
+        faixa = ui_dialogo(self.janela, "MO - Mensagem Operativa.", "Mensagem Operativa do COG-Alupar")
+        doc_lib_criar_botao(faixa, "GRID MO", self.abrir_salvo, "neutro"
+                            ).place(relx=1.0, x=-24, rely=0.5, anchor="e", width=170, height=34)
+        self.lbl_status = Label(faixa, text="", bg=SGA_AZUL, fg="#B8CCE8", font=(SGA_FONTE, 9, "bold"))
+        self.lbl_status.place(relx=1.0, x=-208, rely=0.5, anchor="e")
+
+    def _titulo_secao(self, texto, dica=None):
+        """Título de uma seção do formulário (Emitente, Destinatário, De acordo...), ocupando as duas colunas."""
+        rotulo = Label(self.card, text=texto, bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 11, "bold"), anchor="w")
+        rotulo.grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=(10, 0 if dica else 2))
+        self._linha += 1
+        if dica:
+            Label(self.card, text=dica, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w"
+                  ).grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 2))
+            self._linha += 1
+        return rotulo
+
+    def _campo_empresa(self, prefixo, rotulo_texto, opcoes):
+        """Linha "Empresa" do Emitente (empresas do ATEIE/AI) ou do Destinatário (empresas notificadas): combobox e, em
+        OUTRA, o campo para digitar o nome da empresa."""
+        rot = self._rotulo(rotulo_texto)
+        quadro = Frame(self.card, bg=SGA_CARD)
+        combo = ttk.Combobox(quadro, values=opcoes, state="readonly", width=24, font=(SGA_FONTE, 10))
+        combo.pack(side=LEFT)
+        combo.bind("<<ComboboxSelected>>", lambda e, p=prefixo: self._ao_mudar_empresa(p, True))
+        combo.bind("<MouseWheel>", lambda e: (_rolar_area_sga(e), "break")[1])
+        rotulo_outra = Label(quadro, text="Nome da empresa:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE,
+                             font=(SGA_FONTE, 10, "bold"))
+        entrada_outra = criar_entrada_sga(quadro, width=34)
+        self.configurar_entrada(entrada_outra, "texto")
+        self.forcar_maiusculas(entrada_outra)
+        self._controles += [combo, entrada_outra]
+        self._nova_linha(rot, quadro)
+        self._alvos[f"{prefixo}_empresa"] = (combo, rot)
+        self._alvos[f"{prefixo}_empresa_outra"] = (entrada_outra, rot)
+        self._empresas[prefixo] = (combo, rotulo_outra, entrada_outra)
+        return combo
+
+    def _campo_entrada(self, chave, rotulo_texto, largura=46):
+        """Linha com rótulo + campo de texto livre de uma linha."""
+        rot = self._rotulo(rotulo_texto)
+        entrada = criar_entrada_sga(self.card, width=largura)
+        self.configurar_entrada(entrada, "texto")
+        self._controles.append(entrada)
+        self._nova_linha(rot, entrada)
+        self._alvos[chave] = (entrada, rot)
+        return entrada
+
+    def _entrada_com_data(self, pai, ano_curto, hora=None):
+        """Entrada de data com o ícone do calendário (e, com 'hora', o campo da hora que recebe a hora atual ao escolher
+        a data). Devolve (entrada, ícone)."""
+        entrada = criar_entrada_sga(pai, width=11)
+        entrada.pack(side=LEFT)
+        icone = IconeCalendarioDocLib(pai, lambda e=entrada: self.abrir_calendario(
+            e, ano_curto, self._hora_da_data.get(e)))
+        icone.pack(side=LEFT, padx=(4, 0))
+        self.configurar_entrada(entrada, "data", ano_curto=ano_curto)
+        return entrada, icone
+
+    def _montar_formulario(self):
+        area = Frame(self.janela, bg=SGA_FUNDO)
+        area.place(x=0, y=64, relwidth=1.0, relheight=1.0, height=-(64 + 76))
+        self.inner = criar_area_rolavel(area, bg=SGA_FUNDO)
+        self.canvas = self.inner.master
+        self._hora_da_data = {}                 # entrada de data -> entrada da hora que recebe a hora atual
+
+        card = Frame(self.inner, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
+        card.pack(fill=X, padx=24, pady=(16, 24))
+        card.grid_columnconfigure(0, minsize=250)
+        card.grid_columnconfigure(1, weight=1)
+        self.card = card
+        self._linha = 0
+
+        # 1. MO Nº COG (preenchido automaticamente: números anuais, crescentes, no formato 0001/26)
+        rot = self._rotulo("MO Nº COG")
+        self.lbl_numero = Label(card, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 12, "bold"), anchor="w")
+        self._nova_linha(rot, self.lbl_numero)
+
+        # 2. Data (do envio da MO, dd/mm/aa, com calendário)
+        rot = self._rotulo("Data (envio da MO)")
+        quadro = Frame(card, bg=SGA_CARD)
+        self.ent_data, icone = self._entrada_com_data(quadro, True)
+        Label(quadro, text="(dd/mm/aa)", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).pack(side=LEFT, padx=(8, 0))
+        self._controles += [self.ent_data, icone]
+        self._nova_linha(rot, quadro)
+        self._alvos["data_envio"] = (self.ent_data, rot)
+
+        # 3. Classificação
+        rot = self._rotulo("Classificação")
+        quadro = Frame(card, bg=SGA_CARD)
+        self.var_classificacao = StringVar(value="")
+        for texto in DOC_LIB_CLASSIFICACOES_MO:
+            # tristatevalue: sem ele o Tk desenha os botões "indefinidos" enquanto nada está selecionado
+            radio = Radiobutton(quadro, text=texto, variable=self.var_classificacao, value=texto,
+                                tristatevalue="-", font=(SGA_FONTE, 10), bg=SGA_CARD)
+            radio.pack(side=LEFT, padx=(0, 28))
+            self._controles.append(radio)
+        self._nova_linha(rot, quadro)
+        self._alvos["classificacao"] = (None, rot)
+
+        # 3. Emitente: 3.1 Empresa (as empresas do ATEIE/AI), 3.2 Órgão (texto livre) e 3.3 Nome (usuário logado)
+        self._titulo_secao("Emitente:")
+        self._campo_empresa("emitente", "Empresa", DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE)
+        self.ent_emitente_orgao = self._campo_entrada("emitente_orgao", "Órgão")
+        rot = self._rotulo("Nome")
+        self.lbl_emitente_nome = Label(card, text=self.emitente_nome or "-", bg=SGA_CARD, fg=SGA_TEXTO,
+                                       font=(SGA_FONTE, 10, "bold"), anchor="w")
+        self._nova_linha(rot, self.lbl_emitente_nome)
+        self._alvos["emitente_nome"] = (None, None)
+
+        # 4. Destinatário: 4.1 Empresa (as empresas do Pessoal Notificado), 4.2 Órgão e 4.3 Nome (texto livre)
+        self._titulo_secao("Destinatário:")
+        self._campo_empresa("destinatario", "Empresa", DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE)
+        self.ent_destinatario_orgao = self._campo_entrada("destinatario_orgao", "Órgão")
+        self.ent_destinatario_nome = self._campo_entrada("destinatario_nome", "Nome")
+
+        # 5. Recebido por (Nome) / 6. Data / 7. Hora
+        rot = self._rotulo("Recebido por")
+        quadro = Frame(card, bg=SGA_CARD)
+        self.ent_recebido_nome = criar_entrada_sga(quadro, width=34)
+        self.ent_recebido_nome.pack(side=LEFT)
+        self.configurar_entrada(self.ent_recebido_nome, "texto")
+        Label(quadro, text="Data:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(18, 6))
+        self.ent_recebido_data, icone = self._entrada_com_data(quadro, False)
+        Label(quadro, text="Hora:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(18, 6))
+        self.ent_recebido_hora = criar_entrada_sga(quadro, width=8)
+        self.ent_recebido_hora.pack(side=LEFT)
+        self.configurar_entrada(self.ent_recebido_hora, "hora")
+        self._hora_da_data[self.ent_recebido_data] = self.ent_recebido_hora        # a hora atual vem ao escolher a data
+        self._controles += [self.ent_recebido_nome, self.ent_recebido_data, icone, self.ent_recebido_hora]
+        self._nova_linha(rot, quadro)
+        self._alvos["recebido_nome"] = (self.ent_recebido_nome, rot)
+        self._alvos["recebido_data"] = (self.ent_recebido_data, rot)
+        self._alvos["recebido_hora"] = (self.ent_recebido_hora, rot)
+
+        # 8. Assunto (duas linhas) / 9. Descrição (até 30 páginas) / 9.1 Observações (opcional, sem texto padrão)
+        self.txt_assunto = self._campo_texto("assunto", "Assunto", 2)
+        self.txt_descricao = self._campo_texto("descricao", "Descrição", 16, barra=True,
+                                               dica=f"(texto livre, com previsão de até\n{DOC_LIB_PAGINAS_DESCRICAO_MO} páginas)")
+        self.txt_observacoes = self._campo_texto("observacoes", "Observações", 4, opcional=True, barra=True,
+                                                 separador=False)
+        self._separador()
+
+        # 10. De acordo: a opção "Mensagem Operativa meramente informativa" (dispensa o De acordo) ou o De acordo
+        # (10.1 Nome, 10.2 Data, 10.3 Hora): uma coisa ou outra, nunca as duas
+        self.lbl_de_acordo = self._titulo_secao("De acordo:", "Marque a opção abaixo se a MO for meramente informativa; "
+                                                              "senão, registre o De acordo da outra empresa.")
+        self.var_informativa = IntVar(value=0)
+        self.chk_informativa = Checkbutton(card, text=DOC_LIB_TEXTO_MO_INFORMATIVA, variable=self.var_informativa,
+                                           onvalue=1, offvalue=0, font=(SGA_FONTE, 10, "bold"), bg=SGA_CARD,
+                                           anchor="w", justify="left", wraplength=900,
+                                           command=self._ao_mudar_informativa)
+        self.chk_informativa.grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=(2, 6))
+        self._controles.append(self.chk_informativa)
+        self._alvos["informativa"] = (None, self.lbl_de_acordo)
+        self._linha += 1
+        rot = self._rotulo("De acordo")
+        quadro = Frame(card, bg=SGA_CARD)
+        Label(quadro, text="Nome:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(0, 6))
+        self.ent_de_acordo_nome = criar_entrada_sga(quadro, width=34)
+        self.ent_de_acordo_nome.pack(side=LEFT)
+        self.configurar_entrada(self.ent_de_acordo_nome, "texto")
+        Label(quadro, text="Data:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(18, 6))
+        self.ent_de_acordo_data, self.ico_de_acordo = self._entrada_com_data(quadro, False)
+        Label(quadro, text="Hora:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(18, 6))
+        self.ent_de_acordo_hora = criar_entrada_sga(quadro, width=8)
+        self.ent_de_acordo_hora.pack(side=LEFT)
+        self.configurar_entrada(self.ent_de_acordo_hora, "hora")
+        self._nova_linha(rot, quadro, separador=False)
+        self._alvos["de_acordo_nome"] = (self.ent_de_acordo_nome, rot)
+        self._alvos["de_acordo_data"] = (self.ent_de_acordo_data, rot)
+        self._alvos["de_acordo_hora"] = (self.ent_de_acordo_hora, rot)
+
+    def _montar_rodape(self):
+        rodape = criar_rodape_sga(self.janela)
+        self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "neutro")
+        self.btn_salvar = doc_lib_criar_botao(rodape, "Salvar", self.salvar, "sucesso")
+        self.btn_editar = doc_lib_criar_botao(rodape, "Editar", self.editar, "aviso")
+        self.btn_gerar = doc_lib_criar_botao(rodape, "Gerar Documento", self.gerar, "primario")
+        self.btn_encaminhar = doc_lib_criar_botao(rodape, "Encaminhar MO", self.encaminhar, "agendar")
+        self.btn_reservar = doc_lib_criar_botao(rodape, "MO-Reservado", self.reservar, "aviso")
+        self.btn_cancelar = doc_lib_criar_botao(rodape, "Cancelar MO", self.cancelar_mo, "perigo")
+        botoes = (self.btn_voltar, self.btn_salvar, self.btn_editar, self.btn_gerar, self.btn_encaminhar,
+                  self.btn_reservar, self.btn_cancelar)
+        for posicao, botao in enumerate(botoes):
+            botao.place(relx=0.5, x=-507 + posicao * 146, rely=0.5, anchor="w", width=138, height=42)
+
+    # ------------------------------------------------------------------ calendário e campos dependentes
+
+    def _rotulo(self, texto, opcional=False, pai=None):
+        return Label(pai or self.card, text=texto + (" (opcional)" if opcional else ""), bg=SGA_CARD,
+                     fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold"), anchor="nw", justify="left", wraplength=225)
+
+    def _nova_linha(self, rotulo, conteudo, separador=True):
+        rotulo.grid(row=self._linha, column=0, sticky="nw", padx=(16, 8), pady=(12, 8))
+        conteudo.grid(row=self._linha, column=1, sticky="ew", padx=(0, 16), pady=(8, 8))
+        self._linha += 1
+        if separador:
+            self._separador()
+
+    def _separador(self):
+        Frame(self.card, bg="#E5EAF1", height=1).grid(row=self._linha, column=0, columnspan=2, sticky="ew")
+        self._linha += 1
+
+    @staticmethod
+    def forcar_maiusculas(widget):
+        """O que for digitado ou colado no campo passa para caixa alta na hora (o cursor não sai do lugar)."""
+        def converter(evento=None):
+            try:
+                if str(widget.cget("state")) != "normal":
+                    return
+                texto = widget.winfo_class() == "Text"
+                atual = widget.get("1.0", "end-1c") if texto else widget.get()
+                novo = atual.upper()
+                if novo == atual:
+                    return
+                posicao = widget.index(INSERT)
+                if texto:
+                    widget.delete("1.0", END)
+                    widget.insert("1.0", novo)
+                    widget.mark_set(INSERT, posicao)
+                else:
+                    widget.delete(0, END)
+                    widget.insert(0, novo)
+                    widget.icursor(posicao)
+            except TclError:
+                pass
+        widget.bind("<KeyRelease>", converter, add="+")
+        widget.bind("<<Paste>>", lambda e: widget.after_idle(converter), add="+")
+
+    def _campo_texto(self, chave, nome, linhas, barra=False, opcional=False, separador=True, maiusculas=False,
+                     dica=None):
+        """Linha com rótulo + campo de texto livre de várias linhas (maiusculas: converte a digitação para caixa
+        alta; dica: orientação em fonte 9, sob o nome do campo)."""
+        bloco = None
+        if dica:
+            bloco = Frame(self.card, bg=SGA_CARD)
+            rotulo = self._rotulo(nome, opcional, pai=bloco)
+            rotulo.pack(anchor="nw")
+            Label(bloco, text=dica, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w",
+                  justify="left").pack(anchor="nw", pady=(2, 0))
+        else:
+            rotulo = self._rotulo(nome, opcional)
+        quadro = Frame(self.card, bg=SGA_CARD)
+        texto = criar_area_texto_sga(quadro, wrap=WORD, height=linhas)
+        if barra:
+            rolagem = Scrollbar(quadro, orient=VERTICAL, command=texto.yview)
+            texto.configure(yscrollcommand=rolagem.set)
+            rolagem.pack(side=RIGHT, fill=Y)
+        texto.pack(side=LEFT, fill=BOTH, expand=True)
+        texto.bind("<Tab>", lambda e: (e.widget.tk_focusNext().focus_set(), "break")[1])
+        try:
+            texto.bind("<Shift-Tab>", lambda e: (e.widget.tk_focusPrev().focus_set(), "break")[1])
+            texto.bind("<ISO_Left_Tab>", lambda e: (e.widget.tk_focusPrev().focus_set(), "break")[1])
+        except TclError:
+            pass
+        texto.bind("<MouseWheel>", self._roda_texto)
+        texto.bind("<Key>", lambda e, w=texto: self._limpar_marca(w), add="+")
+        texto.bind("<FocusOut>", lambda e, w=texto: self._limpar_marca(w) if self._texto(w) else None, add="+")
+        if maiusculas:
+            self.forcar_maiusculas(texto)
+        self._controles.append(texto)
+        self._alvos[chave] = (texto, rotulo)
+        self._nova_linha(bloco or rotulo, quadro, separador)
+        return texto
+
+    def _roda_texto(self, evento):
+        """Roda do mouse sobre um texto: rola o próprio texto só se ele tiver o que rolar; senão,
+        quem rola é a janela."""
+        inicio, fim = evento.widget.yview()
+        if inicio <= 0.0 and fim >= 1.0:
+            return None
+        evento.widget.yview_scroll(int(-1 * (evento.delta / 120)), "units")
+        return "break"
+
+    def abrir_calendario(self, entrada, ano_curto, entrada_hora=None):
+        """Abre o calendário do campo de data. Com 'entrada_hora' (campo "Hora" de Recebido por), depois de escolhida a
+        data o campo recebe a hora atual quando está vazio (o usuário pode alterá-la em seguida)."""
+        self._limpar_marca(entrada)
+        doc_lib_selecionar_data(self.janela, entrada, ano_curto, lambda: self._apos_escolher_data(entrada_hora))
+
+    def _apos_escolher_data(self, entrada_hora=None):
+        if entrada_hora is not None and str(entrada_hora.cget("state")) == "normal" and not entrada_hora.get().strip():
+            doc_lib_definir_entrada(entrada_hora, datetime.now().strftime("%H:%M"))
+            self._limpar_marca(entrada_hora)
+
+    def _ao_mudar_empresa(self, prefixo, evento=False):
+        """Em OUTRA mostra o campo para o nome da empresa; nas demais opções, esconde e limpa o campo."""
+        combo, rotulo_outra, entrada_outra = self._empresas[prefixo]
+        self._limpar_marca(combo)
+        if combo.get() == "OUTRA":
+            rotulo_outra.pack(side=LEFT, padx=(18, 6))
+            entrada_outra.pack(side=LEFT)
+            if evento:
+                entrada_outra.focus_set()
+        else:
+            rotulo_outra.pack_forget()
+            entrada_outra.pack_forget()
+            doc_lib_definir_entrada(entrada_outra, "")
+            self._limpar_marca(entrada_outra)
+
+    def _ao_mudar_informativa(self):
+        """Mensagem meramente informativa: o De acordo é desabilitado e limpo (uma coisa ou outra, nunca as duas)."""
+        self._limpar_marca(self.ent_de_acordo_nome)
+        if self.var_informativa.get():
+            for entrada in (self.ent_de_acordo_nome, self.ent_de_acordo_data, self.ent_de_acordo_hora):
+                doc_lib_definir_entrada(entrada, "")
+                self._limpar_marca(entrada)
+        self._ajustar_de_acordo()
+
+    def _ajustar_de_acordo(self):
+        """O De acordo fica editável conforme o estado da MO: em edição só se ela não é meramente informativa; depois de
+        emitida, só se não é informativa e o De acordo ainda não foi registrado (salvo); cancelada, nunca."""
+        gravado = self._doc_gravado or {}
+        if self.cancelada:
+            travar = True
+        elif self.emitido:
+            travar = bool(gravado.get("informativa")) or doc_lib_de_acordo_mo_completo(gravado)
+        else:
+            travar = self.salvo or bool(self.var_informativa.get())
+        for widget in (self.ent_de_acordo_nome, self.ent_de_acordo_data, self.ico_de_acordo, self.ent_de_acordo_hora):
+            doc_lib_bloquear_widget(widget, travar)
+
+    def _atualizar_numero_provisorio(self):
+        """Mostra o número da MO: o definitivo (depois do primeiro Salvar) ou o que ela vai receber (cinza e itálico: só é
+        consumido ao salvar)."""
+        if self.numero:
+            self.lbl_numero.configure(text=self.numero, fg=SGA_TEXTO, font=(SGA_FONTE, 12, "bold"))
+            return
+        try:
+            self.numero_previsto = doc_lib_numeros_previstos(1, "MO")[0]
+        except sqlite3.Error:
+            self.numero_previsto = ""
+        self.lbl_numero.configure(text=(self.numero_previsto + "  (será consumido ao salvar)") if self.numero_previsto else "",
+                                  fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 12, "italic"))
+
+    # ------------------------------------------------------------------ leitura e gravação dos campos
+
+    def configurar_entrada(self, entrada, tipo, ano_curto=False):
+        """Liga ao campo a formatação automática (data dd/mm/aa(aa), hora HH:MM) e a limpeza da marca de erro.
+        """
+        entrada.configure(readonlybackground=DOC_LIB_COR_BLOQUEADO)
+        if tipo in ("data", "hora"):
+            entrada.bind("<FocusOut>", lambda e, w=entrada: self._ao_sair_campo(w, tipo, ano_curto),
+                         add="+")
+        entrada.bind("<Key>", lambda e, w=entrada: self._limpar_marca(w), add="+")
+        if tipo not in ("data", "hora"):
+            entrada.bind("<FocusOut>", lambda e, w=entrada: self._limpar_marca(w) if w.get().strip() else None,
+                         add="+")
+
+    def _ao_sair_campo(self, entrada, tipo, ano_curto):
+        try:
+            if str(entrada.cget("state")) != "normal":
+                return
+            texto = entrada.get().strip()
+            if texto:
+                novo = doc_lib_normalizar_data(texto, ano_curto) if tipo == "data" else doc_lib_normalizar_hora(texto)
+                if novo:
+                    self._limpar_marca(entrada)
+                    if novo != entrada.get():
+                        entrada.delete(0, END)
+                        entrada.insert(0, novo)
+                else:
+                    self._marcar(entrada)         # formato inválido: destaca já, sem esperar o Salvar
+        except TclError:
+            return
+
+    def _marcar(self, widget, rotulo=None):
+        """Destaca em vermelho um campo (contorno) e/ou seu rótulo."""
+        if widget is not None and widget not in self._marcados:
+            classe = widget.winfo_class()
+            if classe in ("Entry", "Text"):
+                self._marcados[widget] = {"highlightbackground": str(widget.cget("highlightbackground")),
+                                          "highlightcolor": str(widget.cget("highlightcolor"))}
+            elif classe == "TCombobox":
+                self._marcados[widget] = {"style": str(widget.cget("style"))}
+        if widget is not None and widget in self._marcados:
+            if widget.winfo_class() == "TCombobox":
+                widget.configure(style="DocLibErro.TCombobox")
+            else:
+                widget.configure(highlightbackground=SGA_VERMELHO, highlightcolor=SGA_VERMELHO)
+        if rotulo is not None and rotulo not in self._rotulos_marcados:
+            self._rotulos_marcados[rotulo] = str(rotulo.cget("fg"))
+            rotulo.configure(fg=SGA_VERMELHO)
+
+    def _limpar_marca(self, widget):
+        original = self._marcados.pop(widget, None)
+        if original:
+            try:
+                widget.configure(**original)
+            except TclError:
+                pass
+
+    def esquecer_marcas(self, widget):
+        """Chamado antes de destruir um campo que pode estar marcado."""
+        self._marcados.pop(widget, None)
+        for filho in widget.winfo_children():
+            self._marcados.pop(filho, None)
+
+    def _limpar_erros(self):
+        for widget in list(self._marcados):
+            self._limpar_marca(widget)
+        for rotulo, cor in list(self._rotulos_marcados.items()):
+            try:
+                rotulo.configure(fg=cor)
+            except TclError:
+                pass
+        self._rotulos_marcados.clear()
+
+    def rolar_ate(self, widget):
+        """Rola a janela até deixar o campo visível."""
+        try:
+            self.janela.update_idletasks()
+            y = 0
+            atual = widget
+            while atual is not None and atual is not self.inner:
+                y += atual.winfo_y()
+                atual = atual.master
+            total = max(self.inner.winfo_height(), 1)
+            self.canvas.yview_moveto(max(0.0, (y - 120) / total))
+        except TclError:
+            pass
+
+    def _mostrar_erros(self, erros):
+        """Informa os campos pendentes (mensagem objetiva), destaca-os em vermelho e leva o usuário ao primeiro."""
+        primeiro = None
+        for chaves, _ in erros:
+            for chave in chaves:
+                widget, rotulo = self._alvo_da_chave(chave)
+                self._marcar(widget, rotulo)
+                if primeiro is None:
+                    primeiro = widget if widget is not None else rotulo
+        linhas = ["Existem campos obrigatórios não preenchidos ou incorretos.",
+                  "Os campos marcados em vermelho precisam ser corrigidos:", ""]
+        linhas += [f"• {mensagem}" for _, mensagem in erros[:14]]
+        if len(erros) > 14:
+            linhas.append(f"... e mais {len(erros) - 14} pendência(s).")
+        messagebox.showwarning("Campos obrigatórios", "\n".join(linhas), parent=self.janela)
+        if primeiro is not None:
+            self.rolar_ate(primeiro)
+            if primeiro.winfo_class() in ("Entry", "Text", "TCombobox"):
+                primeiro.focus_set()
+
+    @staticmethod
+    def _texto(widget):
+        return widget.get("1.0", "end-1c").strip()
+
+    @staticmethod
+    def _definir_texto(widget, valor):
+        estado = str(widget.cget("state"))
+        widget.configure(state=NORMAL)
+        widget.delete("1.0", END)
+        widget.insert("1.0", valor or "")
+        widget.configure(state=estado)
+
+    def _assinatura(self):
+        return json.dumps(self._coletar(), sort_keys=True, ensure_ascii=False)
+
+    def _tem_alteracoes_pendentes(self):
+        return self._assinatura() != self._assinatura_ref
+
+    def _alvo_da_chave(self, chave):
+        """(widget, rótulo) do campo identificado pela chave devolvida pela validação."""
+        return self._alvos.get(chave, (None, None))
+
+    def _coletar(self):
+        """Todos os dados da tela (como digitados, sem normalizar)."""
+        dados = {"id": self.mo_id, "revisao": self.revisao,
+                 "data_envio": self.ent_data.get().strip(),
+                 "classificacao": self.var_classificacao.get(),
+                 "emitente_nome": self.emitente_nome or "",
+                 "emitente_orgao": self.ent_emitente_orgao.get().strip(),
+                 "destinatario_orgao": self.ent_destinatario_orgao.get().strip(),
+                 "destinatario_nome": self.ent_destinatario_nome.get().strip(),
+                 "recebido_nome": self.ent_recebido_nome.get().strip(),
+                 "recebido_data": self.ent_recebido_data.get().strip(),
+                 "recebido_hora": self.ent_recebido_hora.get().strip(),
+                 "assunto": self._texto(self.txt_assunto), "descricao": self._texto(self.txt_descricao),
+                 "observacoes": self._texto(self.txt_observacoes),
+                 "informativa": 1 if self.var_informativa.get() else 0,
+                 "de_acordo_nome": self.ent_de_acordo_nome.get().strip(),
+                 "de_acordo_data": self.ent_de_acordo_data.get().strip(),
+                 "de_acordo_hora": self.ent_de_acordo_hora.get().strip()}
+        for prefixo, (combo, _, entrada_outra) in self._empresas.items():
+            empresa = combo.get().strip()
+            dados[f"{prefixo}_empresa"] = empresa
+            dados[f"{prefixo}_empresa_outra"] = entrada_outra.get().strip() if empresa == "OUTRA" else ""
+        return dados
+
+    def _preencher(self, doc):
+        """Mostra na tela uma MO gravada no banco."""
+        self._limpar_erros()
+        self.mo_id, self.revisao, self.numero, self.status = doc["id"], doc["revisao"], doc["numero"], doc["status"]
+        self.cancelada = doc["status"] == STATUS_ATEIE_CANCELADO
+        if doc_lib_documento_reservado_mo(doc):
+            # MO reservada: quem a preenche passa a constar como emitente (a reserva fica registrada em reservado_por)
+            self.usuario = obter_nome_usuario_logado()
+            self.emitente_nome = obter_nome_completo_usuario(self.usuario)
+        else:
+            self.emitente_nome = doc["emitente_nome"] or ""
+        self.lbl_emitente_nome.configure(text=self.emitente_nome or "-")
+        doc_lib_definir_entrada(self.ent_data, doc["data_envio"] or "")
+        self.var_classificacao.set(doc["classificacao"] or "")
+        for prefixo, (combo, _, entrada_outra) in self._empresas.items():
+            estado_combo = str(combo.cget("state"))
+            combo.configure(state="readonly")
+            combo.set(doc[f"{prefixo}_empresa"] or "")
+            combo.configure(state=estado_combo)
+            doc_lib_definir_entrada(entrada_outra, (doc[f"{prefixo}_empresa_outra"] or "").upper())
+            self._ao_mudar_empresa(prefixo)
+        for entrada, chave in ((self.ent_emitente_orgao, "emitente_orgao"), (self.ent_destinatario_orgao, "destinatario_orgao"),
+                               (self.ent_destinatario_nome, "destinatario_nome"), (self.ent_recebido_nome, "recebido_nome"),
+                               (self.ent_recebido_data, "recebido_data"), (self.ent_recebido_hora, "recebido_hora"),
+                               (self.ent_de_acordo_nome, "de_acordo_nome"), (self.ent_de_acordo_data, "de_acordo_data"),
+                               (self.ent_de_acordo_hora, "de_acordo_hora")):
+            doc_lib_definir_entrada(entrada, doc[chave] or "")
+        for widget, chave in ((self.txt_assunto, "assunto"), (self.txt_descricao, "descricao"),
+                              (self.txt_observacoes, "observacoes")):
+            self._definir_texto(widget, doc[chave])
+        self.var_informativa.set(1 if doc["informativa"] else 0)
+        self._atualizar_numero_provisorio()
+
+    def _carregar_documento(self, doc):
+        """Mostra a MO gravada: travada (versão salva) e, se já foi gerada, no estado EMITIDO (só o De acordo editável).
+        Uma MO RESERVADA abre em modo editável (sem travar) para o preenchimento; uma MO CANCELADA abre só para consulta."""
+        self._preencher(doc)
+        self._doc_gravado = doc
+        self.emitido = bool(doc.get("emitido"))
+        self.reservado = doc_lib_documento_reservado_mo(doc) and not self.emitido
+        self.salvo = not self.reservado
+        self._aplicar_bloqueios()
+        self._assinatura_ref = self._assinatura()
+        self._atualizar_estado()
+
+    # ------------------------------------------------------------------ estados
+
+    def _aplicar_bloqueios(self):
+        """Libera/trava cada campo conforme o estado da MO:
+          - nova ou em edição ........ tudo editável (o De acordo, só se a MO não é meramente informativa)
+          - salva (travada) .......... nada editável (Editar libera)
+          - EMITIDA (já gerada) ...... todos os campos travados para sempre; só o De acordo pode ser preenchido (uma vez,
+                                       e não numa MO meramente informativa)
+          - CANCELADA ................ nada editável
+        MO reservada abre editável."""
+        travar = self.emitido or self.salvo or self.cancelada
+        for widget in self._controles:
+            doc_lib_bloquear_widget(widget, travar)
+        for prefixo, (_, _, entrada_outra) in self._empresas.items():
+            doc_lib_bloquear_widget(entrada_outra, travar)
+        self._ajustar_de_acordo()
+
+    def _pendente(self):
+        """True se existem dados ainda não salvos (MO nova, em edição ou, depois de emitida, com o De acordo alterado)."""
+        if self.mo_id is None:
+            return True
+        if self.cancelada:
+            return False
+        if self.emitido or self.reservado:      # reservada: já nasce editável, só há o que salvar depois de digitar
+            return self._assinatura() != self._assinatura_ref
+        return not self.salvo
+
+    def _atualizar_estado(self):
+        pendente = self._pendente()
+        self._ultimo_pendente = pendente
+        doc_lib_estado_botao(self.btn_voltar, True)
+        doc_lib_estado_botao(self.btn_salvar, pendente)
+        doc_lib_estado_botao(self.btn_editar, self.mo_id is not None and not self.emitido and self.salvo
+                             and not self.cancelada)
+        doc_lib_estado_botao(self.btn_gerar, self.mo_id is not None and not pendente)
+        doc_lib_estado_botao(self.btn_cancelar, self.mo_id is not None and not pendente
+                             and self.status in DOC_LIB_STATUS_CANCELAVEIS_MO)
+        if self.mo_id is None:
+            texto = "Nova MO (não salva)"
+        else:
+            situacao = ("cancelada" if self.cancelada else "emitida" if self.emitido else
+                        "reservada" if self.reservado else "salva" if self.salvo else "em edição")
+            texto = f"MO {self.numero} - {situacao} (rev. {self.revisao})" \
+                    + (" - alterações não salvas" if pendente and (self.emitido or self.reservado) else "")
+        self.lbl_status.configure(text=texto)
+
+    # ------------------------------------------------------------------ ações dos botões
+
+    def salvar(self):
+        self._limpar_erros()
+        dados = doc_lib_normalizar_mo(self._coletar())
+        erros = doc_lib_validar_mo(dados, self._doc_gravado)
+        if erros:
+            self._mostrar_erros(erros)
+            return
+        usuario = obter_nome_usuario_logado()
+        de_acordo_antes = doc_lib_de_acordo_mo_completo(self._doc_gravado)
+        numero_previsto = self.numero_previsto if self.mo_id is None else ""
+        ja_emitida = self.emitido
+        era_reservada = self.reservado
+        try:
+            mo_id = doc_lib_salvar_mo(dados, usuario)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except DocLibBloqueado as erro:
+            messagebox.showwarning("Alteração não permitida", str(erro), parent=self.janela)
+            return
+        except DocLibRegra as erro:
+            messagebox.showwarning("Regra da MO", str(erro), parent=self.janela)
+            return
+        except (sqlite3.Error, OSError) as erro:
+            messagebox.showerror("Erro", f"Não foi possível salvar a MO: {erro}", parent=self.janela)
+            return
+        doc = doc_lib_carregar_mo(mo_id)
+        self._carregar_documento(doc)
+
+        if ja_emitida:
+            mensagem = "MO atualizada com sucesso!"
+            if not de_acordo_antes and doc_lib_de_acordo_mo_completo(doc):
+                mensagem += (f"\n\n'De acordo' registrado: status {doc['status']}.\n\nGere o documento novamente: o novo "
+                             f"PDF traz o De acordo e não tem mais o aviso 'Aguardando o De Acordo do documento'.")
+        else:
+            mensagem = ("MO reservada preenchida e salva com sucesso!" if era_reservada else "MO salva com sucesso!") + \
+                f"\n\nMO Nº COG: {doc['numero']}\nStatus: {doc['status']}"
+            if numero_previsto and numero_previsto != doc["numero"]:
+                mensagem += (f"\n\nA numeração foi atualizada porque outro usuário emitiu números enquanto esta MO era "
+                             f"preenchida: {numero_previsto} passou a {doc['numero']}.")
+            mensagem += "\n\nUse 'Gerar Documento' para emitir o PDF."
+        messagebox.showinfo("Sucesso", mensagem, parent=self.janela)
+
+    def editar(self):
+        if not self.salvo or self.emitido or self.cancelada:
+            return
+        self.salvo = False
+        self._aplicar_bloqueios()
+        self._atualizar_numero_provisorio()
+        self._assinatura_ref = self._assinatura()
+        self._atualizar_estado()
+
+    def gerar(self):
+        """Gera o PDF a partir da versão salva (revalida antes), arquiva e oferece abrir/imprimir. A primeira geração EMITE
+        a MO: status "Aguarda De Acordo" (ou "Concluído", se meramente informativa) e proteção dos dados (só o De acordo
+        segue editável)."""
+        if self.mo_id is None or self._pendente():
+            if self.reservado and self.mo_id is not None:
+                messagebox.showwarning(
+                    "Atenção", "Há dados digitados que ainda não foram salvos.\n\nSalve o preenchimento da MO reservada "
+                               "ou, para imprimir o formulário em branco, abra-a novamente pelo GRID MO.",
+                    parent=self.janela)
+            else:
+                messagebox.showwarning("Atenção", "Salve a MO antes de gerar o documento.", parent=self.janela)
+            return
+        try:
+            doc = doc_lib_carregar_mo(self.mo_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler a MO salva: {erro}", parent=self.janela)
+            return
+        if doc is None or doc["revisao"] != self.revisao:
+            messagebox.showwarning("Documento alterado",
+                                   "Esta MO foi alterada por outro usuário depois de aberta nesta janela.\n\n"
+                                   "Feche-a e abra-a novamente (GRID MO) antes de gerar o documento.", parent=self.janela)
+            return
+        reservada = doc_lib_documento_reservado_mo(doc)      # formulário em branco: nada a validar nem a emitir
+        cancelada = doc["status"] == STATUS_ATEIE_CANCELADO
+        erros = [] if reservada or cancelada else doc_lib_validar_mo(doc, doc)
+        if erros:
+            messagebox.showwarning("Campos obrigatórios",
+                                   "O documento salvo possui pendências e não pode ser gerado:\n\n"
+                                   + "\n".join(f"• {mensagem}" for _, mensagem in erros[:14]), parent=self.janela)
+            return
+        if not self.emitido and not reservada and not cancelada and not messagebox.askyesno(
+                "Emitir MO",
+                "Ao gerar o documento a MO será considerada EMITIDA, com status "
+                + ("'Concluído' (mensagem meramente informativa)" if doc["informativa"] else "'Aguarda De Acordo'")
+                + ".\n\nA partir daí os dados do documento não poderão ser alterados"
+                + ("." if doc["informativa"] else " (só o De acordo poderá ser preenchido).")
+                + "\n\nDeseja gerar o documento?", parent=self.janela):
+            return
+        try:
+            caminho, aviso = doc_lib_arquivar_pdf_mo(doc, obter_nome_usuario_logado())
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except Exception as erro:
+            messagebox.showerror("Erro", f"Falha ao gerar/arquivar o documento MO: {erro}", parent=self.janela)
+            return
+        doc = doc_lib_carregar_mo(self.mo_id)
+        self._carregar_documento(doc)
+        lembrete = None
+        if reservada:
+            lembrete = ("MO reservada: o PDF é um formulário em branco (só o número). A MO continua Reservada e editável; "
+                        "depois de usá-la, abra-a no GRID MO e preencha todos os campos.")
+        elif cancelada:
+            lembrete = "MO cancelada: o PDF traz o número riscado e as informações do cancelamento."
+        elif doc["status"] == STATUS_ATEIE_AGUARDA_DE_ACORDO:
+            lembrete = ("Status: Aguarda De Acordo. Quando a outra empresa responder, registre o De acordo (nome, data e "
+                        "hora) e gere o documento novamente.")
+        doc_lib_dialogo_documento_gerado(self.janela, caminho, aviso, lembrete)
+
+    def reservar(self):
+        """Botão MO-Reservado: pede a quantidade (1 a 10) e reserva os números na sequência da última MO emitida ou
+        reservada. Cada número vira uma MO no GRID MO, com status Reservado."""
+        usuario = obter_nome_usuario_logado()
+        reservados = doc_lib_dialogo_reserva(self.janela, usuario, obter_nome_completo_usuario(usuario), rotulo="MO",
+                                             tipo="MO", reservar_numeros=doc_lib_reservar_mo)
+        if not reservados:
+            return
+        self._atualizar_numero_provisorio()            # o número previsto da MO nova avançou
+        numeros = [item["numero"] for item in reservados]
+        messagebox.showinfo(
+            "MO-Reservado",
+            f"{len(numeros)} número(s) de MO reservado(s):\n\n{', '.join(numeros)}\n\n"
+            f"As MOs reservadas aparecem no GRID MO com status 'Reservado'. Para imprimir o formulário em branco, abra a "
+            f"MO reservada no GRID e use 'Gerar Documento'.", parent=self.janela)
+
+    def cancelar_mo(self):
+        """Cancela a MO (com justificativa). O número cancelado fica registrado e nunca é reaproveitado."""
+        if self.mo_id is None or self._pendente() or self.status not in DOC_LIB_STATUS_CANCELAVEIS_MO:
+            return
+        if not messagebox.askyesno(
+                "Confirmar cancelamento",
+                f"Deseja realmente cancelar a MO {self.numero}?\n\nO número {self.numero} fica registrado como cancelado "
+                f"e não será reaproveitado.", parent=self.janela):
+            return
+        justificativa = solicitar_justificativa(self.janela, self.numero, rotulo="MO")
+        if justificativa is None:
+            return
+        try:
+            doc_lib_cancelar_mo(self.mo_id, obter_nome_usuario_logado(), justificativa, self.revisao)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except (ValueError, sqlite3.Error) as erro:
+            messagebox.showerror("Erro", f"Não foi possível cancelar a MO: {erro}", parent=self.janela)
+            return
+        self._carregar_documento(doc_lib_carregar_mo(self.mo_id))
+        messagebox.showinfo("MO cancelada", f"A MO {self.numero} foi cancelada.\n\nGere o documento novamente para que o "
+                                            f"PDF mostre o cancelamento.", parent=self.janela)
+
+    def encaminhar(self):
+        """Botão Encaminhar MO: depois de confirmar numa janela, envia por e-mail (do remetente escolhido entre
+        EMAIL_ATEIE_REMETENTES), com o PDF do documento anexado, a MO já emitida. Os destinatários e os e-mails em cópia
+        vêm do cadastro de e-mails: empresa do Emitente (3.1) e, como opção, a empresa do Destinatário (4.1). Depois do
+        envio a MO passa a "Sim, em dd/mm/aaaa" em "Enviado e-mail" e não pode mais ser encaminhada."""
+        titulo = "Encaminhar MO"
+        if self.mo_id is None or self._pendente():
+            messagebox.showwarning(titulo, "Salve a MO e gere o documento antes de encaminhá-la.", parent=self.janela)
+            return
+        try:
+            doc = doc_lib_carregar_mo(self.mo_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler a MO salva: {erro}", parent=self.janela)
+            return
+        if doc is None or doc["revisao"] != self.revisao:
+            messagebox.showwarning("Documento alterado",
+                                   "Esta MO foi alterada por outro usuário depois de aberta nesta janela.\n\n"
+                                   "Feche-a e abra-a novamente (GRID MO) antes de encaminhá-la.", parent=self.janela)
+            return
+        if not doc["emitido"] or doc["status"] in (STATUS_ATEIE_CANCELADO, STATUS_ATEIE_RESERVADO):
+            dica = ("\n\nUse 'Gerar Documento' para emitir a MO." if doc["status"] in (STATUS_ATEIE_EM_ANALISE,) else "")
+            messagebox.showwarning(titulo, f"O envio só é permitido para MO já emitida e não cancelada.\n\n"
+                                           f"Situação atual: {doc['status']}{dica}", parent=self.janela)
+            return
+        if doc["email_enviado_em"]:
+            messagebox.showwarning(
+                titulo, "O e-mail desta MO já foi enviado e ela não pode ser encaminhada novamente.\n\n"
+                        f"• {doc['numero']}: {doc_lib_texto_email_enviado(doc['email_enviado_em'])}\n\n"
+                        "Se o registro estiver errado, volte-o para 'Não' no GRID MO (botão 'Marcar e-mail enviado').",
+                parent=self.janela)
+            return
+        usuario = obter_nome_usuario_logado()
+
+        # Ao clicar no botão, junto com a abertura da janela de envio, o PDF que vai anexado ao e-mail (sem o aviso de
+        # De Acordo) é gerado e uma cópia vai para a pasta Downloads, para o caso de ser preciso enviar manualmente.
+        self.janela.configure(cursor="watch")
+        self.janela.update_idletasks()
+        try:
+            caminho_pdf, aviso = doc_lib_pdf_para_envio_mo(doc, usuario)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except (DocLibRegra, sqlite3.Error, OSError) as erro:
+            messagebox.showerror(titulo, f"Não foi possível preparar o PDF do documento para envio:\n\n{erro}",
+                                 parent=self.janela)
+            return
+        finally:
+            self.janela.configure(cursor="")
+        caminho_copia, erro_copia = doc_lib_copiar_para_downloads(caminho_pdf)
+
+        informativa = bool(doc["informativa"])
+        assunto = EMAIL_MO_ASSUNTO_INFORMATIVA if informativa else EMAIL_MO_ASSUNTO
+        texto = EMAIL_MO_TEXTO_INFORMATIVA if informativa else EMAIL_MO_TEXTO
+        envio = doc_lib_dialogo_encaminhar(
+            self.janela, {"empresa": doc["emitente_empresa"], "empresa_outra": doc["emitente_empresa_outra"]},
+            [doc["numero"]], usuario, caminho_pdf, caminho_copia, erro_copia, rotulo="MO", assunto=assunto, texto=texto,
+            opcao_inicial=doc_lib_empresa_emitente_mo(doc, True) if doc["destinatario_empresa"] != "OUTRA"
+            else doc["destinatario_empresa_outra"], rotulo_empresa="Empresa emitente:",
+            subtitulo="Envio por e-mail, com o PDF do documento anexado, " + ("para conhecimento" if informativa
+                                                                              else "para análise e De Acordo"),
+            descricao_anexo="PDF do documento" + ("" if informativa else " sem o aviso de De Acordo"))
+        if not envio:
+            return
+        remetente, destinatarios, copias = envio["remetente"], envio["destinatarios"], envio["copias"]
+        if doc_lib_email_enviado_mo(self.mo_id):    # conferência final: outro usuário pode ter encaminhado antes
+            messagebox.showwarning(
+                titulo, "O e-mail NÃO foi enviado: esta MO foi encaminhada por outro usuário enquanto esta janela estava "
+                        f"aberta.\n\n• {doc['numero']}: {doc_lib_texto_email_enviado(doc_lib_email_enviado_mo(self.mo_id))}",
+                parent=self.janela)
+            return
+
+        assunto_final = f"{assunto}: {doc['numero']}"
+        corpo = texto.format(numeros=doc["numero"])
+        manual = caminho_copia or caminho_pdf              # arquivo para enviar à mão se o e-mail falhar
+        self.janela.configure(cursor="watch")
+        self.janela.update_idletasks()
+        try:
+            metodo = doc_lib_enviar_email(remetente, destinatarios, copias, assunto_final, corpo, caminho_pdf)
+        except (DocLibEmailErro, OSError) as erro:
+            messagebox.showerror(titulo, f"O e-mail NÃO foi enviado.\n\n{erro}\n\n"
+                                         f"Para enviar manualmente, use o arquivo:\n{manual}\n\n"
+                                         f"Depois de enviar à mão, marque o e-mail como enviado no GRID MO "
+                                         f"(botão 'Marcar e-mail enviado').", parent=self.janela)
+            return
+        finally:
+            self.janela.configure(cursor="")
+        resumo = (f"E-mail enviado ({metodo}).\n\nDe: {remetente}\nPara: {'; '.join(destinatarios)}\n"
+                  + (f"Cc: {'; '.join(copias)}\n" if copias else "")
+                  + f"MO: {doc['numero']}\nAnexo: {os.path.basename(caminho_pdf)}")
+        if caminho_copia:
+            resumo += f"\nCópia do arquivo enviado: {caminho_copia}"
+        try:
+            doc_lib_registrar_envio_mo(doc["id"], remetente, destinatarios, copias, assunto_final, caminho_pdf, metodo,
+                                       usuario)
+            resumo += f"\n\nGRID MO, Enviado e-mail: Sim, em {datetime.now().strftime('%d/%m/%Y')}"
+        except sqlite3.Error as erro:
+            resumo += (f"\n\nAtenção: o e-mail foi enviado, mas o envio não pôde ser registrado no banco: {erro}\n"
+                       f"Marque o e-mail como enviado no GRID MO (botão 'Marcar e-mail enviado').")
+        if aviso:
+            resumo += f"\n\n{aviso}"
+        messagebox.showinfo(titulo, resumo, parent=self.janela)
+
+    def abrir_salvo(self):
+        if self._tem_alteracoes_pendentes() and not messagebox.askyesno(
+                "Dados não salvos", "Existem dados não salvos nesta MO. Abrir outro documento descarta essas "
+                                    "alterações.\n\nDeseja continuar?", parent=self.janela):
+            return
+        try:
+            escolha = doc_lib_escolher_mo(self.janela)
+            doc = doc_lib_carregar_mo(escolha[0]) if escolha else None
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler as MOs salvas: {erro}", parent=self.janela)
+            return
+        if escolha is None:
+            return
+        if doc is None:
+            messagebox.showerror("Erro", "A MO selecionada não foi encontrada.", parent=self.janela)
+            return
+        self._carregar_documento(doc)
+
+    def voltar(self):
+        if self._tem_alteracoes_pendentes() and not messagebox.askyesno(
+                "Dados não salvos", "Existem dados não salvos nesta MO.\n\nDeseja sair mesmo assim?",
+                parent=self.janela):
+            return
+        self.janela.destroy()
+
+
 # ---------------------------------------------------
 # JANELAS DO MENU Doc_Lib. (CLICK_25)
 # ---------------------------------------------------
@@ -19384,7 +21393,19 @@ def cmd_click25_ai():
 
 
 def cmd_click25_mo():
-    doc_lib_pagina_em_construcao("MO")
+    """Doc_Lib. > MO: cadastro, edição, salvamento e geração da MO (Mensagem Operativa)."""
+    if not current_user:
+        messagebox.showwarning("Atenção", "Nenhum usuário está logado. Faça login primeiro.")
+        return
+    if not obter_nome_usuario_logado():
+        messagebox.showwarning("Atenção", "Não foi possível identificar o usuário logado.")
+        return
+    try:
+        garantir_banco_doc_lib()
+    except sqlite3.Error as erro:
+        messagebox.showerror("Erro", f"Não foi possível preparar o banco de dados do Doc_Lib.: {erro}")
+        return
+    JanelaMO()
 
 
 def cmd_click25_sm_avulso():
