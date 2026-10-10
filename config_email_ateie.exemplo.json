@@ -1,5 +1,5 @@
 {
-  "_ajuda": "Copie este arquivo para config_email_ateie.json (mesma pasta do main.py) e preencha. O config_email_ateie.json NAO vai para o GitHub (esta no .gitignore) porque pode ter senha. O remetente e escolhido na janela do Encaminhar ATEIE (nmaganha@alupar.com.br ou jbarros@alupar.com.br; lista EMAIL_ATEIE_REMETENTES no main.py).",
+  "_ajuda": "Copie este arquivo para config_email_ateie.json (mesma pasta do main.py) e preencha. O config_email_ateie.json NAO vai para o GitHub (esta no .gitignore) porque pode ter senha. O remetente e escolhido na janela do Encaminhar ATEIE e do Encaminhar AI (nmaganha@alupar.com.br ou jbarros@alupar.com.br; lista EMAIL_ATEIE_REMETENTES no main.py).",
   "_metodo": "auto = SMTP se smtp_servidor estiver preenchido; senao Outlook (Windows, precisa de: pip install pywin32). Use \"smtp\" ou \"outlook\" para forcar um deles.",
   "_smtp_seguranca": "starttls (porta 587, o mais comum), ssl (porta 465) ou nenhuma (rele interno sem criptografia, por exemplo porta 25).",
   "metodo": "auto",

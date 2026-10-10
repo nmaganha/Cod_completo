@@ -1,4 +1,4 @@
-# Código atualizado em 10-10-26 - Click_25: Encaminhar ATEIE (remetente à escolha e e-mails em cópia), cadastro de e-mails com edição, coluna Enviado e-mail no GRID ATEIE e hora automática em Pessoal Notificado
+# Código atualizado em 10-10-26 - Click_25: AI (Autorização para Impedimento de Equipamento de Interligação) implantado no menu Doc_Lib.; ATEIE: remetente à escolha, e-mails em cópia, coluna Enviado e-mail
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -12358,6 +12358,8 @@ def garantir_banco_doc_lib():
                     cursor.execute("UPDATE doclib_ateie_intervencoes SET email_enviado_em = ?, email_enviado_por = ?, "
                                    "email_enviado_origem = 'Sistema' WHERE numero = ?", (data, enviado_por, numero))
 
+    _garantir_tabelas_doc_lib_ai(cursor)         # tabelas do AI (Click_25)
+
     conexao.commit()
     conexao.close()
     _doc_lib_migrar_dados()
@@ -12510,6 +12512,9 @@ def _doc_lib_ultimo_numero(cursor, tipo, ano):
     ultimo = linha[0] if linha else 0
     if tipo == "ATEIE":
         cursor.execute("SELECT MAX(sequencia) FROM doclib_ateie_intervencoes WHERE ano = ?", (ano,))
+        ultimo = max(ultimo, cursor.fetchone()[0] or 0)
+    elif tipo == "AI":                  # o AI tem numeração própria (0001/26...), independente da do ATEIE
+        cursor.execute("SELECT MAX(sequencia) FROM doclib_ai_intervencoes WHERE ano = ?", (ano,))
         ultimo = max(ultimo, cursor.fetchone()[0] or 0)
     return ultimo
 
@@ -14533,26 +14538,45 @@ class JanelaListaAteie:
     """Janela "GRID ATEIE": UMA linha por ATEIE (número), com busca livre e filtros por coluna que
     podem ser combinados (clique no título da coluna para ver os valores existentes, sem repetição). O texto de
     cada coluna quebra em mais de uma linha quando é maior que a largura; Equipamento de Interligação, Empresa e
-    Local aparecem sempre em caixa alta."""
+    Local aparecem sempre em caixa alta.
+
+    A janela do AI (JanelaListaAI) usa esta mesma classe, trocando os atributos abaixo e os três métodos de acesso
+    ao banco (_listar, _agrupar_reservados e _definir_email_enviado)."""
 
     SEM_FILTRO = "(Todos)"
+    ROTULO = "ATEIE"                     # nome do documento nos textos da janela
+    PLURAL = "ATEIEs"
+    COLUNAS = DOC_LIB_COLUNAS_LISTA
+
+    @staticmethod
+    def _listar():
+        return doc_lib_listar_ateie()
+
+    @staticmethod
+    def _agrupar_reservados(selecao, usuario):
+        return doc_lib_agrupar_reservados(selecao, usuario)
+
+    @staticmethod
+    def _definir_email_enviado(selecao, data, usuario):
+        return doc_lib_definir_email_enviado(selecao, data, usuario)
 
     def __init__(self, parent):
         self.parent = parent
-        self.resultado = None            # (id do documento, linha da tabela) do ATEIE escolhido
+        self.resultado = None            # (id do documento, linha da tabela) do documento escolhido
         self.filtros = {}                # campo -> valor selecionado
         self.popup = None
         self.carregar_registros()
 
         janela = self.janela = Toplevel(parent)
-        janela.title("GRID ATEIE")
+        janela.title(f"GRID {self.ROTULO}")
         largura = min(1560, max(900, janela.winfo_screenwidth() - 20))     # a nova coluna pede mais largura
         janela.geometry(f"{largura}x700")
         janela.minsize(900, 500)
         janela.transient(parent)
-        ui_dialogo(janela, "GRID ATEIE", "Selecione o ATEIE e clique em Abrir (ou dê duplo clique). Clique no título "
-                                         "de uma coluna para filtrar. Para agrupar ATEIEs reservados, selecione-os com "
-                                         "Ctrl+clique (ou Shift+clique) e clique em Agrupar ATEIEs.")
+        ui_dialogo(janela, f"GRID {self.ROTULO}",
+                   f"Selecione o {self.ROTULO} e clique em Abrir (ou dê duplo clique). Clique no título de uma coluna "
+                   f"para filtrar. Para agrupar {self.PLURAL} reservados, selecione-os com Ctrl+clique (ou "
+                   f"Shift+clique) e clique em Agrupar {self.PLURAL}.")
 
         barra_busca = Frame(janela, bg=SGA_FUNDO)
         barra_busca.place(x=24, y=78, relwidth=1.0, width=-48, height=34)
@@ -14565,7 +14589,7 @@ class JanelaListaAteie:
                             ).pack(side=RIGHT, padx=(10, 0), ipadx=10, fill=Y)
 
         self.tabela = TabelaQuebraDocLib(janela, [(c[0], self.titulo_coluna(c[0], c[1]), c[2])
-                                                  for c in DOC_LIB_COLUNAS_LISTA],
+                                                  for c in self.COLUNAS],
                                          ao_clicar_titulo=self.abrir_filtro, ao_abrir=self.abrir)
         self.tabela.place(x=24, y=122, relwidth=1.0, width=-48, relheight=1.0, height=-122 - 78)
 
@@ -14575,7 +14599,7 @@ class JanelaListaAteie:
         self.busca_var.trace_add("write", lambda *args: self.aplicar())
         doc_lib_criar_botao(janela, "Abrir", self.abrir, "primario"
                             ).place(relx=0.5, x=-340, rely=1.0, y=-20, anchor="sw", width=120, height=40)
-        doc_lib_criar_botao(janela, "Agrupar ATEIEs", self.agrupar, "aviso"
+        doc_lib_criar_botao(janela, f"Agrupar {self.PLURAL}", self.agrupar, "aviso"
                             ).place(relx=0.5, x=-210, rely=1.0, y=-20, anchor="sw", width=170, height=40)
         doc_lib_criar_botao(janela, "Marcar e-mail enviado", self.marcar_email_enviado, "agendar"
                             ).place(relx=0.5, x=-30, rely=1.0, y=-20, anchor="sw", width=230, height=40)
@@ -14586,11 +14610,12 @@ class JanelaListaAteie:
 
     # ---- dados e filtros -------------------------------------------------------------------------------------
     def carregar_registros(self):
-        """Lê do banco um registro por ATEIE e prepara o texto de cada coluna (caixa alta onde for o caso)."""
-        self.registros = doc_lib_listar_ateie()
+        """Lê do banco um registro por documento numerado e prepara o texto de cada coluna (caixa alta onde for o
+        caso)."""
+        self.registros = self._listar()
         for registro in self.registros:
             textos = {}
-            for chave, _, _, maiuscula in DOC_LIB_COLUNAS_LISTA:
+            for chave, _, _, maiuscula in self.COLUNAS:
                 texto = _doc_lib_uma_linha(registro[chave])
                 textos[chave] = texto.upper() if maiuscula else texto
             registro["_texto"] = textos
@@ -14636,21 +14661,21 @@ class JanelaListaAteie:
         return visiveis
 
     def titulo_coluna(self, chave, titulo=None):
-        titulo = titulo or next(c[1] for c in DOC_LIB_COLUNAS_LISTA if c[0] == chave)
+        titulo = titulo or next(c[1] for c in self.COLUNAS if c[0] == chave)
         return f"● {titulo} ▼" if chave in self.filtros else f"{titulo} ▼"
 
     def aplicar(self):
         """Redesenha a lista conforme os filtros e a busca."""
         visiveis = self.linhas_visiveis()
         self.tabela.preencher([{
-            "valores": [registro["_texto"][c[0]] for c in DOC_LIB_COLUNAS_LISTA],
+            "valores": [registro["_texto"][c[0]] for c in self.COLUNAS],
             "cor": DOC_LIB_COR_STATUS.get(registro["status"], SGA_TEXTO),
             "dados": (registro["ateie_id"], registro["ordem"])} for registro in visiveis])
-        for chave, _, _, _ in DOC_LIB_COLUNAS_LISTA:
+        for chave, _, _, _ in self.COLUNAS:
             self.tabela.definir_titulo(chave, self.titulo_coluna(chave))
-        titulos = {c[0]: c[1] for c in DOC_LIB_COLUNAS_LISTA}
+        titulos = {c[0]: c[1] for c in self.COLUNAS}
         ativos = "; ".join(f"{titulos[chave]} = {valor}" for chave, valor in self.filtros.items())
-        self.contador.config(text=f"{len(visiveis)} de {len(self.registros)} ATEIE(s)"
+        self.contador.config(text=f"{len(visiveis)} de {len(self.registros)} {self.ROTULO}(s)"
                                   + (f"   |   Filtros ativos: {ativos}" if ativos else ""))
 
     def definir_filtro(self, chave, valor):
@@ -14751,24 +14776,24 @@ class JanelaListaAteie:
     def abrir(self, evento=None):
         escolha = self.tabela.dados_selecionado()
         if escolha is None:
-            messagebox.showwarning("Atenção", "Selecione um ATEIE na lista.", parent=self.janela)
+            messagebox.showwarning("Atenção", f"Selecione um {self.ROTULO} na lista.", parent=self.janela)
             return
         if len(self.tabela.dados_selecionados()) > 1:
-            messagebox.showwarning("Atenção", "Há mais de um ATEIE selecionado. Selecione apenas um para abrir.",
-                                   parent=self.janela)
+            messagebox.showwarning("Atenção", f"Há mais de um {self.ROTULO} selecionado. Selecione apenas um para "
+                                              f"abrir.", parent=self.janela)
             return
         self.resultado = escolha
         self.janela.destroy()
 
     def marcar_email_enviado(self):
-        """Marca na coluna "Enviado e-mail" os ATEIEs selecionados (Ctrl+clique ou Shift+clique para vários) como
+        """Marca na coluna "Enviado e-mail" os documentos selecionados (Ctrl+clique ou Shift+clique para vários) como
         "Sim, em dd/mm/aaaa", com a data informada, ou os devolve a "Não". Serve para o envio feito manualmente
-        quando o envio pelo sistema falha (o botão Encaminhar ATEIE já marca sozinho os ATEIEs que envia)."""
+        quando o envio pelo sistema falha (o botão Encaminhar já marca sozinho os documentos que envia)."""
         selecao = self.tabela.dados_selecionados()
         if not selecao:
-            messagebox.showwarning("Marcar e-mail enviado", "Selecione na lista o(s) ATEIE(s) cujo e-mail foi enviado.\n\n"
-                                                           "Use Ctrl+clique (ou Shift+clique) para selecionar vários.",
-                                   parent=self.janela)
+            messagebox.showwarning("Marcar e-mail enviado", f"Selecione na lista o(s) {self.ROTULO}(s) cujo e-mail "
+                                                           f"foi enviado.\n\nUse Ctrl+clique (ou Shift+clique) para "
+                                                           f"selecionar vários.", parent=self.janela)
             return
         por_chave = {(registro["ateie_id"], registro["ordem"]): registro for registro in self.registros}
         escolhidos = sorted((por_chave[chave] for chave in selecao if chave in por_chave),
@@ -14780,7 +14805,7 @@ class JanelaListaAteie:
         if resposta is None:
             return
         try:
-            doc_lib_definir_email_enviado(selecao, resposta["data"], obter_nome_usuario_logado())
+            self._definir_email_enviado(selecao, resposta["data"], obter_nome_usuario_logado())
         except (DocLibRegra, DocLibConflito) as erro:
             messagebox.showwarning("Marcar e-mail enviado", str(erro), parent=self.janela)
             if isinstance(erro, DocLibConflito):
@@ -14792,49 +14817,51 @@ class JanelaListaAteie:
         self.recarregar()
 
     def agrupar(self):
-        """Agrupa os ATEIEs reservados selecionados (Ctrl+clique ou Shift+clique) em um único documento: um só PDF,
-        com todos os números, que preservam a numeração original. Máximo de DOC_LIB_LIMITE_AGRUPAMENTO ATEIEs."""
+        """Agrupa os reservados selecionados (Ctrl+clique ou Shift+clique) em um único documento: um só PDF, com
+        todos os números, que preservam a numeração original. Máximo de DOC_LIB_LIMITE_AGRUPAMENTO documentos."""
         selecao = self.tabela.dados_selecionados()
+        titulo_agrupar = f"Agrupar {self.PLURAL}"
         if len(selecao) < 2:
-            messagebox.showwarning("Agrupar ATEIEs", "Selecione dois ou mais ATEIEs com status Reservado.\n\n"
-                                                     "Use Ctrl+clique (ou Shift+clique) para selecionar vários.",
+            messagebox.showwarning(titulo_agrupar, f"Selecione dois ou mais {self.PLURAL} com status Reservado.\n\n"
+                                                   f"Use Ctrl+clique (ou Shift+clique) para selecionar vários.",
                                    parent=self.janela)
             return
         por_chave = {(registro["ateie_id"], registro["ordem"]): registro for registro in self.registros}
         escolhidos = sorted((por_chave[chave] for chave in selecao if chave in por_chave),
                             key=lambda registro: (registro["ano"], registro["sequencia"]))
         if len(escolhidos) > DOC_LIB_LIMITE_AGRUPAMENTO:
-            messagebox.showwarning("Agrupar ATEIEs", f"Um agrupamento pode ter no máximo {DOC_LIB_LIMITE_AGRUPAMENTO} "
-                                                     f"ATEIEs. Foram selecionados {len(escolhidos)}.", parent=self.janela)
+            messagebox.showwarning(titulo_agrupar, f"Um agrupamento pode ter no máximo {DOC_LIB_LIMITE_AGRUPAMENTO} "
+                                                   f"{self.PLURAL}. Foram selecionados {len(escolhidos)}.",
+                                   parent=self.janela)
             return
         fora = [registro for registro in escolhidos if registro["status"] != STATUS_ATEIE_RESERVADO]
         if fora:
             messagebox.showwarning(
-                "Agrupar ATEIEs", f"Só é possível agrupar ATEIEs com status '{STATUS_ATEIE_RESERVADO}'.\n\n"
+                titulo_agrupar, f"Só é possível agrupar {self.PLURAL} com status '{STATUS_ATEIE_RESERVADO}'.\n\n"
                                   f"Não estão reservados: " + ", ".join(f"{r['numero']} ({r['status']})" for r in fora)
                                   + ".", parent=self.janela)
             return
         numeros = ", ".join(registro["numero"] for registro in escolhidos)
         if not messagebox.askyesno(
-                "Agrupar ATEIEs",
-                f"Agrupar os {len(escolhidos)} ATEIEs reservados abaixo em um único documento?\n\n{numeros}\n\n"
+                titulo_agrupar,
+                f"Agrupar os {len(escolhidos)} {self.PLURAL} reservados abaixo em um único documento?\n\n{numeros}\n\n"
                 f"O PDF passará a ser um só, com todos esses números (a numeração original é preservada). "
                 f"O agrupamento não pode ser desfeito.", parent=self.janela):
             return
         try:
-            _, agrupados = doc_lib_agrupar_reservados(selecao, obter_nome_usuario_logado())
+            _, agrupados = self._agrupar_reservados(selecao, obter_nome_usuario_logado())
         except (DocLibRegra, DocLibConflito) as erro:
-            messagebox.showwarning("Agrupar ATEIEs", str(erro), parent=self.janela)
+            messagebox.showwarning(titulo_agrupar, str(erro), parent=self.janela)
             if isinstance(erro, DocLibConflito):
                 self.recarregar()
             return
         except sqlite3.Error as erro:
-            messagebox.showerror("Erro", f"Não foi possível agrupar os ATEIEs: {erro}", parent=self.janela)
+            messagebox.showerror("Erro", f"Não foi possível agrupar os {self.PLURAL}: {erro}", parent=self.janela)
             return
         self.recarregar()
-        messagebox.showinfo("Agrupar ATEIEs", f"ATEIEs agrupados em um único documento:\n\n{', '.join(agrupados)}\n\n"
-                                              f"Abra qualquer um deles para preencher o documento ou gerar o PDF único.",
-                            parent=self.janela)
+        messagebox.showinfo(titulo_agrupar, f"{self.PLURAL} agrupados em um único documento:\n\n"
+                                            f"{', '.join(agrupados)}\n\nAbra qualquer um deles para preencher o "
+                                            f"documento ou gerar o PDF único.", parent=self.janela)
 
 
 def doc_lib_escolher_ateie(parent):
@@ -14972,19 +14999,21 @@ def doc_lib_dialogo_documento_gerado(parent, caminho, aviso=None, lembrete=None)
     janela.wait_window()
 
 
-def doc_lib_dialogo_reserva(parent, usuario, nome_completo=""):
+def doc_lib_dialogo_reserva(parent, usuario, nome_completo="", rotulo="ATEIE", tipo="ATEIE", reservar_numeros=None):
     """Janela do botão ATEIE-Reservado: pede a quantidade de números (1 a DOC_LIB_LIMITE_RESERVA), mostra quais serão
-    reservados e faz a reserva. Devolve a lista [{ateie_id, numero}] reservada, ou None se o usuário voltar."""
+    reservados e faz a reserva. Devolve a lista [{ateie_id, numero}] reservada, ou None se o usuário voltar.
+    O botão AI-Reservado usa a mesma janela (rotulo="AI", tipo="AI", reservar_numeros=doc_lib_reservar_ai)."""
+    reservar_numeros = reservar_numeros or doc_lib_reservar_ateie
     resultado = {"reservados": None}
     janela = Toplevel(parent)
-    janela.title("ATEIE-Reservado")
+    janela.title(f"{rotulo}-Reservado")
     janela.geometry("600x330")
     janela.resizable(False, False)
     janela.transient(parent)
-    ui_dialogo(janela, "ATEIE-Reservado", "Reserva de números de ATEIE para emissão manual em caso de "
-                                          "indisponibilidade do sistema")
+    ui_dialogo(janela, f"{rotulo}-Reservado", f"Reserva de números de {rotulo} para emissão manual em caso de "
+                                              f"indisponibilidade do sistema")
     cartao = ui_cartao(janela, 84, 150)
-    Label(cartao, text=f"Quantidade de números de ATEIE a reservar (1 a {DOC_LIB_LIMITE_RESERVA}):", bg=SGA_CARD,
+    Label(cartao, text=f"Quantidade de números de {rotulo} a reservar (1 a {DOC_LIB_LIMITE_RESERVA}):", bg=SGA_CARD,
           fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).place(x=20, y=14)
     quantidade = StringVar(value="1")
     somente_digitos = (janela.register(lambda texto: texto == "" or (texto.isdigit() and len(texto) <= 3)), "%P")
@@ -15004,23 +15033,23 @@ def doc_lib_dialogo_reserva(parent, usuario, nome_completo=""):
             previsao.config(text=f"Informe uma quantidade de 1 a {DOC_LIB_LIMITE_RESERVA}.", fg=SGA_VERMELHO)
             return
         try:
-            numeros = doc_lib_numeros_previstos(quantidade_digitada)
+            numeros = doc_lib_numeros_previstos(quantidade_digitada, tipo)
         except sqlite3.Error:
             numeros = []
         texto = ""
         if numeros:
             faixa = numeros[0] if len(numeros) == 1 else f"{numeros[0]} a {numeros[-1]}"
-            texto = f"Serão reservados: {faixa} ({len(numeros)} ATEIE{'s' if len(numeros) > 1 else ''})."
+            texto = f"Serão reservados: {faixa} ({len(numeros)} {rotulo}{'s' if len(numeros) > 1 else ''})."
         previsao.config(text=texto, fg=SGA_TEXTO_SUAVE)
 
     def reservar(evento=None):
         try:
-            reservados = doc_lib_reservar_ateie(quantidade.get(), usuario, nome_completo)
+            reservados = reservar_numeros(quantidade.get(), usuario, nome_completo)
         except DocLibRegra as erro:
-            messagebox.showwarning("ATEIE-Reservado", str(erro), parent=janela)
+            messagebox.showwarning(f"{rotulo}-Reservado", str(erro), parent=janela)
             return
         except sqlite3.Error as erro:
-            messagebox.showerror("Erro", f"Não foi possível reservar os números de ATEIE: {erro}", parent=janela)
+            messagebox.showerror("Erro", f"Não foi possível reservar os números de {rotulo}: {erro}", parent=janela)
             return
         resultado["reservados"] = reservados
         janela.destroy()
@@ -15043,16 +15072,17 @@ def doc_lib_dialogo_reserva(parent, usuario, nome_completo=""):
 
 
 def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
-    """Janela "Cadastrar e-mails": e-mails de cada Empresa Solicitante usados pelo botão Encaminhar ATEIE. Pode haver
+    """Janela "Cadastrar e-mails": e-mails de cada Empresa Solicitante usados pelos botões Encaminhar ATEIE e Encaminhar
+    AI (o cadastro é o mesmo para os dois documentos). Pode haver
     vários e-mails por empresa e, nas empresas com mais de um destinatário possível, por opção (a opção é escolhida
     na hora do envio; "(todos os envios)" vale em qualquer escolha). Cada e-mail é "Para" (destinatário) ou "Cópia (Cc)"
     (recebe o ATEIE com cópia). O e-mail selecionado pode ser editado, sem precisar removê-lo e incluí-lo de novo."""
     janela = Toplevel(parent)
-    janela.title("Cadastrar e-mails - Encaminhar ATEIE")
+    janela.title("Cadastrar e-mails - Encaminhar ATEIE e AI")
     janela.geometry("1240x620")
     janela.minsize(1140, 520)
     janela.transient(parent)
-    ui_dialogo(janela, "E-mails do Encaminhar ATEIE", "Destinatários e e-mails em cópia por Empresa Solicitante. Nas "
+    ui_dialogo(janela, "E-mails do Encaminhar ATEIE e AI", "Destinatários e e-mails em cópia por Empresa. Nas "
                                                       "empresas com mais de um destinatário possível, a opção é "
                                                       "escolhida na hora do envio.")
     quadro = Frame(janela, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
@@ -15172,7 +15202,7 @@ def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
             return
         item = itens[selecionado[0]]
         if not messagebox.askyesno("Remover e-mail", f"Remover {item['email']}\n({item['empresa']} - "
-                                                     f"{item['escolha'] or DOC_LIB_TEXTO_SEMPRE}) do Encaminhar ATEIE?",
+                                                     f"{item['escolha'] or DOC_LIB_TEXTO_SEMPRE}) do Encaminhar ATEIE e AI?",
                                    parent=janela):
             return
         try:
@@ -15211,21 +15241,24 @@ def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
 _DOC_LIB_ULTIMO_REMETENTE = {"valor": EMAIL_ATEIE_REMETENTE}
 
 
-def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=None, erro_copia=None):
+def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=None, erro_copia=None,
+                               rotulo="ATEIE", assunto=None, texto=None):
     """Janela de confirmação do botão Encaminhar ATEIE. Mostra o remetente (a escolher entre EMAIL_ATEIE_REMETENTES),
     empresa, ATEIE(s), anexo, onde ficou a cópia do PDF na pasta Downloads (ou o motivo de não ter sido salva),
     destinatários, e-mails em cópia e o texto do e-mail. Quando a empresa tem mais de um destinatário possível o
     usuário escolhe um; empresa sem e-mail cadastrado (por exemplo OUTRA) permite digitar o endereço.
-    Devolve {"remetente", "destinatarios", "copias"} ou None se o envio for cancelado."""
+    Devolve {"remetente", "destinatarios", "copias"} ou None se o envio for cancelado.
+    rotulo, assunto e texto trocam o nome do documento, o assunto e o texto do e-mail (padrão: os do ATEIE); o Encaminhar
+    AI usa a mesma janela."""
     empresa = doc_lib_empresa_do_documento(doc)
-    corpo = EMAIL_ATEIE_TEXTO.format(numeros=doc_lib_texto_numeros(numeros))
+    corpo = (texto or EMAIL_ATEIE_TEXTO).format(numeros=doc_lib_texto_numeros(numeros))
     estado = {"envio": None}
     janela = Toplevel(parent)
-    janela.title("Encaminhar ATEIE")
+    janela.title(f"Encaminhar {rotulo}")
     janela.geometry("780x700")                      # cabe em tela de 1366x768
     janela.resizable(False, False)
     janela.transient(parent)
-    ui_dialogo(janela, "Encaminhar ATEIE", "Envio por e-mail, com o PDF do documento anexado, para análise e De Acordo")
+    ui_dialogo(janela, f"Encaminhar {rotulo}", "Envio por e-mail, com o PDF do documento anexado, para análise e De Acordo")
     cartao = ui_cartao(janela, 84, 530)
     cartao.grid_columnconfigure(1, weight=1)
 
@@ -15247,7 +15280,7 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
         Radiobutton(quadro_remetente, text=endereco, variable=var_remetente, value=endereco, tristatevalue="-",
                     font=(SGA_FONTE, 10, "bold"), bg=SGA_CARD).pack(side=LEFT, padx=(0, 20))
     rotulo_valor(1, "Empresa solicitante:", empresa or "(não informada)")
-    rotulo_valor(2, "ATEIE(s):", doc_lib_texto_numeros(numeros), negrito=True)
+    rotulo_valor(2, f"{rotulo}(s):", doc_lib_texto_numeros(numeros), negrito=True)
     rotulo_valor(3, "Anexo:", (f"{os.path.basename(anexo)}\n" if anexo else "")
                  + "PDF do documento sem a linha vermelha e sem o aviso de De Acordo")
     if copia:
@@ -15256,7 +15289,7 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
         rotulo_valor(4, "Cópia salva em:", f"Não foi possível salvar em Downloads: {erro_copia}", cor=SGA_VERMELHO)
     else:
         rotulo_valor(4, "Cópia salva em:", "(não gerada)", cor=SGA_VERMELHO)
-    rotulo_valor(5, "Assunto:", f"{EMAIL_ATEIE_ASSUNTO}: {doc_lib_texto_numeros(numeros)}")
+    rotulo_valor(5, "Assunto:", f"{assunto or EMAIL_ATEIE_ASSUNTO}: {doc_lib_texto_numeros(numeros)}")
     zona = Frame(cartao, bg=SGA_CARD)
     zona.grid(row=6, column=0, columnspan=2, sticky="ew", padx=20, pady=(14, 0))
     zona.grid_columnconfigure(1, weight=1)
@@ -15334,7 +15367,7 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
     def confirmar(evento=None):
         lista, em_copia, erro = calcular()
         if not lista:
-            messagebox.showwarning("Encaminhar ATEIE", erro, parent=janela)
+            messagebox.showwarning(f"Encaminhar {rotulo}", erro, parent=janela)
             return
         _DOC_LIB_ULTIMO_REMETENTE["valor"] = var_remetente.get()
         estado["envio"] = {"remetente": var_remetente.get(), "destinatarios": lista, "copias": em_copia}
@@ -16637,6 +16670,2679 @@ class JanelaAteie:
         self.janela.destroy()
 
 
+# =====================================================================================================================
+# AI - AUTORIZAÇÃO PARA IMPEDIMENTO DE EQUIPAMENTO DE INTERLIGAÇÃO (Doc_Lib. - Click_25)
+# =====================================================================================================================
+# O AI segue os mesmos conceitos e critérios do ATEIE: numeração própria por ano (0001/26), um número e um status por
+# linha da tabela, AI-Reservado e agrupamento de reservados, "De acordo", regras de data da execução, Encaminhar AI
+# por e-mail e coluna "Enviado e-mail" no GRID AI. As funções e as janelas do AI são espelho das do ATEIE (sufixo _ai /
+# classe JanelaAI), com as diferenças do documento:
+#   - Classificação do Impedimento ganha a opção Emergência;
+#   - campos novos: 5 Tempo de Manobras, 6 Em caso de necessidade pode-se dispor do equipamento em e 7 Condições de
+#     Impedimento;
+#   - Observações é opcional e não traz texto padrão; não existe o campo Nota (o espaço no final do PDF traz o aviso de
+#     "Aguardando o De Acordo" e as informações de cancelamento);
+#   - "De acordo" tem 2 linhas e em Pessoal Notificado a coluna Setor vem antes da coluna Empresa;
+#   - a tabela é "17. Período Total Previsto para os Impedimentos" e "18. Período Verificado na Execução dos Serviços"
+#     (Liberado para Manutenção e Liberado para Operação), com os mesmos critérios das colunas 2 a 13 do ATEIE.
+# Os status, as classificações de e-mail, o cadastro de e-mails por empresa, as datas/horas e os componentes visuais são
+# compartilhados com o ATEIE.
+DOC_LIB_CLASSIFICACOES_AI = ["Programado", "Urgência", "Emergência"]
+DOC_LIB_TEXTO_INDISPONIVEL = "Indisponível"      # opção do campo 6 (a outra é informar o tempo, HH:MM)
+DOC_LIB_LIMITE_NOTIFICACOES_AI = 2               # linhas de "De acordo" (15.1 a 15.6)
+DOC_LIB_LIMITE_PESSOAL_AI = 3                    # linhas de "Pessoal Notificado" (16.1 a 16.5)
+DOC_LIB_LINHAS_INTERVENCOES_AI = 10              # AIs (linhas da tabela 17/18) por documento
+# Texto exibido no GRID AI, em "Equipamento a Impedir", enquanto o registro permanece reservado
+DOC_LIB_TEXTO_EQUIPAMENTO_RESERVADO_AI = "AI RESERVADO"
+EMAIL_AI_ASSUNTO = "AI - Para análise e De Acordo"
+EMAIL_AI_TEXTO = ("Prezados,\n\n"
+                  "Segue para análise e o De Acordo o(s) AIs números: {numeros}.\n\n"
+                  "Atenciosamente,\n"
+                  "COG-ALUPAR")
+
+# Colunas 17.1 a 18.8 da tabela de impedimentos: (campo no banco, cabeçalho, descrição, tipo). Os campos do banco são os
+# mesmos das colunas 2 a 13 do ATEIE, o que permite usar as mesmas regras (DOC_LIB_CAMPOS_PROGRAMADOS, _INICIO, _TERMINO)
+DOC_LIB_COLUNAS_INTERVENCAO_AI = [
+    ("prev_data_inicio", "Data", "17.1 Data de início previsto do impedimento", "data"),
+    ("prev_hora_inicio", "Hora", "17.2 Hora de início previsto do impedimento", "hora"),
+    ("prev_data_termino", "Data", "17.3 Data de término previsto do impedimento", "data"),
+    ("prev_hora_termino", "Hora", "17.4 Hora de término previsto do impedimento", "hora"),
+    ("real_data_inicio", "Data", "18.1 Data da liberação para manutenção", "data"),
+    ("real_hora_inicio", "Hora", "18.2 Hora da liberação para manutenção", "hora"),
+    ("real_os_r_inicio", "OS-R",
+     "18.3 OS-R: operador da empresa responsável (que originou o AI) que liberou o equipamento para manutenção", "texto"),
+    ("real_os_oe_inicio", "OS-OE",
+     "18.4 OS-OE: operador da outra empresa que concordou com a liberação para manutenção", "texto"),
+    ("real_data_termino", "Data", "18.5 Data da liberação para operação", "data"),
+    ("real_hora_termino", "Hora", "18.6 Hora da liberação para operação", "hora"),
+    ("real_os_r_termino", "OS-R",
+     "18.7 OS-R: operador da empresa responsável que informou a liberação do equipamento para operação", "texto"),
+    ("real_os_oe_termino", "OS-OE",
+     "18.8 OS-OE: operador da outra empresa que foi comunicado sobre a liberação para operação", "texto"),
+]
+_DOC_LIB_DESCRICAO_CAMPO_AI = {chave: descricao for chave, _, descricao, _ in DOC_LIB_COLUNAS_INTERVENCAO_AI}
+
+# Pessoal Notificado do AI: a coluna Setor vem antes da coluna Empresa (no ATEIE é o contrário)
+DOC_LIB_COLUNAS_PESSOAL_AI = [("nome", "Nome", "texto"), ("setor", "Setor", "texto"), ("empresa", "Empresa", "empresa"),
+                              ("data", "Data", "data"), ("hora", "Hora", "hora")]
+
+# Colunas da janela "GRID AI": (campo, título, largura em pixels, exibir sempre em caixa alta)
+DOC_LIB_COLUNAS_LISTA_AI = [
+    ("numero", "N° AI", 105, False),
+    ("equipamento", "Equipamento a Impedir", 185, True),
+    ("empresa", "Empresa", 115, True),
+    ("solicitante", "Solicitado por", 150, False),
+    ("prog_inicio", "Programação Início", 135, False),
+    ("prog_termino", "Programação Término", 135, False),
+    ("local", "Local", 140, True),
+    ("servicos", "Serviço a Executar", 205, False),
+    ("email_enviado", "Enviado e-mail", 150, False),
+    ("status", "Status", 160, False),
+]
+
+
+# ---------------------------------------------------
+# BANCO DE DADOS DO AI
+# ---------------------------------------------------
+def _garantir_tabelas_doc_lib_ai(cursor):
+    """Cria as tabelas do AI (se não existirem). Mesmo modelo do ATEIE (veja garantir_banco_doc_lib):
+      doclib_ai                 - dados gerais do documento (emitido = 1 depois de "Gerar Documento")
+      doclib_ai_notificacoes    - "De acordo"
+      doclib_ai_pessoal         - "Pessoal Notificado"
+      doclib_ai_intervencoes    - UMA linha por AI, cada uma com número, status, dados do período previsto e verificado,
+                                  cancelamento e "Enviado e-mail" próprios
+      doclib_ai_pdfs            - cada PDF gerado e arquivado
+      doclib_ai_agrupamentos    - histórico dos agrupamentos de AIs reservados
+      doclib_ai_emails          - e-mails enviados pelo botão Encaminhar AI
+    A numeração usa doclib_numeracao (tipo "AI"); o cadastro de e-mails por empresa é o mesmo do ATEIE."""
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_ai (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        classificacao TEXT NOT NULL,
+                        equipamento TEXT NOT NULL,
+                        empresa TEXT NOT NULL,
+                        empresa_outra TEXT,
+                        local_servico TEXT NOT NULL,
+                        tempo_manobras TEXT,
+                        disponivel_em TEXT,
+                        condicoes TEXT,
+                        servicos TEXT NOT NULL,
+                        observacoes TEXT,
+                        documentos_vinculados TEXT,
+                        solicitado_por TEXT NOT NULL,
+                        solicitado_por_usuario TEXT,
+                        data_preenchimento TEXT NOT NULL,
+                        hora_preenchimento TEXT NOT NULL,
+                        revisao INTEGER NOT NULL DEFAULT 1,
+                        emitido INTEGER NOT NULL DEFAULT 0,
+                        emitido_em TEXT,
+                        emitido_por TEXT,
+                        criado_em TEXT,
+                        atualizado_por TEXT,
+                        atualizado_em TEXT,
+                        reservado_por TEXT,
+                        reservado_em TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_ai_notificacoes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ai_id INTEGER NOT NULL,
+                        ordem INTEGER NOT NULL,
+                        nome TEXT,
+                        data TEXT,
+                        hora TEXT,
+                        FOREIGN KEY(ai_id) REFERENCES doclib_ai(id))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_ai_pessoal (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ai_id INTEGER NOT NULL,
+                        ordem INTEGER NOT NULL,
+                        nome TEXT,
+                        empresa TEXT,
+                        empresa_outra TEXT,
+                        setor TEXT,
+                        data TEXT,
+                        hora TEXT,
+                        FOREIGN KEY(ai_id) REFERENCES doclib_ai(id))''')
+    colunas_intervencao = ",\n                        ".join(
+        f"{chave} TEXT" for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO_AI)
+    cursor.execute(f'''CREATE TABLE IF NOT EXISTS doclib_ai_intervencoes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ai_id INTEGER NOT NULL,
+                        ordem INTEGER NOT NULL,
+                        numero TEXT UNIQUE NOT NULL,
+                        ano INTEGER NOT NULL,
+                        sequencia INTEGER NOT NULL,
+                        {colunas_intervencao},
+                        status TEXT NOT NULL DEFAULT 'Em análise',
+                        cancelada_por TEXT,
+                        data_cancelamento TEXT,
+                        justificativa_cancelamento TEXT,
+                        email_enviado_em TEXT,
+                        email_enviado_por TEXT,
+                        email_enviado_origem TEXT,
+                        UNIQUE(ai_id, ordem),
+                        FOREIGN KEY(ai_id) REFERENCES doclib_ai(id))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_ai_pdfs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ai_id INTEGER NOT NULL,
+                        revisao INTEGER,
+                        caminho TEXT NOT NULL,
+                        gerado_por TEXT,
+                        gerado_em TEXT,
+                        revisao_final INTEGER,
+                        tipo TEXT,
+                        FOREIGN KEY(ai_id) REFERENCES doclib_ai(id))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_ai_agrupamentos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ai_id INTEGER NOT NULL,
+                        numeros TEXT NOT NULL,
+                        agrupado_por TEXT,
+                        agrupado_em TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_ai_emails (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ai_id INTEGER NOT NULL,
+                        numeros TEXT NOT NULL,
+                        destinatarios TEXT NOT NULL,
+                        copias TEXT,
+                        remetente TEXT,
+                        assunto TEXT,
+                        anexo TEXT,
+                        metodo TEXT,
+                        enviado_por TEXT,
+                        enviado_em TEXT)''')
+
+
+def doc_lib_erros_datas_execucao_ai(item, gravado=None):
+    """Regras de data da execução de um AI (item = linha da tabela), as mesmas do ATEIE:
+      - 18.1 (data da liberação para manutenção) tem de ser IGUAL a 17.1 (data de início previsto);
+      - 18.5 (data da liberação para operação) não pode ser ANTERIOR a 17.3 (data de término previsto); posterior pode.
+    Um grupo que já está gravado e não foi alterado não é revalidado ('gravado' = linha como está no banco).
+    Retorna [(campo, mensagem)]."""
+    def valor(chave):
+        return str(item.get(chave) or "").strip()
+
+    def inalterado(chaves):
+        return gravado is not None and all(str(gravado.get(c) or "").strip() == valor(c) for c in chaves)
+
+    def dia(texto):
+        normal = doc_lib_normalizar_data(texto)
+        return datetime.strptime(normal, "%d/%m/%Y") if normal else None
+
+    erros = []
+    prog, real = dia(valor("prev_data_inicio")), dia(valor("real_data_inicio"))
+    if prog and real and real != prog and not inalterado(DOC_LIB_CAMPOS_INICIO):
+        erros.append(("real_data_inicio",
+                      f"a data da liberação para manutenção (18.1) deve ser igual à data de início previsto "
+                      f"(17.1: {valor('prev_data_inicio')})."))
+    prog, real = dia(valor("prev_data_termino")), dia(valor("real_data_termino"))
+    if prog and real and real < prog and not inalterado(DOC_LIB_CAMPOS_TERMINO):
+        erros.append(("real_data_termino",
+                      f"a data da liberação para operação (18.5) não pode ser anterior à data de término previsto "
+                      f"(17.3: {valor('prev_data_termino')}); posterior pode."))
+    return erros
+
+
+def doc_lib_diferencas_bloqueadas_ai(atual, dados, emitido=True):
+    """Lista o que, nos dados recebidos, difere do gravado e NÃO pode ser alterado (mesmas regras do ATEIE).
+
+    AI já EMITIDO (documento gerado): dados gerais, Pessoal Notificado e o Nº e o período previsto (17.1 a 17.4) de cada
+    AI ficam protegidos. O "De acordo" só recebe linhas novas (as já registradas não mudam). Os campos 18.1 a 18.8 só
+    podem ser alterados depois que o "De acordo" já estiver preenchido e salvo e, quando os quatro campos da liberação
+    para manutenção (18.1 a 18.4) ou os quatro da liberação para operação (18.5 a 18.8) já estão preenchidos e salvos,
+    esse grupo não muda mais.
+    AI ainda NÃO emitido: os campos 18.1 a 18.8 não podem ser informados antes da geração do documento.
+    Lista vazia = nada protegido foi alterado."""
+    def texto(valor):
+        return str(valor or "").strip()
+
+    gravadas = {item["ordem"]: item for item in atual.get("intervencoes") or []}
+    diferencas = []
+
+    if not emitido:
+        for item in sorted(dados.get("intervencoes") or [], key=lambda i: i["ordem"]):
+            gravada = gravadas.get(item["ordem"], {})
+            if any(texto(gravada.get(chave)) != texto(item.get(chave)) for chave in DOC_LIB_CAMPOS_EXECUCAO):
+                diferencas.append(f"Linha {item['ordem']}: os campos 18.1 a 18.8 só podem ser informados depois que o "
+                                  f"documento for gerado")
+        return diferencas
+
+    for chave, nome in (("classificacao", "Classificação do Impedimento"), ("empresa", "Empresa"),
+                        ("empresa_outra", "Empresa (OUTRA)"), ("equipamento", "Equipamento a Impedir"),
+                        ("local", "Local"), ("tempo_manobras", "Tempo de Manobras"),
+                        ("disponivel_em", "Em caso de necessidade pode-se dispor do equipamento em"),
+                        ("condicoes", "Condições de Impedimento"), ("servicos", "Serviço a Executar"),
+                        ("observacoes", "Observações"), ("documentos_vinculados", "Documentos Internos Vinculados")):
+        # Equipamento, Empresa e Local são sempre apresentados em caixa alta: mudar só a caixa não conta como alteração
+        comparar = str.upper if chave in DOC_LIB_CAMPOS_CAIXA_ALTA else str
+        if comparar(texto(atual.get(chave))) != comparar(texto(dados.get(chave))):
+            diferencas.append(nome)
+
+    def linhas_nao_vazias(linhas, chaves):
+        return [{chave: texto(linha.get(chave)) for chave in chaves} for linha in linhas
+                if any(texto(linha.get(chave)) for chave in chaves)]
+
+    fixas = linhas_nao_vazias(atual.get("notificacoes") or [], ("nome", "data", "hora"))
+    novas = linhas_nao_vazias(dados.get("notificacoes") or [], ("nome", "data", "hora"))
+    if novas[:len(fixas)] != fixas:
+        diferencas.append("De acordo (as linhas já registradas não podem ser alteradas)")
+    elif len(novas) > DOC_LIB_LIMITE_NOTIFICACOES_AI or not all(all(linha.values()) for linha in novas[len(fixas):]):
+        diferencas.append(f"De acordo (cada linha nova precisa de nome, data e hora, no máximo "
+                          f"{DOC_LIB_LIMITE_NOTIFICACOES_AI} linhas)")
+    de_acordo_gravado = doc_lib_de_acordo_completo(atual.get("notificacoes"))
+    chaves_pessoal = ("nome", "setor", "empresa", "empresa_outra", "data", "hora")
+    if linhas_nao_vazias(atual.get("pessoal") or [], chaves_pessoal) \
+            != linhas_nao_vazias(dados.get("pessoal") or [], chaves_pessoal):
+        diferencas.append("Pessoal Notificado")
+
+    for item in sorted(dados.get("intervencoes") or [], key=lambda i: i["ordem"]):
+        ordem = item["ordem"]
+        gravada = gravadas.get(ordem)
+        if gravada is None:
+            if any(texto(item.get(chave)) for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO_AI):
+                diferencas.append(f"Linha {ordem}: não é possível incluir novos AI depois da emissão")
+            continue
+        if any(texto(gravada.get(chave)) != texto(item.get(chave)) for chave in DOC_LIB_CAMPOS_PROGRAMADOS):
+            diferencas.append(f"Linha {ordem} ({gravada['numero']}): Nº e período previsto (17.1 a 17.4)")
+        if gravada.get("status") == STATUS_ATEIE_CANCELADO:
+            continue
+        if not de_acordo_gravado and any(texto(gravada.get(chave)) != texto(item.get(chave))
+                                         for chave in DOC_LIB_CAMPOS_EXECUCAO):
+            diferencas.append(f"Linha {ordem} ({gravada['numero']}): os campos 18.1 a 18.8 só podem ser informados "
+                              f"depois que o De acordo estiver preenchido e salvo")
+        for chaves, campos, nome in ((DOC_LIB_CAMPOS_INICIO, "18.1 a 18.4", "liberação para manutenção já salva"),
+                                     (DOC_LIB_CAMPOS_TERMINO, "18.5 a 18.8", "liberação para operação já salva")):
+            if all(texto(gravada.get(chave)) for chave in chaves) \
+                    and any(texto(gravada.get(chave)) != texto(item.get(chave)) for chave in chaves):
+                diferencas.append(f"Linha {ordem} ({gravada['numero']}): campos {campos} ({nome})")
+    return diferencas
+
+
+def doc_lib_salvar_ai(dados, usuario):
+    """Grava o AI (novo ou já existente) em uma única transação e devolve o id. Mesmas regras do ATEIE:
+
+    - AI novo com os 4 campos do período previsto (17.1 a 17.4) preenchidos: recebe aqui o próximo número do ano
+      (linhas incompletas ou vazias NÃO consomem número) e entra com o status "Em análise".
+    - AI já numerado: mantém o número; só os dados são atualizados. AI cancelado: não é alterado.
+    - Documento já EMITIDO (gerado): dados gerais, De acordo, Pessoal Notificado e período previsto ficam protegidos, e o
+      grupo de liberação para manutenção (18.1 a 18.4) ou para operação (18.5 a 18.8) já preenchido e salvo não muda mais
+      (DocLibBloqueado se houver tentativa); só o restante dos campos 18.1 a 18.8 é gravado.
+    - Depois da emissão o "De acordo" só recebe linhas novas, e os campos 18.1 a 18.8 só são aceitos depois que o
+      "De acordo" estiver preenchido e salvo (DocLibBloqueado). Antes da emissão eles não podem ser informados.
+    - Datas da execução: 18.1 igual a 17.1; 18.5 não anterior a 17.3 (DocLibRegra).
+    - O status de cada AI é recalculado a cada gravação (doc_lib_calcular_status).
+    - Lança DocLibConflito se outra pessoa salvou o documento depois que ele foi aberto."""
+    dados = doc_lib_normalizar_ai(dados)
+    agora = datetime.now()
+    agora_texto = agora.strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        ai_id = dados.get("id")
+        emitido = False
+        atual = None
+        campos_gerais = (dados["classificacao"], dados["equipamento"], dados["empresa"], dados["empresa_outra"],
+                         dados["local"], dados["tempo_manobras"], dados["disponivel_em"], dados["condicoes"],
+                         dados["servicos"], dados["observacoes"], dados["documentos_vinculados"])
+
+        if ai_id is not None:
+            atual = _doc_lib_ler_ai(conexao, ai_id)
+            if atual is None or atual["revisao"] != dados.get("revisao"):
+                raise DocLibConflito("Este AI foi alterado por outro usuário depois de aberto nesta janela.\n\n"
+                                     "Feche-o e abra-o novamente (GRID AI) para ver a versão atual.")
+            emitido = bool(atual["emitido"])
+        era_reservado = doc_lib_documento_reservado(atual)
+        bloqueadas = doc_lib_diferencas_bloqueadas_ai(atual or {}, dados, emitido)
+        if bloqueadas:
+            if emitido:
+                cabecalho = ("Este AI já foi emitido (documento gerado). Só podem ser alterados: o De acordo "
+                             "(novas linhas) e os campos 18.1 a 18.8 da tabela (depois que o De acordo estiver "
+                             "preenchido e salvo); a liberação para manutenção (18.1 a 18.4) ou para operação "
+                             "(18.5 a 18.8) já salva não muda mais.")
+            else:
+                cabecalho = "Dados de execução não são aceitos antes da geração do documento."
+            raise DocLibBloqueado(cabecalho + "\n\nAlterações recusadas: " + "; ".join(bloqueadas) + ".")
+        gravadas = {item["ordem"]: item for item in (atual or {}).get("intervencoes") or []}
+        violacoes = [f"Linha {item['ordem']}: {mensagem}" for item in dados["intervencoes"]
+                     if gravadas.get(item["ordem"], {}).get("status") != STATUS_ATEIE_CANCELADO
+                     for _, mensagem in doc_lib_erros_datas_execucao_ai(item, gravadas.get(item["ordem"]))]
+        if violacoes:
+            raise DocLibRegra("Dados de execução recusados:\n\n" + "\n".join(violacoes))
+
+        if ai_id is None:
+            cursor.execute(
+                "INSERT INTO doclib_ai (classificacao, equipamento, empresa, empresa_outra, local_servico, "
+                "tempo_manobras, disponivel_em, condicoes, servicos, observacoes, documentos_vinculados, "
+                "solicitado_por, solicitado_por_usuario, data_preenchimento, hora_preenchimento, revisao, emitido, "
+                "criado_em, atualizado_por, atualizado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, "
+                "?, ?, ?)",
+                campos_gerais + (dados["solicitado_por"], dados.get("solicitado_por_usuario") or dados["solicitado_por"],
+                                 dados["data_preenchimento"], dados["hora_preenchimento"], agora_texto, usuario,
+                                 agora_texto))
+            ai_id = cursor.lastrowid
+        else:
+            if emitido:
+                cursor.execute("UPDATE doclib_ai SET revisao = revisao + 1, atualizado_por = ?, "
+                               "atualizado_em = ? WHERE id = ?", (usuario, agora_texto, ai_id))
+            else:
+                cursor.execute(
+                    "UPDATE doclib_ai SET classificacao = ?, equipamento = ?, empresa = ?, empresa_outra = ?, "
+                    "local_servico = ?, tempo_manobras = ?, disponivel_em = ?, condicoes = ?, servicos = ?, "
+                    "observacoes = ?, documentos_vinculados = ?, revisao = revisao + 1, atualizado_por = ?, "
+                    "atualizado_em = ? WHERE id = ?",
+                    campos_gerais + (usuario, agora_texto, ai_id))
+                if era_reservado:
+                    # AI reservado sendo preenchido: "Solicitado por", data e hora passam a ser os de quem registra
+                    # o documento no sistema (a reserva fica registrada em reservado_por e reservado_em)
+                    cursor.execute("UPDATE doclib_ai SET solicitado_por = ?, solicitado_por_usuario = ?, "
+                                   "data_preenchimento = ?, hora_preenchimento = ? WHERE id = ?",
+                                   (dados["solicitado_por"], dados.get("solicitado_por_usuario") or dados["solicitado_por"],
+                                    dados["data_preenchimento"], dados["hora_preenchimento"], ai_id))
+                cursor.execute("DELETE FROM doclib_ai_notificacoes WHERE ai_id = ?", (ai_id,))
+                cursor.execute("DELETE FROM doclib_ai_pessoal WHERE ai_id = ?", (ai_id,))
+
+        if emitido:
+            # depois da emissão o "De acordo" só ganha linhas novas (as já gravadas foram verificadas acima)
+            gravadas_de_acordo = len(atual["notificacoes"])
+            novas = [linha for linha in dados["notificacoes"]
+                     if any(str(linha.get(chave) or "").strip() for chave in ("nome", "data", "hora"))]
+            for ordem, linha in enumerate(novas[gravadas_de_acordo:], start=gravadas_de_acordo + 1):
+                cursor.execute("INSERT INTO doclib_ai_notificacoes (ai_id, ordem, nome, data, hora) "
+                               "VALUES (?, ?, ?, ?, ?)", (ai_id, ordem, linha["nome"], linha["data"], linha["hora"]))
+        else:
+            # "De acordo" é opcional: só são gravadas as linhas com algum conteúdo
+            ordem = 0
+            for linha in dados["notificacoes"]:
+                if not any(str(linha.get(chave) or "").strip() for chave in ("nome", "data", "hora")):
+                    continue
+                ordem += 1
+                cursor.execute("INSERT INTO doclib_ai_notificacoes (ai_id, ordem, nome, data, hora) "
+                               "VALUES (?, ?, ?, ?, ?)", (ai_id, ordem, linha["nome"], linha["data"], linha["hora"]))
+            for ordem, linha in enumerate(dados["pessoal"], start=1):
+                cursor.execute("INSERT INTO doclib_ai_pessoal (ai_id, ordem, nome, empresa, empresa_outra, "
+                               "setor, data, hora) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                               (ai_id, ordem, linha["nome"], linha["empresa"], linha.get("empresa_outra") or "",
+                                linha["setor"], linha["data"], linha["hora"]))
+
+        cursor.execute("SELECT ordem, status FROM doclib_ai_intervencoes WHERE ai_id = ?", (ai_id,))
+        existentes = dict(cursor.fetchall())
+        nomes_colunas = [chave for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO_AI]
+
+        for item in sorted(dados["intervencoes"], key=lambda i: i["ordem"]):
+            ordem = item["ordem"]
+            if ordem in existentes:
+                if existentes[ordem] == STATUS_ATEIE_CANCELADO:
+                    continue
+                gravar = list(DOC_LIB_CAMPOS_EXECUCAO) if emitido else nomes_colunas   # depois de emitido: só 18.1 a 18.8
+                cursor.execute(f"UPDATE doclib_ai_intervencoes SET {', '.join(f'{chave} = ?' for chave in gravar)} "
+                               f"WHERE ai_id = ? AND ordem = ?",
+                               [item.get(chave, "") for chave in gravar] + [ai_id, ordem])
+            elif not emitido and all(item.get(chave) for chave in DOC_LIB_CAMPOS_PROGRAMADOS):
+                sequencia = _doc_lib_consumir_numero(cursor, "AI", agora.year)
+                cursor.execute(
+                    f"INSERT INTO doclib_ai_intervencoes (ai_id, ordem, numero, ano, sequencia, "
+                    f"{', '.join(nomes_colunas)}, status) VALUES (?, ?, ?, ?, ?, {', '.join('?' * len(nomes_colunas))}, ?)",
+                    [ai_id, ordem, doc_lib_formatar_numero(sequencia, agora.year), agora.year, sequencia]
+                    + [item.get(chave, "") for chave in nomes_colunas] + [STATUS_ATEIE_EM_ANALISE])
+
+        _doc_lib_recalcular_status_ai(cursor, ai_id, emitido)
+        cursor.execute("COMMIT")
+        return ai_id
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def _doc_lib_ler_ai(conexao, ai_id):
+    """Lê o AI completo (dados gerais, notificações, pessoal e intervenções) usando a conexão informada."""
+    cursor = conexao.cursor()
+    cursor.row_factory = sqlite3.Row
+    cursor.execute("SELECT * FROM doclib_ai WHERE id = ?", (ai_id,))
+    cabecalho = cursor.fetchone()
+    if cabecalho is None:
+        return None
+    doc = dict(cabecalho)
+    doc["local"] = doc.pop("local_servico")
+    cursor.execute("SELECT nome, data, hora FROM doclib_ai_notificacoes WHERE ai_id = ? ORDER BY ordem", (ai_id,))
+    doc["notificacoes"] = [dict(linha) for linha in cursor.fetchall()]
+    cursor.execute("SELECT nome, empresa, empresa_outra, setor, data, hora FROM doclib_ai_pessoal "
+                   "WHERE ai_id = ? ORDER BY ordem", (ai_id,))
+    doc["pessoal"] = [dict(linha) for linha in cursor.fetchall()]
+    cursor.execute("SELECT * FROM doclib_ai_intervencoes WHERE ai_id = ? ORDER BY ordem", (ai_id,))
+    doc["intervencoes"] = [dict(linha) for linha in cursor.fetchall()]
+    return doc
+
+
+def doc_lib_carregar_ai(ai_id):
+    """Devolve o AI completo (dados gerais, notificações, pessoal e intervenções) ou None."""
+    conexao = doc_lib_conectar()
+    try:
+        return _doc_lib_ler_ai(conexao, ai_id)
+    finally:
+        conexao.close()
+
+
+def doc_lib_listar_ai():
+    """Um registro por AI (cada linha numerada), do mais recente para o mais antigo, no formato que o GRID espera (a
+    chave "ateie_id" é o id do documento, nome herdado do GRID ATEIE)."""
+    conexao = doc_lib_conectar()
+    cursor = conexao.cursor()
+    try:
+        cursor.execute(
+            "SELECT i.ai_id, i.ordem, i.numero, i.ano, i.sequencia, i.status, a.equipamento, a.empresa, "
+            "a.empresa_outra, a.local_servico, a.servicos, a.solicitado_por, i.prev_data_inicio, "
+            "i.prev_hora_inicio, i.prev_data_termino, i.prev_hora_termino, i.email_enviado_em "
+            "FROM doclib_ai_intervencoes i "
+            "JOIN doclib_ai a ON a.id = i.ai_id ORDER BY i.ano DESC, i.sequencia DESC")
+        resultado = []
+        for (ai_id, ordem, numero, ano, sequencia, status, equipamento, empresa, empresa_outra, local,
+             servicos, solicitado_por, data_inicio, hora_inicio, data_termino, hora_termino,
+             email_enviado_em) in cursor.fetchall():
+            enviado = doc_lib_texto_email_enviado(email_enviado_em)       # "Não" ou "Sim, em dd/mm/aaaa"
+            if status == STATUS_ATEIE_RESERVADO:     # só o número e a expressão AI RESERVADO; o resto em branco
+                resultado.append({
+                    "ateie_id": ai_id, "ordem": ordem, "numero": numero, "ano": ano, "sequencia": sequencia,
+                    "status": status, "equipamento": DOC_LIB_TEXTO_EQUIPAMENTO_RESERVADO_AI, "empresa": "",
+                    "solicitante": "", "prog_inicio": "", "prog_termino": "", "local": "", "servicos": "",
+                    "email_enviado": enviado})
+                continue
+            resultado.append({
+                "ateie_id": ai_id, "ordem": ordem, "numero": numero, "ano": ano, "sequencia": sequencia,
+                "status": status, "equipamento": equipamento or "",
+                "empresa": empresa_outra if empresa == "OUTRA" and empresa_outra else empresa,
+                "solicitante": solicitado_por, "prog_inicio": f"{data_inicio} {hora_inicio}",
+                "prog_termino": f"{data_termino} {hora_termino}", "local": local or "", "servicos": servicos or "",
+                "email_enviado": enviado,
+            })
+        return resultado
+    finally:
+        conexao.close()
+
+
+def doc_lib_reservar_ai(quantidade, usuario, nome_completo=""):
+    """Reserva 'quantidade' (1 a DOC_LIB_LIMITE_RESERVA) números de AI, na sequência do último número emitido ou
+    reservado do ano. Cada número vira um registro individual (um documento com um AI) com status Reservado, só com o
+    número; todos os demais campos ficam em branco para o preenchimento posterior (o AI não tem texto padrão em
+    Observações). Tudo em uma única transação: ou são reservados todos os números pedidos, ou nenhum.
+    Devolve [{"ateie_id": ..., "numero": ...}] na ordem da numeração. Lança DocLibRegra se a quantidade for inválida."""
+    try:
+        quantidade = int(str(quantidade).strip())
+    except (TypeError, ValueError):
+        raise DocLibRegra("Informe a quantidade de números a reservar (número inteiro).")
+    if not 1 <= quantidade <= DOC_LIB_LIMITE_RESERVA:
+        raise DocLibRegra(f"A quantidade de números a reservar deve estar entre 1 e {DOC_LIB_LIMITE_RESERVA}.")
+    agora = datetime.now()
+    agora_texto = agora.strftime("%d/%m/%Y - %H:%Mh")
+    nomes_colunas = [chave for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO_AI]
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        reservados = []
+        for _ in range(quantidade):
+            sequencia = _doc_lib_consumir_numero(cursor, "AI", agora.year)
+            numero = doc_lib_formatar_numero(sequencia, agora.year)
+            cursor.execute(
+                "INSERT INTO doclib_ai (classificacao, equipamento, empresa, empresa_outra, local_servico, "
+                "tempo_manobras, disponivel_em, condicoes, servicos, observacoes, documentos_vinculados, "
+                "solicitado_por, solicitado_por_usuario, data_preenchimento, hora_preenchimento, revisao, emitido, "
+                "criado_em, atualizado_por, atualizado_em, reservado_por, reservado_em) "
+                "VALUES ('', '', '', '', '', '', '', '', '', '', '', ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)",
+                (nome_completo or usuario, usuario, agora.strftime("%d/%m/%Y"), agora.strftime("%H:%M"),
+                 agora_texto, usuario, agora_texto, usuario, agora_texto))
+            ai_id = cursor.lastrowid
+            cursor.execute(
+                f"INSERT INTO doclib_ai_intervencoes (ai_id, ordem, numero, ano, sequencia, "
+                f"{', '.join(nomes_colunas)}, status) VALUES (?, 1, ?, ?, ?, {', '.join(['?'] * len(nomes_colunas))}, ?)",
+                [ai_id, numero, agora.year, sequencia] + [""] * len(nomes_colunas) + [STATUS_ATEIE_RESERVADO])
+            reservados.append({"ateie_id": ai_id, "numero": numero})
+        cursor.execute("COMMIT")
+        return reservados
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+# ---------------------------------------------------
+# NORMALIZAÇÃO E VALIDAÇÃO DO AI
+# ---------------------------------------------------
+def doc_lib_normalizar_ai(dados):
+    """Devolve uma cópia dos dados com datas e horas válidas já no padrão de cada campo (tabela: dd/mm/aa; demais campos:
+    dd/mm/aaaa; horas: HH:MM, inclusive o Tempo de Manobras e o tempo do campo 6). Valores inválidos ficam como foram
+    digitados (a validação os aponta)."""
+    def data_hora(linha, ano_curto):
+        linha = dict(linha)
+        if "data" in linha:
+            linha["data"] = doc_lib_normalizar_data(linha["data"], ano_curto) or linha["data"]
+        if "hora" in linha:
+            linha["hora"] = doc_lib_normalizar_hora(linha["hora"]) or linha["hora"]
+        return linha
+
+    novo = dict(dados)
+    novo["tempo_manobras"] = str(dados.get("tempo_manobras") or "").strip()
+    novo["tempo_manobras"] = doc_lib_normalizar_hora(novo["tempo_manobras"]) or novo["tempo_manobras"]
+    disponivel = str(dados.get("disponivel_em") or "").strip()
+    if disponivel.lower() == DOC_LIB_TEXTO_INDISPONIVEL.lower():
+        disponivel = DOC_LIB_TEXTO_INDISPONIVEL
+    novo["disponivel_em"] = doc_lib_normalizar_hora(disponivel) or disponivel
+    novo["notificacoes"] = [data_hora(linha, False) for linha in dados.get("notificacoes", [])]
+    novo["pessoal"] = []
+    for linha in dados.get("pessoal", []):
+        linha = data_hora(linha, False)
+        if linha.get("empresa") != "OUTRA":
+            linha["empresa_outra"] = ""
+        novo["pessoal"].append(linha)
+    intervencoes = []
+    for item in dados.get("intervencoes", []):
+        item = dict(item)
+        for chave, _, _, tipo in DOC_LIB_COLUNAS_INTERVENCAO_AI:
+            valor = item.get(chave) or ""
+            if tipo == "data":
+                valor = doc_lib_normalizar_data(valor, True) or valor
+            elif tipo == "hora":
+                valor = doc_lib_normalizar_hora(valor) or valor
+            item[chave] = valor
+        intervencoes.append(item)
+    novo["intervencoes"] = intervencoes
+    return novo
+
+
+def doc_lib_validar_ai(dados, atual=None):
+    """Valida o AI (antes de salvar e antes de gerar o documento). 'atual' é o documento como está gravado (quando já
+    existe): execução já gravada e inalterada não é revalidada nas regras de data.
+
+    Retorna uma lista de (chaves_dos_campos, mensagem); lista vazia = documento válido.
+    Opcionais: De acordo, Observações e Documentos Internos Vinculados. Os demais campos são obrigatórios, inclusive o
+    Tempo de Manobras (HH:MM), o campo 6 (Indisponível ou o tempo HH:MM) e as Condições de Impedimento. Na tabela são
+    obrigatórios os 4 campos do período previsto de cada AI usado (pelo menos um); os campos de execução (18.1 a 18.8)
+    são preenchidos à medida que o serviço acontece e, se informados, precisam estar corretos."""
+    erros = []
+
+    def vazio(valor):
+        return not str(valor or "").strip()
+
+    if vazio(dados.get("empresa")):
+        erros.append((("empresa",), "Empresa: selecione a empresa."))
+    elif dados.get("empresa") == "OUTRA" and vazio(dados.get("empresa_outra")):
+        erros.append((("empresa_outra",), "Empresa (OUTRA): informe o nome da empresa."))
+    if vazio(dados.get("classificacao")):
+        erros.append((("classificacao",), "Classificação do Impedimento: selecione Programado, Urgência ou Emergência."))
+    if vazio(dados.get("equipamento")):
+        erros.append((("equipamento",), "Equipamento a Impedir: preencha o campo."))
+    if vazio(dados.get("local")):
+        erros.append((("local",), "Local: preencha o campo."))
+    if vazio(dados.get("tempo_manobras")):
+        erros.append((("tempo_manobras",), "Tempo de Manobras: informe o tempo (HH:MM)."))
+    elif not doc_lib_normalizar_hora(dados.get("tempo_manobras")):
+        erros.append((("tempo_manobras",), "Tempo de Manobras: tempo inválido (use HH:MM)."))
+    disponivel = str(dados.get("disponivel_em") or "").strip()
+    if not disponivel:
+        erros.append((("disponivel_em",), "Em caso de necessidade pode-se dispor do equipamento em: selecione "
+                                          "Indisponível ou informe o tempo (HH:MM)."))
+    elif disponivel.lower() != DOC_LIB_TEXTO_INDISPONIVEL.lower() and not doc_lib_normalizar_hora(disponivel):
+        erros.append((("disponivel_em",), "Em caso de necessidade pode-se dispor do equipamento em: tempo inválido "
+                                          "(use HH:MM)."))
+    if vazio(dados.get("condicoes")):
+        erros.append((("condicoes",), "Condições de Impedimento: preencha o campo."))
+    if vazio(dados.get("servicos")):
+        erros.append((("servicos",), "Serviço a Executar: preencha o campo."))
+    if vazio(dados.get("solicitado_por")) or vazio(dados.get("data_preenchimento")) \
+            or vazio(dados.get("hora_preenchimento")):
+        erros.append((("solicitado_por",), "Solicitado por: usuário, data ou hora não identificados "
+                                           "(faça login novamente)."))
+
+    def validar_linhas(linhas, colunas, prefixo, titulo, opcional=False):
+        """opcional=True: linha totalmente em branco é ignorada; linha parcialmente preenchida precisa ser
+        completada (ou removida)."""
+        if not linhas and not opcional:
+            erros.append(((f"{prefixo}:1:nome",), f"{titulo}: informe ao menos uma linha."))
+        for numero_linha, linha in enumerate(linhas, start=1):
+            if opcional and all(vazio(linha.get(chave)) for chave, _, _ in colunas):
+                continue
+            faltando = [(chave, rotulo) for chave, rotulo, _ in colunas if vazio(linha.get(chave))]
+            if faltando:
+                erros.append((tuple(f"{prefixo}:{numero_linha}:{chave}" for chave, _ in faltando),
+                              f"{titulo}, linha {numero_linha}: preencha "
+                              + ", ".join(rotulo for _, rotulo in faltando) + "."))
+            for chave, rotulo, tipo in colunas:
+                valor = linha.get(chave)
+                if vazio(valor):
+                    continue
+                if tipo == "data" and not doc_lib_normalizar_data(valor):
+                    erros.append(((f"{prefixo}:{numero_linha}:{chave}",),
+                                  f"{titulo}, linha {numero_linha}: Data inválida (use DD/MM/AAAA)."))
+                if tipo == "hora" and not doc_lib_normalizar_hora(valor):
+                    erros.append(((f"{prefixo}:{numero_linha}:{chave}",),
+                                  f"{titulo}, linha {numero_linha}: Hora inválida (use HH:MM)."))
+                if tipo == "empresa" and valor == "OUTRA" and vazio(linha.get(chave + "_outra")):
+                    erros.append(((f"{prefixo}:{numero_linha}:{chave}_outra",),
+                                  f"{titulo}, linha {numero_linha}: informe o nome da empresa (OUTRA)."))
+
+    validar_linhas(dados.get("notificacoes") or [], DOC_LIB_COLUNAS_NOTIFICACAO, "notif",
+                   "De acordo (Pessoas/Áreas notificadas)", opcional=True)
+    validar_linhas(dados.get("pessoal") or [], DOC_LIB_COLUNAS_PESSOAL_AI, "pessoal", "Pessoal Notificado")
+
+    # Tabela 17/18
+    gravadas = {item["ordem"]: item for item in (atual or {}).get("intervencoes") or []}
+    intervencoes_usadas = 0
+    for item in dados.get("intervencoes") or []:
+        if item.get("status") == STATUS_ATEIE_CANCELADO:
+            intervencoes_usadas += 1
+            continue
+        ordem = item["ordem"]
+        valores = {chave: str(item.get(chave) or "").strip() for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO_AI}
+        numero = item.get("numero")
+        if not numero and not any(valores.values()):
+            continue                                         # linha não utilizada
+        intervencoes_usadas += 1
+        titulo = f"AI da linha {ordem}" + (f" (Nº {numero})" if numero else "")
+
+        faltando = [chave for chave in DOC_LIB_CAMPOS_PROGRAMADOS if not valores[chave]]
+        if faltando:
+            dica = ("; para retirar o AI use o botão Cancelar" if numero else "")
+            erros.append((tuple(f"interv:{ordem}:{chave}" for chave in faltando),
+                          f"{titulo}: preencha " + ", ".join(_DOC_LIB_DESCRICAO_CAMPO_AI[c] for c in faltando)
+                          + dica + "."))
+
+        for chave, _, descricao, tipo in DOC_LIB_COLUNAS_INTERVENCAO_AI:
+            valor = valores[chave]
+            if not valor:
+                continue
+            if tipo == "data" and not doc_lib_normalizar_data(valor):
+                erros.append(((f"interv:{ordem}:{chave}",), f"{titulo}: {descricao} inválida (use DD/MM/AA)."))
+            if tipo == "hora" and not doc_lib_normalizar_hora(valor):
+                erros.append(((f"interv:{ordem}:{chave}",), f"{titulo}: {descricao} inválida (use HH:MM)."))
+
+        inicio = _doc_lib_data_hora(valores["prev_data_inicio"], valores["prev_hora_inicio"])
+        termino = _doc_lib_data_hora(valores["prev_data_termino"], valores["prev_hora_termino"])
+        if inicio and termino and termino < inicio:
+            erros.append(((f"interv:{ordem}:prev_data_termino", f"interv:{ordem}:prev_hora_termino"),
+                          f"{titulo}: o término previsto não pode ser anterior ao início previsto."))
+
+        for chave_data, chave_hora, nome in (("real_data_inicio", "real_hora_inicio", "liberação para manutenção"),
+                                             ("real_data_termino", "real_hora_termino", "liberação para operação")):
+            if bool(valores[chave_data]) != bool(valores[chave_hora]):
+                ausente = chave_hora if valores[chave_data] else chave_data
+                erros.append(((f"interv:{ordem}:{ausente}",),
+                              f"{titulo}: preencha também {_DOC_LIB_DESCRICAO_CAMPO_AI[ausente]} "
+                              f"(data e hora da {nome} andam juntas)."))
+        for campo, mensagem in doc_lib_erros_datas_execucao_ai(valores, gravadas.get(ordem)):
+            erros.append(((f"interv:{ordem}:{campo}",), f"{titulo}: {mensagem}"))
+
+        inicio_real = _doc_lib_data_hora(valores["real_data_inicio"], valores["real_hora_inicio"])
+        termino_real = _doc_lib_data_hora(valores["real_data_termino"], valores["real_hora_termino"])
+        if inicio_real and termino_real and termino_real < inicio_real:
+            erros.append(((f"interv:{ordem}:real_data_termino", f"interv:{ordem}:real_hora_termino"),
+                          f"{titulo}: a liberação para operação não pode ser anterior à liberação para manutenção."))
+
+    if intervencoes_usadas == 0:
+        erros.append((tuple(f"interv:1:{chave}" for chave in DOC_LIB_CAMPOS_PROGRAMADOS),
+                      "Tabela de impedimentos: informe ao menos um AI (data e hora de início e de término "
+                      "previstos)."))
+    return erros
+
+
+# ---------------------------------------------------
+# STATUS, CANCELAMENTO, RESERVA E AGRUPAMENTO DO AI
+# ---------------------------------------------------
+
+
+def _doc_lib_recalcular_status_ai(cursor, ai_id, emitido):
+    """Recalcula e grava o status de cada AI (intervenção) do documento, um a um."""
+    cursor.execute("SELECT nome, data, hora FROM doclib_ai_notificacoes WHERE ai_id = ?", (ai_id,))
+    de_acordo = doc_lib_de_acordo_completo([{"nome": n, "data": d, "hora": h} for n, d, h in cursor.fetchall()])
+    colunas = DOC_LIB_CAMPOS_PROGRAMADOS + DOC_LIB_CAMPOS_EXECUCAO
+    cursor.execute(f"SELECT id, status, {', '.join(colunas)} FROM doclib_ai_intervencoes "
+                   f"WHERE ai_id = ?", (ai_id,))
+    for linha in cursor.fetchall():
+        item = dict(zip(["id", "status"] + list(colunas), linha))
+        novo = doc_lib_calcular_status(item, emitido, de_acordo)
+        if novo != item["status"]:
+            cursor.execute("UPDATE doclib_ai_intervencoes SET status = ? WHERE id = ?", (novo, item["id"]))
+
+
+def doc_lib_cancelar_intervencao_ai(ai_id, ordem, usuario, justificativa, revisao_esperada):
+    """Cancela SOMENTE o AI (intervenção) indicado: os demais AI do mesmo documento continuam com o
+    status que tinham. O número cancelado fica registrado e nunca é reaproveitado. Só é possível cancelar um
+    AI "Em análise", "Aguarda De Acordo" ou "Aprovado para Execução": em execução ele somente pode ser concluído,
+    e concluído ou já cancelado não cancela (ValueError). Devolve a nova revisão do documento."""
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT revisao FROM doclib_ai WHERE id = ?", (ai_id,))
+        linha = cursor.fetchone()
+        if linha is None or linha[0] != revisao_esperada:
+            raise DocLibConflito("Este AI foi alterado por outro usuário depois de aberto nesta janela.\n\n"
+                                 "Feche-o e abra-o novamente (GRID AI) para ver a versão atual.")
+        cursor.execute("SELECT status FROM doclib_ai_intervencoes WHERE ai_id = ? AND ordem = ?",
+                       (ai_id, ordem))
+        linha = cursor.fetchone()
+        if linha is None:
+            raise ValueError("AI não encontrado.")
+        if linha[0] == STATUS_ATEIE_CANCELADO:
+            raise ValueError("Este AI já está cancelado.")
+        if linha[0] not in DOC_LIB_STATUS_CANCELAVEIS:
+            raise ValueError(f"Um AI com status '{linha[0]}' não pode ser cancelado.")
+        cursor.execute("UPDATE doclib_ai_intervencoes SET status = ?, cancelada_por = ?, data_cancelamento = ?, "
+                       "justificativa_cancelamento = ? WHERE ai_id = ? AND ordem = ?",
+                       (STATUS_ATEIE_CANCELADO, usuario, agora_texto, justificativa, ai_id, ordem))
+        cursor.execute("UPDATE doclib_ai SET revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? "
+                       "WHERE id = ?", (usuario, agora_texto, ai_id))
+        cursor.execute("SELECT revisao FROM doclib_ai WHERE id = ?", (ai_id,))
+        nova_revisao = cursor.fetchone()[0]
+        cursor.execute("COMMIT")
+        return nova_revisao
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_agrupar_reservados_ai(selecao, usuario):
+    """Agrupa AIs reservados em um único documento (um só PDF, com todos os números). 'selecao' é a lista de
+    (id do documento, linha da tabela) dos AIs escolhidos no GRID AI. Regras:
+      - de 2 a DOC_LIB_LIMITE_AGRUPAMENTO AIs, todos com status Reservado (a numeração não precisa ser sequencial);
+      - se um AI selecionado já faz parte de um agrupamento, todos os AI desse agrupamento têm de ser selecionados
+        (os cancelados acompanham o agrupamento);
+      - o documento resultante não pode passar de DOC_LIB_LINHAS_INTERVENCOES_AI linhas.
+    A numeração original de cada AI é preservada (as linhas ficam em ordem de número) e o histórico dos PDFs
+    em branco já gerados passa para o documento agrupado. O agrupamento fica registrado em doclib_ai_agrupamentos.
+    Devolve (id do documento resultante, [números agrupados]). Lança DocLibRegra se não puderem ser agrupados e
+    DocLibConflito se algum deles foi alterado por outro usuário."""
+    pares = list(dict.fromkeys((int(ai_id), int(ordem)) for ai_id, ordem in selecao))
+    if len(pares) < 2:
+        raise DocLibRegra("Selecione dois ou mais AIs com status Reservado para agrupar.")
+    if len(pares) > DOC_LIB_LIMITE_AGRUPAMENTO:
+        raise DocLibRegra(f"Um agrupamento pode ter no máximo {DOC_LIB_LIMITE_AGRUPAMENTO} AIs "
+                          f"({len(pares)} foram selecionados).")
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        for ai_id, ordem in pares:
+            cursor.execute("SELECT i.numero, i.status, a.emitido FROM doclib_ai_intervencoes i "
+                           "JOIN doclib_ai a ON a.id = i.ai_id WHERE i.ai_id = ? AND i.ordem = ?",
+                           (ai_id, ordem))
+            linha = cursor.fetchone()
+            if linha is None:
+                raise DocLibConflito("Um dos AIs selecionados não existe mais ou foi agrupado por outro usuário.\n\n"
+                                     "Feche e abra novamente o GRID AI para ver a situação atual.")
+            numero, status, emitido = linha
+            if status != STATUS_ATEIE_RESERVADO or emitido:
+                raise DocLibRegra(f"O AI {numero} está com status '{status}'. Só é possível agrupar AIs com "
+                                  f"status '{STATUS_ATEIE_RESERVADO}'.")
+
+        documentos = list(dict.fromkeys(ai_id for ai_id, _ in pares))
+        if len(documentos) < 2:
+            raise DocLibRegra("Os AIs selecionados já fazem parte do mesmo agrupamento (mesmo documento).")
+        linhas = []                 # (ano, sequência, id da intervenção, id do documento de origem, número)
+        for ai_id in documentos:
+            cursor.execute("SELECT id, ordem, numero, ano, sequencia, status FROM doclib_ai_intervencoes "
+                           "WHERE ai_id = ? ORDER BY ordem", (ai_id,))
+            do_documento = cursor.fetchall()
+            for intervencao_id, ordem, numero, ano, sequencia, status in do_documento:
+                if (ai_id, ordem) not in pares and status != STATUS_ATEIE_CANCELADO:
+                    raise DocLibRegra(
+                        f"O AI {numero} já foi agrupado com outros AIs "
+                        f"({', '.join(item[2] for item in do_documento)}) e não foi selecionado.\n\n"
+                        f"Selecione todos os AIs desse agrupamento para agrupá-los com outros.")
+                linhas.append((ano, sequencia, intervencao_id, ai_id, numero))
+        if len(linhas) > DOC_LIB_LINHAS_INTERVENCOES_AI:
+            raise DocLibRegra(f"O documento agrupado teria {len(linhas)} linhas (inclui AIs cancelados) e o "
+                              f"máximo é {DOC_LIB_LINHAS_INTERVENCOES_AI}.")
+
+        linhas.sort()
+        destino = linhas[0][3]                                  # documento do menor número
+        origens = [ai_id for ai_id in documentos if ai_id != destino]
+        # as linhas passam para o documento de destino em ordem de número (primeiro afasta as ordens atuais, para
+        # não colidir com UNIQUE(ai_id, ordem))
+        marcas = ", ".join("?" * len(linhas))
+        cursor.execute(f"UPDATE doclib_ai_intervencoes SET ordem = ordem + 1000 WHERE id IN ({marcas})",
+                       [linha[2] for linha in linhas])
+        for ordem, (_, _, intervencao_id, _, _) in enumerate(linhas, start=1):
+            cursor.execute("UPDATE doclib_ai_intervencoes SET ai_id = ?, ordem = ? WHERE id = ?",
+                           (destino, ordem, intervencao_id))
+        marcas = ", ".join("?" * len(origens))
+        # o histórico dos PDFs em branco e dos agrupamentos anteriores acompanha as linhas para o documento de destino
+        cursor.execute(f"UPDATE doclib_ai_pdfs SET ai_id = ? WHERE ai_id IN ({marcas})", [destino] + origens)
+        cursor.execute(f"UPDATE doclib_ai_agrupamentos SET ai_id = ? WHERE ai_id IN ({marcas})",
+                       [destino] + origens)
+        # os documentos de origem (reservados, sem notificações nem pessoal) deixam de existir
+        cursor.execute(f"DELETE FROM doclib_ai_notificacoes WHERE ai_id IN ({marcas})", origens)
+        cursor.execute(f"DELETE FROM doclib_ai_pessoal WHERE ai_id IN ({marcas})", origens)
+        cursor.execute(f"DELETE FROM doclib_ai WHERE id IN ({marcas})", origens)
+        cursor.execute("UPDATE doclib_ai SET revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? "
+                       "WHERE id = ?", (usuario, agora_texto, destino))
+        numeros = [linha[4] for linha in linhas]
+        cursor.execute("INSERT INTO doclib_ai_agrupamentos (ai_id, numeros, agrupado_por, agrupado_em) "
+                       "VALUES (?, ?, ?, ?)", (destino, ", ".join(numeros), usuario, agora_texto))
+        cursor.execute("COMMIT")
+        return destino, numeros
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+# ---------------------------------------------------
+# ENCAMINHAR AI POR E-MAIL (envio, remetente e destinatários são os do ATEIE)
+# ---------------------------------------------------
+
+
+def doc_lib_registrar_envio_ai(ai_id, numeros, remetente, destinatarios, copias, assunto, anexo, metodo, usuario):
+    """Registra o e-mail enviado (quem, quando, de qual remetente, para quem, com cópia para quem, qual PDF) e marca
+    cada AI enviado como "Sim, em dd/mm/aaaa" na coluna "Enviado e-mail" do GRID AI. Um AI que já consta como
+    enviado mantém a data original (o envio fica só no histórico). Não altera a revisão do documento (o PDF anexado
+    continua valendo e a janela do AI aberta não vira "alterada por outro usuário")."""
+    agora = datetime.now()
+    conexao = doc_lib_conectar()
+    try:
+        conexao.execute("INSERT INTO doclib_ai_emails (ai_id, numeros, destinatarios, copias, remetente, assunto, "
+                        "anexo, metodo, enviado_por, enviado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (ai_id, ", ".join(numeros), "; ".join(destinatarios), "; ".join(copias), remetente, assunto,
+                         anexo, metodo, usuario, agora.strftime("%d/%m/%Y - %H:%Mh")))
+        conexao.executemany(
+            "UPDATE doclib_ai_intervencoes SET email_enviado_em = ?, email_enviado_por = ?, "
+            "email_enviado_origem = 'Sistema' WHERE ai_id = ? AND numero = ? "
+            "AND COALESCE(email_enviado_em, '') = ''",
+            [(agora.strftime("%d/%m/%Y"), usuario, ai_id, numero) for numero in numeros])
+        conexao.commit()
+    finally:
+        conexao.close()
+
+
+def doc_lib_emails_ja_enviados_ai(ai_id, numeros):
+    """{número: 'dd/mm/aaaa'} dos AI do documento (entre 'numeros') que já constam como "Enviado e-mail: Sim". Esses
+    AI não podem ser encaminhados nem marcados como enviados de novo."""
+    numeros = list(numeros)
+    if not numeros:
+        return {}
+    conexao = doc_lib_conectar()
+    try:
+        linhas = conexao.execute(
+            f"SELECT numero, email_enviado_em FROM doclib_ai_intervencoes WHERE ai_id = ? "
+            f"AND numero IN ({', '.join('?' * len(numeros))}) AND COALESCE(email_enviado_em, '') <> ''",
+            [ai_id] + numeros).fetchall()
+    finally:
+        conexao.close()
+    return dict(linhas)
+
+
+def doc_lib_definir_email_enviado_ai(selecao, data, usuario):
+    """Marcação manual da coluna "Enviado e-mail" do GRID AI (usada quando o envio pelo sistema falhou e o e-mail foi
+    enviado à mão). 'selecao' é a lista de (id do documento, linha da tabela); 'data' é dd/mm/aaaa para marcar
+    "Sim, em dd/mm/aaaa" ou None para voltar a "Não". Marcar como enviado só vale para AI com documento gerado, não
+    cancelado e que ainda NÃO conste como enviado: um AI com "Sim" não pode ser marcado de novo (a data original
+    permanece); para corrigir um registro errado é preciso voltá-lo a "Não" (DocLibRegra se algum não puder). Não altera
+    a revisão do documento. Devolve a quantidade de AI."""
+    pares = list(dict.fromkeys((int(ai_id), int(ordem)) for ai_id, ordem in selecao))
+    if not pares:
+        raise DocLibRegra("Selecione pelo menos um AI.")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        ja_enviados = []
+        for ai_id, ordem in pares:
+            cursor.execute("SELECT numero, status, email_enviado_em FROM doclib_ai_intervencoes "
+                           "WHERE ai_id = ? AND ordem = ?", (ai_id, ordem))
+            linha = cursor.fetchone()
+            if linha is None:
+                raise DocLibConflito("Um dos AIs selecionados não existe mais ou foi agrupado por outro usuário.\n\n"
+                                     "Feche e abra novamente o GRID AI para ver a situação atual.")
+            numero, status, enviado_em = linha
+            if data and status in DOC_LIB_STATUS_SEM_ENVIO_EMAIL:
+                raise DocLibRegra(f"O AI {numero} está com status '{status}'. Só é possível marcar o e-mail como "
+                                  f"enviado depois que o documento é gerado, e não para AI cancelado.")
+            if data and enviado_em:
+                ja_enviados.append(f"{numero} ({doc_lib_texto_email_enviado(enviado_em)})")
+        if ja_enviados:
+            raise DocLibRegra("Já consta(m) como e-mail enviado: " + ", ".join(ja_enviados) + ".\n\n"
+                              "Um AI com 'Enviado e-mail: Sim' não pode ser marcado como enviado novamente. Para "
+                              "marcar, selecione somente AI com 'Não'. Se o registro estiver errado, use 'Voltar "
+                              "para Não'.")
+        for ai_id, ordem in pares:
+            cursor.execute("UPDATE doclib_ai_intervencoes SET email_enviado_em = ?, email_enviado_por = ?, "
+                           "email_enviado_origem = ? WHERE ai_id = ? AND ordem = ?",
+                           (data or None, usuario if data else None, "Manual" if data else None, ai_id, ordem))
+        cursor.execute("COMMIT")
+        return len(pares)
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_pdf_para_envio_ai(doc, usuario):
+    """PDF a anexar no e-mail do Encaminhar AI: o documento SEM a linha vermelha dos campos 18.1 a 18.8 e sem o aviso
+    "Aguardando o De Acordo do documento" (marcas de controle interno que não devem ir para a outra empresa).
+    Reaproveita o PDF desse tipo já arquivado enquanto o documento não mudou (mesma revisão); se não houver, ou se o
+    arquivo não existir mais, gera e arquiva um novo em AI/Enviados/<ano>. Devolve (caminho, aviso)."""
+    conexao = doc_lib_conectar()
+    try:
+        linha = conexao.execute("SELECT caminho FROM doclib_ai_pdfs WHERE ai_id = ? AND tipo = 'envio' "
+                                "AND revisao_final = ? ORDER BY id DESC LIMIT 1",
+                                (doc["id"], doc["revisao"])).fetchone()
+    finally:
+        conexao.close()
+    if linha and os.path.isfile(linha[0]):
+        return linha[0], None
+    return doc_lib_arquivar_pdf_ai(doc, usuario, para_envio=True)
+
+
+# ---------------------------------------------------
+# GERAÇÃO DO DOCUMENTO AI EM PDF
+# ---------------------------------------------------
+class PDFAI(PDFAteie):
+    """Folha A4 do AI: mesmo cabeçalho do ATEIE (logotipo, título e réguas, rodapé), com a geometria do formulário de
+    referência do AI (margens, posição do título e altura das réguas)."""
+    X0 = 11.2
+    X1 = 201.4
+    Y_REGUA_TOPO = 12.7
+    Y_REGUA_TITULO = 29.6
+    Y_CONTEUDO = 30.4
+
+    def header(self):
+        self.set_draw_color(0, 0, 0)
+        self.set_line_width(0.8)
+        self.line(self.X0, self.Y_REGUA_TOPO, self.X1, self.Y_REGUA_TOPO)
+        if os.path.exists(LOGO_ATEIE):
+            self.image(LOGO_ATEIE, x=12.5, y=13.9, w=32.5)         # o mesmo logotipo do ATEIE
+        self.set_font("DejaVuC", "B", 11)
+        self.set_text_color(0, 0, 0)
+        self.set_xy(46.7, 19.0)
+        self.cell(self.X1 - 46.7, 5.2, "AUTORIZAÇÃO PARA IMPEDIMENTO DE EQUIPAMENTO DE INTERLIGAÇÃO – AI", align="C")
+        self.line(self.X0, self.Y_REGUA_TITULO, self.X1, self.Y_REGUA_TITULO)
+        self.set_line_width(0.2)
+
+
+def doc_lib_gerar_pdf_ai(doc, caminho, gerado_por="", para_envio=False):
+    """Gera o PDF do AI (layout do documento de referência) em 'caminho'. Mesmo tratamento do ATEIE:
+
+    AI RESERVADO (ou grupo de reservados): sai o formulário em branco, para uso físico em emissão manual ou de
+    emergência. Fica apenas o número de cada AI (coluna Nº); sem a linha vermelha sobre os campos 18.1 a 18.8 e sem o
+    aviso "Aguardando o De Acordo do documento".
+
+    para_envio=True (PDF anexado ao e-mail do botão Encaminhar AI): o mesmo documento, mas sem a linha vermelha sobre os
+    campos 18.1 a 18.8 e sem o aviso "Aguardando o De Acordo do documento", que são marcas de controle interno do COG. O
+    risco e a lista de AIs cancelados continuam, pois fazem parte do conteúdo do documento.
+
+    O espaço no final (onde o ATEIE tem a Nota) traz o aviso "Aguardando o De Acordo do documento" e as informações dos
+    AIs cancelados."""
+    agora = datetime.now()
+    if doc_lib_documento_reservado(doc):
+        em_branco = {chave: "" for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO_AI}
+        doc = dict(doc, classificacao="", equipamento="", empresa="", empresa_outra="", local="", tempo_manobras="",
+                   disponivel_em="", condicoes="", servicos="", observacoes="", documentos_vinculados="",
+                   solicitado_por="", solicitado_por_usuario="", data_preenchimento="", hora_preenchimento="",
+                   notificacoes=[], pessoal=[],
+                   intervencoes=[dict(item, **em_branco) for item in doc.get("intervencoes") or []])
+    pdf = PDFAI(f"Gerado pelo sistema COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}")
+    pdf.add_page()
+    X0, X1 = PDFAI.X0, PDFAI.X1
+    LARGURA = X1 - X0
+    estado = {"y": PDFAI.Y_CONTEUDO}
+
+    def nova_pagina():
+        pdf.add_page()
+        estado["y"] = PDFAI.Y_CONTEUDO
+
+    def garantir(altura):
+        """Abre nova página se não houver 'altura' mm livres na atual."""
+        if estado["y"] + altura > PDFAI.Y_MAXIMO:
+            nova_pagina()
+
+    def regua(y, x_ini=X0, x_fim=X1, espessura=0.2):
+        pdf.set_line_width(espessura)
+        pdf.line(x_ini, y, x_fim, y)
+
+    def largura_texto(texto, estilo, tamanho):
+        pdf.set_font("DejaVuC", estilo, tamanho)
+        return pdf.get_string_width(texto)
+
+    def rotulo(x, y_base, numero, texto, tamanho=9.0):
+        """Rótulo do campo: número pequeno e rebaixado (subescrito) + texto em itálico. Devolve o x final."""
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("DejaVuC", "I", tamanho * 0.62)
+        pdf.text(x, y_base + 0.8, f"{numero}.")
+        x += pdf.get_string_width(f"{numero}.") + 0.1
+        pdf.set_font("DejaVuC", "I", tamanho)
+        pdf.text(x, y_base, texto)
+        return x + pdf.get_string_width(texto)
+
+    def valor_ajustado(x, y_base, texto, largura, tamanho=9.5, minimo=6.0, estilo=""):
+        """Valor em uma linha: reduz a fonte até caber e, no limite, abrevia com reticências."""
+        texto = " ".join(str(texto or "").split())
+        tam = tamanho
+        pdf.set_font("DejaVuC", estilo, tam)
+        while tam > minimo and pdf.get_string_width(texto) > largura:
+            tam -= 0.5
+            pdf.set_font("DejaVuC", estilo, tam)
+        while len(texto) > 1 and pdf.get_string_width(texto) > largura:
+            texto = texto[:-2] + "…"
+        pdf.set_text_color(0, 0, 0)
+        pdf.text(x, y_base, texto)
+
+    def ajustar_celula(texto, largura):
+        """Maior fonte (de 7 a 5,5) em que o texto cabe em uma linha da célula; se nem assim couber,
+        usa 5,5 e quebra em várias linhas. Retorna (tamanho, linhas)."""
+        texto = " ".join(str(texto).split())
+        for tamanho in (7.0, 6.5, 6.0, 5.5):
+            pdf.set_font("DejaVuC", "", tamanho)
+            if pdf.get_string_width(texto) <= largura:
+                return tamanho, [texto]
+        return 5.5, doc_lib_quebrar_linhas(pdf, largura, 2.5, texto)
+
+    def posicao_valor(numero, nome, x_ini):
+        """x onde começa o valor de um campo cujo rótulo (número + nome) começa em x_ini + 1,0."""
+        return x_ini + 1.0 + largura_texto(f"{numero}.", "I", 9.0 * 0.62) + largura_texto(nome, "I", 9.0) + 0.1 + 2.0
+
+    def campo_texto(numero, nome, valor, minimo=10.2):
+        """Linha do formulário com rótulo à esquerda e o valor ao lado (quebrando em várias linhas,
+        inclusive entre páginas, se necessário), terminada por uma régua."""
+        valor = (valor or "").strip()
+        x_valor = posicao_valor(numero, nome, X0)
+        pdf.set_font("DejaVuC", "", 9.5)
+        linhas = doc_lib_quebrar_linhas(pdf, X1 - x_valor - 1.5, 4.3, valor) if valor else [""]
+        altura_total = max(minimo, 4.4 + (len(linhas) - 1) * 4.3 + 5.6)
+        # mantém rótulo e texto juntos; só divide entre páginas se o campo não couber em uma página inteira
+        garantir(altura_total if altura_total <= PDFAI.Y_MAXIMO - PDFAI.Y_CONTEUDO else minimo)
+        y_topo = estado["y"]
+        rotulo(X0 + 1.0, y_topo + 4.4, numero, nome)
+        pdf.set_font("DejaVuC", "", 9.5)
+        pdf.set_text_color(0, 0, 0)
+        y_base = y_topo + 4.4
+        for linha in linhas:
+            if y_base + 3.6 > PDFAI.Y_MAXIMO:        # texto maior que o espaço restante: continua na página seguinte
+                nova_pagina()
+                y_topo = estado["y"]
+                y_base = y_topo + 4.4
+                pdf.set_font("DejaVuC", "", 9.5)
+                pdf.set_text_color(0, 0, 0)
+            pdf.text(x_valor, y_base, linha)
+            y_base += 4.3
+        estado["y"] = max(y_topo + minimo, y_base - 4.3 + 5.6)
+        regua(estado["y"])
+
+    caixa_alta = lambda texto: (texto or "").upper()
+    empresa = doc.get("empresa_outra") if doc.get("empresa") == "OUTRA" and doc.get("empresa_outra") \
+        else doc.get("empresa")
+
+    # ---- 1. Empresa (linha de 7 mm; o rótulo fica na metade direita, como no formulário de referência) -----------
+    y_topo = estado["y"]
+    empresa_texto = " ".join(caixa_alta(empresa).split())
+    pdf.set_font("DejaVuC", "", 9.5)
+    largura_empresa = pdf.get_string_width(empresa_texto)
+    largura_rotulo = largura_texto("1.", "I", 9.0 * 0.62) + largura_texto("Empresa:", "I", 9.0) + 0.1
+    x_rotulo = max(X0 + 1.0, min(136.0, X1 - 1.5 - largura_rotulo - 2.0 - largura_empresa))
+    x_fim = rotulo(x_rotulo, y_topo + 4.9, "1", "Empresa:")
+    valor_ajustado(x_fim + 2.0, y_topo + 4.9, empresa_texto, X1 - 1.5 - (x_fim + 2.0))
+    estado["y"] = y_topo + 7.0
+    regua(estado["y"], espessura=0.34)
+
+    # ---- 2. Classificação do Impedimento ([ ] antes de cada opção) -----------------------------------------------
+    y_topo = estado["y"]
+    rotulo(X0 + 1.0, y_topo + 4.4, "2", "Classificação do Impedimento:")
+    for texto, x_caixa in (("Programado", 88.5), ("Urgência", 129.3), ("Emergência", 164.7)):
+        marcado = doc.get("classificacao") == texto
+        pdf.set_font("DejaVuC", "B" if marcado else "", 9.5)
+        pdf.set_text_color(0, 0, 0)
+        pdf.text(x_caixa, y_topo + 4.4, "[X]" if marcado else "[ ]")
+        x_texto = x_caixa + pdf.get_string_width("[X]") + 1.5
+        pdf.set_font("DejaVuC", "", 9.5)
+        pdf.text(x_texto, y_topo + 4.4, texto)
+    estado["y"] = y_topo + 10.4
+    regua(estado["y"])
+
+    # Equipamento a Impedir e Local saem sempre em caixa alta, como quer que tenham sido digitados
+    campo_texto("3", "Equipamento a Impedir:", caixa_alta(doc.get("equipamento")))
+
+    # ---- 4. Local | 5. Tempo de Manobras (duas colunas, separadas por uma linha vertical) -----------------------
+    X_DIVISAO = 105.8
+    x_local = posicao_valor("4", "Local:", X0)
+    x_tempo = posicao_valor("5", "Tempo de Manobras:", X_DIVISAO)
+    pdf.set_font("DejaVuC", "", 9.5)
+    local = caixa_alta(doc.get("local")).strip()
+    linhas_local = doc_lib_quebrar_linhas(pdf, X_DIVISAO - x_local - 1.5, 4.3, local) if local else [""]
+    altura_linha_dupla = max(10.2, 4.4 + (len(linhas_local) - 1) * 4.3 + 5.6)
+    garantir(altura_linha_dupla)
+    y_topo = estado["y"]
+    rotulo(X0 + 1.0, y_topo + 4.4, "4", "Local:")
+    rotulo(X_DIVISAO + 1.0, y_topo + 4.4, "5", "Tempo de Manobras:")
+    pdf.set_font("DejaVuC", "", 9.5)
+    pdf.set_text_color(0, 0, 0)
+    for indice, linha in enumerate(linhas_local):
+        pdf.text(x_local, y_topo + 4.4 + indice * 4.3, linha)
+    pdf.text(x_tempo, y_topo + 4.4, doc.get("tempo_manobras") or "")
+    estado["y"] = y_topo + altura_linha_dupla
+    pdf.set_line_width(0.2)
+    pdf.line(X_DIVISAO, y_topo, X_DIVISAO, estado["y"])
+    regua(estado["y"])
+
+    campo_texto("6", "Em caso de necessidade pode-se dispor do equipamento em:", doc.get("disponivel_em"))
+    campo_texto("7", "Condições de Impedimento:", doc.get("condicoes"))
+    campo_texto("8", "Serviço a Executar:", doc.get("servicos"))
+    campo_texto("9", "Observações:", doc.get("observacoes"))
+    campo_texto("10", "Documentos Internos Vinculados:", doc.get("documentos_vinculados"))
+
+    # ---- 11 a 15: Solicitado por / Data / Hora / Visto Responsável / De Acordo --------------------------------------
+    notificacoes = (doc.get("notificacoes") or [])[:DOC_LIB_LIMITE_NOTIFICACOES_AI]
+    altura_bloco = 8.2 + 19.1
+    garantir(altura_bloco)
+    y0 = estado["y"]
+    X_VISTO = 166.6
+    X_DATA, X_HORA = 88.8, 131.3
+    rotulo(X0 + 1.0, y0 + 4.3, "11", "Solicitado por:")
+    valor_ajustado(X0 + 1.0 + 28.0, y0 + 4.3, doc.get("solicitado_por"), X_DATA - (X0 + 29.0) - 1.5)
+    x_fim = rotulo(X_DATA, y0 + 4.3, "12", "Data:")
+    valor_ajustado(x_fim + 1.5, y0 + 4.3, doc.get("data_preenchimento"), X_HORA - (x_fim + 1.5) - 1.5)
+    x_fim = rotulo(X_HORA, y0 + 4.3, "13", "Hora:")
+    valor_ajustado(x_fim + 1.5, y0 + 4.3, doc.get("hora_preenchimento"), X_VISTO - (x_fim + 1.5) - 1.0)
+    regua(y0 + 8.2, X0, X_VISTO)
+    rotulo(X0 + 1.0, y0 + 11.9, "15", "De Acordo:")
+    sequencia_rotulos = [("15.1", "15.2", "15.3"), ("15.4", "15.5", "15.6")]
+    for indice, (r_nome, r_data, r_hora) in enumerate(sequencia_rotulos):
+        y_base = y0 + 16.9 + indice * 7.0
+        linha = notificacoes[indice] if indice < len(notificacoes) else {}
+        x_fim = rotulo(X0 + 1.0, y_base, r_nome, "Nome:")
+        valor_ajustado(x_fim + 1.5, y_base, linha.get("nome"), X_DATA - (x_fim + 1.5) - 1.5)
+        x_fim = rotulo(X_DATA + 1.9, y_base, r_data, "Data:")
+        valor_ajustado(x_fim + 1.5, y_base, linha.get("data"), X_HORA - (x_fim + 1.5) - 1.5)
+        x_fim = rotulo(X_HORA, y_base, r_hora, "Hora:")
+        valor_ajustado(x_fim + 1.5, y_base, linha.get("hora"), X_VISTO - (x_fim + 1.5) - 1.0)
+    # 14. Visto Responsável (espaço para o visto manual)
+    pdf.set_line_width(0.2)
+    pdf.line(X_VISTO, y0, X_VISTO, y0 + altura_bloco)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("DejaVuC", "I", 9.0 * 0.62)
+    pdf.text(X_VISTO + 12.0, y0 + 4.1, "14.")
+    pdf.set_font("DejaVuC", "I", 9.0)
+    pdf.set_xy(X_VISTO + 15.1, y0 + 1.4)
+    pdf.cell(10, 4.0, "Visto")
+    pdf.set_xy(X_VISTO, y0 + 5.0)
+    pdf.cell(X1 - X_VISTO, 4.0, "Responsável:", align="C")
+    # user.name (login) do profissional, ao contrário de "Solicitado por", que mostra o nome completo
+    visto = " ".join(str(doc.get("solicitado_por_usuario") or "").split())
+    if visto:
+        tamanho = 9.5
+        pdf.set_font("DejaVuC", "B", tamanho)
+        while tamanho > 6.0 and pdf.get_string_width(visto) > X1 - X_VISTO - 3.0:
+            tamanho -= 0.5
+            pdf.set_font("DejaVuC", "B", tamanho)
+        pdf.set_xy(X_VISTO, y0 + 13.0)
+        pdf.cell(X1 - X_VISTO, 4.5, visto, align="C")
+    estado["y"] = y0 + altura_bloco
+    regua(estado["y"])
+
+    # ---- 16. Pessoal Notificado --------------------------------------------------------------
+    pessoal = (doc.get("pessoal") or [])[:DOC_LIB_LIMITE_PESSOAL_AI]
+    garantir(6.2 + 6.2 + DOC_LIB_LIMITE_PESSOAL_AI * 5.8)
+    y0 = estado["y"]
+    rotulo(X0 + 1.0, y0 + 3.9, "16", "Pessoal Notificado")
+    y_cab = y0 + 6.2
+    larguras = [64.5, 27.5, 40.4, 27.8, 30.0]
+    xs = [X0]
+    for largura in larguras:
+        xs.append(xs[-1] + largura)
+    regua(y_cab, espessura=0.25)
+    for coluna, (numero, nome) in enumerate((("16.1", "Nome:"), ("16.2", "Setor:"), ("16.3", "Empresa:"),
+                                              ("16.4", "Data:"), ("16.5", "Hora:"))):
+        rotulo(xs[coluna] + 1.0, y_cab + 3.9, numero, nome)
+    altura_linha = 5.8
+    y_linha = y_cab + 6.2
+    regua(y_linha, espessura=0.25)
+    chaves_pessoal = ("nome", "setor", "empresa", "data", "hora")
+    for indice in range(DOC_LIB_LIMITE_PESSOAL_AI):
+        linha = pessoal[indice] if indice < len(pessoal) else {}
+        for coluna, chave in enumerate(chaves_pessoal):
+            valor = linha.get(chave)
+            if chave == "empresa" and valor == "OUTRA" and linha.get("empresa_outra"):
+                valor = linha["empresa_outra"]
+            valor_ajustado(xs[coluna] + 1.0, y_linha + 4.0, valor, larguras[coluna] - 2.0, 9.0, 6.0)
+        y_linha += altura_linha
+        regua(y_linha, espessura=0.25)
+    for x_vertical in xs[1:-1]:
+        pdf.set_line_width(0.25)
+        pdf.line(x_vertical, y_cab, x_vertical, y_linha)
+    estado["y"] = y_linha
+
+    # ---- 17 e 18. Período Total Previsto / Período Verificado na Execução dos Serviços ----------------------------
+    intervencoes = sorted(doc.get("intervencoes") or [], key=lambda item: item["ordem"])
+    por_ordem = {item["ordem"]: item for item in intervencoes}
+    larg_col = [17.3, 16.4, 12.3, 15.2, 13.6, 14.4, 14.4, 15.1, 13.7, 14.4, 14.4, 14.4, 14.6]
+    # larguras (mm): col. Nº, 17.1 a 17.4 e 18.1 a 18.8 - mesmas proporções do documento de referência
+    xc = [X0]
+    for largura in larg_col:
+        xc.append(xc[-1] + largura)
+
+    chaves_dados = [chave for chave, _, _, _ in DOC_LIB_COLUNAS_INTERVENCAO_AI]
+    alturas_linhas = []
+    for ordem in range(1, DOC_LIB_LINHAS_INTERVENCOES_AI + 1):
+        item = por_ordem.get(ordem, {})
+        n_linhas = 1
+        for posicao, chave in enumerate(chaves_dados):
+            texto = str(item.get(chave) or "")
+            if texto and DOC_LIB_COLUNAS_INTERVENCAO_AI[posicao][3] == "texto":
+                n_linhas = max(n_linhas, len(ajustar_celula(texto, larg_col[posicao + 1] - 1.2)[1]))
+        alturas_linhas.append(max(6.3, n_linhas * 2.5 + 1.6))
+    ALTURA_TITULO, ALTURA_GRUPO, ALTURA_SUB = 9.5, 6.2, 6.0
+    ALTURA_CABECALHO = ALTURA_TITULO + ALTURA_GRUPO + ALTURA_SUB
+    altura_tabela = ALTURA_CABECALHO + sum(alturas_linhas)
+    estado["y"] += 3.2
+    garantir(altura_tabela + 6.0)
+    yt = estado["y"]
+    y_grupo, y_sub, y_dados = yt + ALTURA_TITULO, yt + ALTURA_TITULO + ALTURA_GRUPO, yt + ALTURA_CABECALHO
+    y_fim_t = yt + altura_tabela
+    pdf.set_line_width(0.2)
+    # molduras
+    pdf.rect(X0, yt, LARGURA, altura_tabela)
+    pdf.line(xc[1], yt, xc[1], y_fim_t)
+    regua(y_grupo, xc[1], X1)
+    regua(y_sub, xc[1], X1)
+    regua(y_dados, X0, X1)
+    pdf.line(xc[5], yt, xc[5], y_fim_t)                                      # 17 | 18
+    for indice_x in (3, 9):                                                  # Início | Término e Manutenção | Operação
+        pdf.line(xc[indice_x], y_grupo, xc[indice_x], y_fim_t)
+    for indice_x in (2, 4, 6, 7, 8, 10, 11, 12):                             # colunas simples
+        pdf.line(xc[indice_x], y_sub, xc[indice_x], y_fim_t)
+    # títulos
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("DejaVuC", "B", 14)
+    pdf.set_xy(X0, yt + 9.6)
+    pdf.cell(larg_col[0], 6.0, "AI", align="C")
+    pdf.set_font("DejaVuC", "", 10)
+    pdf.set_xy(X0, yt + 16.0)
+    pdf.cell(larg_col[0], 4.0, "Nº", align="C")
+
+    def titulo_centralizado(x_ini, x_fim, y_base, numero, texto, tamanho, estilo="I"):
+        largura = (largura_texto(f"{numero}.", "I", tamanho * 0.62) if numero else 0) + largura_texto(texto, estilo, tamanho)
+        x_texto = x_ini + ((x_fim - x_ini) - largura) / 2
+        if numero:
+            rotulo(x_texto, y_base, numero, texto, tamanho)
+        else:
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font("DejaVuC", estilo, tamanho)
+            pdf.text(x_texto, y_base, texto)
+
+    titulo_centralizado(xc[1], xc[5], yt + 3.9, "17", "Período Total Previsto para os", 9.0)
+    titulo_centralizado(xc[1], xc[5], yt + 7.8, "", "Impedimentos:", 9.0, estilo="I")
+    titulo_centralizado(xc[5], X1, yt + 3.9, "18", "Período Verificado na Execução dos Serviços:", 9.0)
+    titulo_centralizado(xc[1], xc[3], y_grupo + 4.2, "", "Início", 10.0, estilo="")
+    titulo_centralizado(xc[3], xc[5], y_grupo + 4.2, "", "Término", 10.0, estilo="")
+    titulo_centralizado(xc[5], xc[9], y_grupo + 4.2, "", "Liberado para Manutenção", 10.0, estilo="")
+    titulo_centralizado(xc[9], X1, y_grupo + 4.2, "", "Liberado para Operação", 10.0, estilo="")
+    sub_rotulos = [("17.1", "Data"), ("17.2", "Hora"), ("17.3", "Data"), ("17.4", "Hora"),
+                   ("18.1", "Data"), ("18.2", "Hora"), ("18.3", "OS-R."), ("18.4", "OS-OE"),
+                   ("18.5", "Data"), ("18.6", "Hora"), ("18.7", "OS-R."), ("18.8", "OS-OE")]
+    for posicao, (numero, texto) in enumerate(sub_rotulos):
+        titulo_centralizado(xc[posicao + 1], xc[posicao + 2], y_sub + 3.9, numero, texto, 7.0)
+
+    # AI gerado ainda sem o "De acordo" preenchido (e salvo): linha vermelha sobre os campos 18.1 a 18.8 e o aviso
+    # abaixo da tabela. Ao gerar o documento de novo, com o "De acordo" já salvo, a marca deixa de aparecer.
+    de_acordo_pdf = doc_lib_de_acordo_completo(doc.get("notificacoes"))
+
+    def aguarda_de_acordo(item):
+        return bool(item.get("numero")) and \
+            doc_lib_calcular_status(item, True, de_acordo_pdf) == STATUS_ATEIE_AGUARDA_DE_ACORDO
+
+    # linhas de dados
+    y_linha = y_dados
+    for indice, ordem in enumerate(range(1, DOC_LIB_LINHAS_INTERVENCOES_AI + 1)):
+        altura = alturas_linhas[indice]
+        item = por_ordem.get(ordem)
+        if indice:
+            regua(y_linha, X0, X1)
+        if item:
+            cancelada = item.get("status") == STATUS_ATEIE_CANCELADO
+            cor = (176, 0, 0) if cancelada else (0, 0, 0)
+            pdf.set_text_color(*cor)
+            pdf.set_font("DejaVuC", "B", 8.0)
+            pdf.set_xy(xc[0], y_linha + (altura - 3.2) / 2)
+            pdf.cell(larg_col[0], 3.2, item.get("numero") or "", align="C")
+            for posicao, chave in enumerate(chaves_dados):
+                texto = str(item.get(chave) or "")
+                if not texto:
+                    continue
+                if DOC_LIB_COLUNAS_INTERVENCAO_AI[posicao][3] == "texto":
+                    tamanho, linhas_texto = ajustar_celula(texto, larg_col[posicao + 1] - 1.2)
+                    pdf.set_font("DejaVuC", "", tamanho)
+                    y_texto = y_linha + (altura - len(linhas_texto) * 2.5) / 2
+                    for linha_texto in linhas_texto:
+                        pdf.set_xy(xc[posicao + 1], y_texto)
+                        pdf.cell(larg_col[posicao + 1], 2.5, linha_texto, align="C")
+                        y_texto += 2.5
+                else:
+                    pdf.set_font("DejaVuC", "", 7.5)
+                    pdf.set_xy(xc[posicao + 1], y_linha + (altura - 3.2) / 2)
+                    pdf.cell(larg_col[posicao + 1], 3.2, texto, align="C")
+            if cancelada:                                       # risco sobre toda a linha cancelada
+                pdf.set_draw_color(176, 0, 0)
+                pdf.set_line_width(0.35)
+                pdf.line(xc[0] + 1, y_linha + altura / 2, X1 - 1, y_linha + altura / 2)
+                pdf.set_draw_color(0, 0, 0)
+                pdf.set_line_width(0.2)
+            elif aguarda_de_acordo(item) and not para_envio:    # linha vermelha nos campos 18.1 a 18.8
+                pdf.set_draw_color(176, 0, 0)
+                pdf.set_line_width(0.35)
+                pdf.line(xc[5] + 1, y_linha + altura / 2, X1 - 1, y_linha + altura / 2)
+                pdf.set_draw_color(0, 0, 0)
+                pdf.set_line_width(0.2)
+            pdf.set_text_color(0, 0, 0)
+        y_linha += altura
+    estado["y"] = y_fim_t
+
+    # ---- Final do documento: aviso de De Acordo e AIs cancelados (no AI não há o campo Nota) -----------------------
+    pdf.set_text_color(0, 0, 0)
+    canceladas = [item for item in intervencoes if item.get("status") == STATUS_ATEIE_CANCELADO]
+    aguardando = not para_envio and any(aguarda_de_acordo(item) for item in intervencoes)
+    y_atual = estado["y"] + 1.0
+    escreveu = False
+    if aguardando:
+        y_atual += 4.0
+        if y_atual + 3.0 > PDFAI.Y_MAXIMO:
+            nova_pagina()
+            y_atual = estado["y"] + 3.6
+        pdf.set_font("DejaVuC", "B", 8.5)
+        pdf.set_text_color(176, 0, 0)
+        pdf.text(X0 + 1.0, y_atual, "Aguardando o De Acordo do documento")
+        y_atual += 4.0
+        pdf.set_text_color(0, 0, 0)
+        escreveu = True
+    if canceladas:
+        y_atual += 1.5 if escreveu else 4.0
+        if y_atual + 3.0 > PDFAI.Y_MAXIMO:
+            nova_pagina()
+            y_atual = estado["y"] + 3.6
+        pdf.set_font("DejaVuC", "B", 8.5)
+        pdf.set_text_color(176, 0, 0)
+        pdf.text(X0 + 1.0, y_atual, "AIs cancelados:")
+        y_atual += 4.0
+        pdf.set_font("DejaVuC", "", 8.5)
+        for item in canceladas:
+            descricao = (f"{item.get('numero')} - cancelado em {item.get('data_cancelamento')} por "
+                         f"{item.get('cancelada_por')}. Justificativa: {item.get('justificativa_cancelamento')}")
+            for linha in doc_lib_quebrar_linhas(pdf, LARGURA - 5.0, 3.8, descricao):
+                if y_atual + 3.0 > PDFAI.Y_MAXIMO:
+                    nova_pagina()
+                    y_atual = estado["y"] + 3.6
+                    pdf.set_font("DejaVuC", "", 8.5)
+                    pdf.set_text_color(176, 0, 0)
+                pdf.text(X0 + 3.0, y_atual, linha)
+                y_atual += 3.8
+        pdf.set_text_color(0, 0, 0)
+
+    pdf.output(caminho)
+
+
+def doc_lib_registrar_geracao_ai(doc, caminho, usuario, tipo=None):
+    """Registra o PDF gerado (tipo "envio" = PDF anexado ao e-mail, que nunca emite o documento) e, na PRIMEIRA
+    geração, EMITE o AI: o documento passa a ser protegido (somente os campos 18.1 a 18.8 continuam editáveis) e
+    cada AI não cancelado passa a "Aguarda De Acordo" (ou "Aprovado para Execução", se o "De acordo" já estiver
+    preenchido). Um AI RESERVADO não é emitido: o PDF dele é o formulário em branco, só fica registrado e o documento
+    continua reservado e editável. Lança DocLibConflito se o documento mudou desde que foi lido. Devolve a revisão
+    atual do documento."""
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT revisao, emitido FROM doclib_ai WHERE id = ?", (doc["id"],))
+        linha = cursor.fetchone()
+        if linha is None or linha[0] != doc["revisao"]:
+            raise DocLibConflito("Este AI foi alterado por outro usuário enquanto o documento era gerado.\n\n"
+                                 "Feche-o e abra-o novamente (GRID AI) antes de gerar o documento.")
+        emitido = bool(linha[1])
+        cursor.execute("INSERT INTO doclib_ai_pdfs (ai_id, revisao, caminho, gerado_por, gerado_em, tipo) "
+                       "VALUES (?, ?, ?, ?, ?, ?)", (doc["id"], doc["revisao"], caminho, usuario, agora_texto, tipo))
+        id_pdf = cursor.lastrowid
+        if not emitido and not doc_lib_documento_reservado(doc) and tipo != "envio":
+            cursor.execute("UPDATE doclib_ai SET emitido = 1, emitido_em = ?, emitido_por = ?, "
+                           "revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? WHERE id = ?",
+                           (agora_texto, usuario, usuario, agora_texto, doc["id"]))
+            _doc_lib_recalcular_status_ai(cursor, doc["id"], True)
+        cursor.execute("SELECT revisao FROM doclib_ai WHERE id = ?", (doc["id"],))
+        revisao = cursor.fetchone()[0]
+        cursor.execute("UPDATE doclib_ai_pdfs SET revisao_final = ? WHERE id = ?", (revisao, id_pdf))
+        cursor.execute("COMMIT")
+        return revisao
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_arquivar_pdf_ai(doc, usuario, para_envio=False):
+    """Gera o PDF do AI, arquiva na pasta do Doc_Lib. (nunca sobrescreve um arquivo anterior), registra o
+    arquivo no banco e, na primeira geração, emite o AI. Retorna (caminho, aviso).
+
+    para_envio=True gera o PDF que vai anexado ao e-mail (sem a linha vermelha e sem o aviso "Aguardando o De Acordo
+    do documento"), arquivado em AI/Enviados/<ano>; só vale para AI já emitido e não emite nada."""
+    if para_envio and not doc.get("emitido"):
+        raise DocLibRegra("O PDF para envio só pode ser gerado de um AI já emitido (use Gerar Documento antes).")
+    agora = datetime.now()
+    numeros = [item["numero"] for item in doc["intervencoes"] if item.get("numero")]
+    ano = next((item["ano"] for item in doc["intervencoes"] if item.get("ano")), agora.year)
+    pasta, aviso = doc_lib_pasta_destino(os.path.join("AI", "Enviados") if para_envio else "AI", ano)
+
+    base = numeros[0] + (f"_a_{numeros[-1]}" if len(numeros) > 1 else "") if numeros else f"id{doc['id']}"
+    prefixo = "AI_RESERVADO_" if doc_lib_documento_reservado(doc) else "AI_"
+    nome_base = f"{prefixo}{base.replace('/', '-')}_{agora.strftime('%Y%m%d-%H%M%S')}"
+    caminho = os.path.join(pasta, nome_base + ".pdf")
+    repeticao = 1
+    while os.path.exists(caminho):          # duas gerações no mesmo segundo: nunca sobrescreve o PDF anterior
+        repeticao += 1
+        caminho = os.path.join(pasta, f"{nome_base}-{repeticao}.pdf")
+    caminho_temporario = caminho + ".tmp"
+    try:
+        doc_lib_gerar_pdf_ai(doc, caminho_temporario, usuario, para_envio=para_envio)
+        os.replace(caminho_temporario, caminho)
+    finally:
+        if os.path.exists(caminho_temporario):
+            os.remove(caminho_temporario)
+
+    try:
+        doc_lib_registrar_geracao_ai(doc, caminho, usuario, tipo="envio" if para_envio else None)
+    except Exception:
+        if os.path.exists(caminho):            # documento não registrado/emitido: não deixa arquivo órfão
+            os.remove(caminho)
+        raise
+    return caminho, aviso
+
+
+# ---------------------------------------------------
+# GRID AI E JANELA DO AI
+# ---------------------------------------------------
+class JanelaListaAI(JanelaListaAteie):
+    """Janela "GRID AI": a mesma do GRID ATEIE (JanelaListaAteie), lendo os AIs. Mesmos filtros, busca, seleção múltipla,
+    Agrupar AIs (só reservados), Marcar e-mail enviado e coluna Enviado e-mail."""
+    ROTULO = "AI"
+    PLURAL = "AIs"
+    COLUNAS = DOC_LIB_COLUNAS_LISTA_AI
+
+    @staticmethod
+    def _listar():
+        return doc_lib_listar_ai()
+
+    @staticmethod
+    def _agrupar_reservados(selecao, usuario):
+        return doc_lib_agrupar_reservados_ai(selecao, usuario)
+
+    @staticmethod
+    def _definir_email_enviado(selecao, data, usuario):
+        return doc_lib_definir_email_enviado_ai(selecao, data, usuario)
+
+
+def doc_lib_escolher_ai(parent):
+    """Abre a janela "GRID AI" e devolve (id do documento, linha da tabela) do AI escolhido, ou None se o usuário voltar
+    sem escolher."""
+    janela = JanelaListaAI(parent)
+    try:
+        janela.janela.grab_set()
+    except TclError:
+        pass
+    janela.janela.wait_window()
+    return janela.resultado
+
+
+
+class JanelaAI:
+    """Janela do AI (Doc_Lib. - Click_25): cadastro, edição, salvamento e geração do documento. É o espelho da janela do
+    ATEIE (JanelaAteie), com os campos do AI: 1 Empresa, 2 Classificação do Impedimento (com Emergência), 3 Equipamento a
+    Impedir, 4 Local, 5 Tempo de Manobras, 6 Em caso de necessidade pode-se dispor do equipamento em, 7 Condições de
+    Impedimento, 8 Serviço a Executar, 9 Observações, 10 Documentos Internos Vinculados, 15 De Acordo (2 linhas), 16 Pessoal
+    Notificado (Nome, Setor, Empresa, Data, Hora) e a tabela 17/18. No AI não há o campo Nota.
+
+    Estados dos botões:
+      - janela nova ........ Voltar e Salvar habilitados; Editar e Gerar Documento desabilitados
+      - depois de Salvar ... campos travados; Editar e Gerar Documento habilitados; Salvar desabilitado
+      - depois de Editar ... campos liberados; Gerar Documento desabilitado até um novo Salvar
+    """
+
+    def __init__(self):
+        self.ai_id = None
+        self.revisao = None
+        self.salvo = False            # versão atual gravada e campos travados (documento ainda não emitido)
+        self.emitido = False          # documento já gerado: só os campos 18.1 a 18.8 continuam editáveis
+        self.reservado = False        # AI reservado aberto para preenchimento: editável, PDF em branco, não emite
+        agora = datetime.now()
+        # "Solicitado por" mostra o nome completo do profissional; o user.name (login) vai para o campo
+        # "Visto Responsável" do documento
+        self.solicitado_por_usuario = obter_nome_usuario_logado()
+        self.solicitado_por = obter_nome_completo_usuario(self.solicitado_por_usuario)
+        self.data_preenchimento = agora.strftime("%d/%m/%Y")
+        self.hora_preenchimento = agora.strftime("%H:%M")
+        # por linha: número, status e se os grupos de execução (18.1 a 18.4 e 18.5 a 18.8) já estão salvos completos (travados)
+        self.estado_intervencoes = [{"numero": "", "status": "", "provisorio": False,
+                                     "inicio_travado": False, "termino_travado": False}
+                                    for _ in range(DOC_LIB_LINHAS_INTERVENCOES_AI)]
+        self._doc_gravado = None      # o AI como está gravado no banco (None enquanto for novo)
+        self._ultimo_pendente = None  # "há dados não salvos" na última vez em que os botões foram atualizados
+        self._controles = []          # campos travados/liberados em bloco
+        self._alvos = {}              # chave de campo -> (widget com contorno ou None, rótulo)
+        self._marcados = {}           # widget -> cores originais do contorno
+        self._rotulos_marcados = {}   # rótulo -> cor original
+        self.celulas = []
+        self.lbl_numero = []
+        self.btn_cancelar = []
+        self.lbl_status_linha = []
+        self.indice_coluna = {chave: posicao for posicao, (chave, _, _, _) in enumerate(DOC_LIB_COLUNAS_INTERVENCAO_AI)}
+
+        self.janela = Toplevel(root)
+        self.janela.title('COG - DOC_LIB. - AI')
+        self.janela.geometry('1240x820')
+        self.janela.minsize(1100, 640)
+        self.janela.resizable(True, True)
+        self.janela['bg'] = SGA_FUNDO
+        self.janela.protocol("WM_DELETE_WINDOW", self.voltar)
+        estilo = ttk.Style(self.janela)       # contorno vermelho do Combobox com pendência
+        estilo.configure("DocLibErro.TCombobox", bordercolor=SGA_VERMELHO, lightcolor=SGA_VERMELHO,
+                         darkcolor=SGA_VERMELHO)
+        estilo.map("DocLibErro.TCombobox", bordercolor=[("focus", SGA_VERMELHO), ("active", SGA_VERMELHO)])
+
+        self._montar_cabecalho()
+        self._montar_formulario()
+        self._montar_rodape()
+        self._aplicar_bloqueios()     # documento novo: tudo editável, exceto os campos 18.1 a 18.8 (só depois de gerar)
+        self._atualizar_estado()
+        self._assinatura_ref = self._assinatura()
+        self.janela.after(300, self._avisar_sem_nome_completo)
+        self.janela.after(300, self._vigiar_alteracoes)
+
+    def _vigiar_alteracoes(self):
+        """Reavalia os botões enquanto o usuário digita. Em AI reservado ou já emitido, "há dados não salvos"
+        depende do que está na tela (comparação com a versão gravada) e nenhum campo avisa a janela quando muda,
+        então o estado é conferido a cada 300 ms: Salvar habilita e Gerar Documento desabilita assim que algo é
+        digitado, e voltam ao normal se o usuário desfizer a alteração."""
+        try:
+            if not self.janela.winfo_exists():
+                return
+            if (self.reservado or self.emitido) and self._pendente() != self._ultimo_pendente:
+                self._atualizar_estado()
+            self.janela.after(300, self._vigiar_alteracoes)
+        except TclError:
+            pass                      # janela fechada durante a conferência
+
+    def _avisar_sem_nome_completo(self):
+        """Usuário sem nome completo cadastrado: "Solicitado por" usará o login até o administrador cadastrar."""
+        if self.ai_id is None and not buscar_nome_completo(self.solicitado_por_usuario):
+            messagebox.showwarning(
+                "Nome completo não cadastrado",
+                f"O usuário '{self.solicitado_por_usuario}' não tem nome completo cadastrado, por isso o campo "
+                f"'Solicitado por' mostrará o próprio login.\n\nPeça ao administrador para cadastrar o nome "
+                f"(menu ADMIN > Nomes dos Usuários).", parent=self.janela)
+
+    # ------------------------------------------------------------------ montagem da janela
+    def _montar_cabecalho(self):
+        faixa = ui_dialogo(self.janela, "AI - Documento de Impedimento.",
+                           "Autorização para Impedimento de Equipamento de Interligação")
+        doc_lib_criar_botao(faixa, "GRID AI", self.abrir_salvo, "neutro"
+                            ).place(relx=1.0, x=-24, rely=0.5, anchor="e", width=170, height=34)
+        self.lbl_status = Label(faixa, text="", bg=SGA_AZUL, fg="#B8CCE8", font=(SGA_FONTE, 9, "bold"))
+        self.lbl_status.place(relx=1.0, x=-208, rely=0.5, anchor="e")
+
+    def _montar_formulario(self):
+        area = Frame(self.janela, bg=SGA_FUNDO)
+        area.place(x=0, y=64, relwidth=1.0, relheight=1.0, height=-(64 + 76))
+        self.inner = criar_area_rolavel(area, bg=SGA_FUNDO)
+        self.canvas = self.inner.master
+
+        card = Frame(self.inner, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
+        card.pack(fill=X, padx=24, pady=(16, 8))
+        card.grid_columnconfigure(0, minsize=250)
+        card.grid_columnconfigure(1, weight=1)
+        self.card = card
+        self._linha = 0
+
+        # 1. Empresa (+ nome manual quando OUTRA)
+        rot = self._rotulo("Empresa")
+        quadro = Frame(card, bg=SGA_CARD)
+        self.cmb_empresa = ttk.Combobox(quadro, values=DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE, state="readonly", width=24,
+                                        font=(SGA_FONTE, 10))
+        self.cmb_empresa.pack(side=LEFT)
+        self.cmb_empresa.bind("<<ComboboxSelected>>", self._ao_mudar_empresa)
+        self.cmb_empresa.bind("<MouseWheel>", lambda e: (_rolar_area_sga(e), "break")[1])
+        self.lbl_empresa_outra = Label(quadro, text="Nome da empresa:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE,
+                                       font=(SGA_FONTE, 10, "bold"))
+        self.ent_empresa_outra = criar_entrada_sga(quadro, width=34)
+        self.configurar_entrada(self.ent_empresa_outra, "texto")
+        self.forcar_maiusculas(self.ent_empresa_outra)
+        self._controles += [self.cmb_empresa, self.ent_empresa_outra]
+        self._nova_linha(rot, quadro)
+        self._alvos["empresa"] = (self.cmb_empresa, rot)
+        self._alvos["empresa_outra"] = (self.ent_empresa_outra, rot)
+
+        # 2. Classificação do Impedimento (Programado, Urgência ou Emergência)
+        rot = self._rotulo("Classificação do Impedimento")
+        quadro = Frame(card, bg=SGA_CARD)
+        self.var_classificacao = StringVar(value="")
+        for texto in DOC_LIB_CLASSIFICACOES_AI:
+            # tristatevalue: sem ele o Tk desenha os botões "indefinidos" enquanto nada está selecionado
+            radio = Radiobutton(quadro, text=texto, variable=self.var_classificacao, value=texto,
+                                tristatevalue="-", font=(SGA_FONTE, 10), bg=SGA_CARD)
+            radio.pack(side=LEFT, padx=(0, 28))
+            self._controles.append(radio)
+        self._nova_linha(rot, quadro)
+        self._alvos["classificacao"] = (None, rot)
+
+        # 3. Equipamento a Impedir / 4. Local
+        self.txt_equipamento = self._campo_texto("equipamento", "Equipamento a Impedir", 3, maiusculas=True,
+                                                 dica="(Não utilizar siglas, com exceção \ndaquelas já consagradas no setor, \ntais como: LT, UG, TR e SE)")
+        self.txt_local = self._campo_texto("local", "Local", 3, maiusculas=True)
+
+        # 5. Tempo de Manobras (HH:MM)
+        rot = self._rotulo("Tempo de Manobras")
+        quadro = Frame(card, bg=SGA_CARD)
+        self.ent_tempo_manobras = criar_entrada_sga(quadro, width=8, justify="center")
+        self.ent_tempo_manobras.pack(side=LEFT)
+        Label(quadro, text="(hh:mm)", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).pack(side=LEFT, padx=(8, 0))
+        self.configurar_entrada(self.ent_tempo_manobras, "hora")
+        self._controles.append(self.ent_tempo_manobras)
+        self._nova_linha(rot, quadro)
+        self._alvos["tempo_manobras"] = (self.ent_tempo_manobras, rot)
+
+        # 6. Em caso de necessidade pode-se dispor do equipamento em: "Indisponível" ou o tempo de retorno (HH:MM)
+        rot = self._rotulo("Em caso de necessidade pode-se dispor do equipamento em")
+        quadro = Frame(card, bg=SGA_CARD)
+        self.var_disponivel = StringVar(value="")            # "indisponivel", "tempo" ou "" (nada escolhido)
+        self.rad_indisponivel = Radiobutton(quadro, text=DOC_LIB_TEXTO_INDISPONIVEL, variable=self.var_disponivel,
+                                            value="indisponivel", tristatevalue="-", font=(SGA_FONTE, 10),
+                                            bg=SGA_CARD, command=self._ao_mudar_disponivel)
+        self.rad_indisponivel.pack(side=LEFT, padx=(0, 28))
+        self.rad_tempo = Radiobutton(quadro, text="Tempo de retorno (hh:mm):", variable=self.var_disponivel,
+                                     value="tempo", tristatevalue="-", font=(SGA_FONTE, 10), bg=SGA_CARD,
+                                     command=lambda: self._ao_mudar_disponivel(True))
+        self.rad_tempo.pack(side=LEFT)
+        self.ent_disponivel_tempo = criar_entrada_sga(quadro, width=8, justify="center")
+        self.ent_disponivel_tempo.pack(side=LEFT, padx=(6, 0))
+        self.configurar_entrada(self.ent_disponivel_tempo, "hora")
+        # clicar no campo do tempo escolhe a opção do tempo (sem precisar clicar antes no botão de opção)
+        self.ent_disponivel_tempo.bind("<Button-1>", self._ao_clicar_tempo_disponivel, add="+")
+        self._controles += [self.rad_indisponivel, self.rad_tempo, self.ent_disponivel_tempo]
+        self._nova_linha(rot, quadro)
+        self._alvos["disponivel_em"] = (self.ent_disponivel_tempo, rot)
+
+        # 7. Condições de Impedimento (texto livre, 6 linhas) / 8. Serviço a Executar / 9. Observações (opcional, sem
+        # texto padrão) / 10. Documentos Internos Vinculados (opcional)
+        self.txt_condicoes = self._campo_texto("condicoes", "Condições de Impedimento", 6, barra=True)
+        self.txt_servicos = self._campo_texto("servicos", "Serviço a Executar", 6, barra=True)
+        self.txt_observacoes = self._campo_texto("observacoes", "Observações", 4, opcional=True, barra=True)
+        self.txt_documentos = self._campo_texto("documentos_vinculados", "Documentos Internos Vinculados", 2,
+                                                opcional=True)
+
+        # 11 a 13. Solicitado por / Data / Hora (preenchidos automaticamente)
+        quadro = Frame(card, bg=SGA_CARD)
+        self.lbl_solicitante = self._par_automatico(quadro, "Solicitado por:", self.solicitado_por or "-", 26)
+        self.lbl_data = self._par_automatico(quadro, "Data:", self.data_preenchimento, 18)
+        self.lbl_hora = self._par_automatico(quadro, "Hora:", self.hora_preenchimento, 0)
+        quadro.grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=10)
+        self._alvos["solicitado_por"] = (None, None)
+        self._linha += 1
+        self._separador()
+
+        # 15. De acordo: Pessoas/Áreas notificadas (2 linhas)
+        Label(card, text="De acordo:", bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 11, "bold"), anchor="w"
+              ).grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=(10, 0))
+        self._linha += 1
+        Label(card, text="Pessoas/Áreas notificadas", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9),
+              anchor="w").grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16)
+        self._linha += 1
+        bloco = Frame(card, bg=SGA_CARD)
+        bloco.grid(row=self._linha, column=0, columnspan=2, sticky="ew", padx=12, pady=(2, 10))
+        self.lista_notificacoes = LinhasDinamicasDocLib(self, bloco, DOC_LIB_COLUNAS_NOTIFICACAO,
+                                                        DOC_LIB_LIMITE_NOTIFICACOES_AI)
+        self._linha += 1
+        self._separador()
+
+        # 16. Pessoal Notificado (Nome, Setor, Empresa, Data, Hora)
+        Label(card, text="Pessoal Notificado:", bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 11, "bold"),
+              anchor="w").grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=(10, 0))
+        self._linha += 1
+        bloco = Frame(card, bg=SGA_CARD)
+        bloco.grid(row=self._linha, column=0, columnspan=2, sticky="ew", padx=12, pady=(2, 10))
+        self.lista_pessoal = LinhasDinamicasDocLib(self, bloco, DOC_LIB_COLUNAS_PESSOAL_AI, DOC_LIB_LIMITE_PESSOAL_AI,
+                                                   DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE, hora_automatica=True)
+        self._linha += 1
+
+        self._montar_tabela()          # 17 e 18 (no AI não há o campo Nota)
+
+    def _montar_rodape(self):
+        rodape = criar_rodape_sga(self.janela)
+        self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "neutro")
+        self.btn_salvar = doc_lib_criar_botao(rodape, "Salvar", self.salvar, "sucesso")
+        self.btn_editar = doc_lib_criar_botao(rodape, "Editar", self.editar, "aviso")
+        self.btn_gerar = doc_lib_criar_botao(rodape, "Gerar Documento", self.gerar, "primario")
+        self.btn_encaminhar = doc_lib_criar_botao(rodape, "Encaminhar AI", self.encaminhar, "agendar")
+        self.btn_reservar = doc_lib_criar_botao(rodape, "AI-Reservado", self.reservar, "aviso")
+        botoes = (self.btn_voltar, self.btn_salvar, self.btn_editar, self.btn_gerar, self.btn_encaminhar,
+                  self.btn_reservar)
+        for posicao, botao in enumerate(botoes):
+            botao.place(relx=0.5, x=-475 + posicao * 160, rely=0.5, anchor="w", width=150, height=42)
+
+    def _ao_mudar_disponivel(self, escolheu_tempo=False):
+        """Campo 6: o tempo (HH:MM) só é digitado com a opção do tempo escolhida; com "Indisponível" o campo do tempo é
+        limpo e travado."""
+        self._limpar_marca(self.ent_disponivel_tempo)
+        if self.var_disponivel.get() != "tempo":
+            doc_lib_definir_entrada(self.ent_disponivel_tempo, "")
+        self._ajustar_entrada_disponivel()
+        if escolheu_tempo and self.var_disponivel.get() == "tempo":
+            self.ent_disponivel_tempo.focus_set()
+
+    def _ao_clicar_tempo_disponivel(self, evento=None):
+        """Clicar no campo do tempo (campo 6) escolhe a opção do tempo, se o documento estiver editável."""
+        if self.emitido or self.salvo or self.var_disponivel.get() == "tempo":
+            return
+        self.var_disponivel.set("tempo")
+        self._ajustar_entrada_disponivel()
+
+    def _ajustar_entrada_disponivel(self):
+        """O campo do tempo (campo 6) fica editável somente com o documento editável e a opção do tempo escolhida."""
+        travada = self.emitido or self.salvo or self.var_disponivel.get() != "tempo"
+        doc_lib_bloquear_widget(self.ent_disponivel_tempo, travada)
+
+    def _montar_tabela(self):
+        """Tabela 17/18: 13 colunas x 10 linhas. Cada linha é um AI com número, status e cancelamento próprios (além
+        das 13 colunas: Status e o botão Cancelar da linha)."""
+        quadro = Frame(self.inner, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
+        quadro.pack(fill=X, padx=24, pady=(0, 24))
+        Label(quadro, text="Períodos dos Impedimentos (até 10 AIs por documento)", bg=SGA_CARD, fg=SGA_AZUL,
+              font=(SGA_FONTE, 11, "bold"), anchor="w").pack(fill=X, padx=16, pady=(12, 0))
+        Label(quadro, text="Cada linha um AI e no máximo 10 AIs por documento.",
+              bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left", wraplength=1100
+              ).pack(fill=X, padx=16, pady=(2, 8))
+
+        tabela = Frame(quadro, bg=SGA_CARD)
+        tabela.pack(fill=X, padx=12, pady=(0, 14))
+        tabela.grid_columnconfigure(0, minsize=86)
+        for coluna in range(1, 13):
+            tabela.grid_columnconfigure(coluna, weight=1, uniform="dados")
+        tabela.grid_columnconfigure(13, minsize=130)
+        tabela.grid_columnconfigure(14, minsize=84)
+
+        cabecalho = dict(bg=SGA_AZUL, fg="white", font=(SGA_FONTE, 9, "bold"))
+        subcabecalho = dict(bg="#2F5F9E", fg="white", font=(SGA_FONTE, 9, "bold"))
+        rotulo_coluna = dict(bg="#DCE8F8", fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"))
+        Label(tabela, text="AI\nNº", **cabecalho).grid(row=0, column=0, rowspan=3, sticky="nsew", padx=1, pady=1)
+        Label(tabela, text="17. Período Total Previsto para os Impedimentos", wraplength=420, **cabecalho
+              ).grid(row=0, column=1, columnspan=4, sticky="nsew", padx=1, pady=1)
+        Label(tabela, text="18. Período Verificado na Execução dos Serviços", **cabecalho
+              ).grid(row=0, column=5, columnspan=8, sticky="nsew", padx=1, pady=1)
+        for texto, coluna, extensao in (("Início", 1, 2), ("Término", 3, 2), ("Liberado para Manutenção", 5, 4),
+                                        ("Liberado para Operação", 9, 4)):
+            Label(tabela, text=texto, **subcabecalho).grid(row=1, column=coluna, columnspan=extensao,
+                                                           sticky="nsew", padx=1, pady=1)
+        for posicao, (chave, curto, descricao, tipo) in enumerate(DOC_LIB_COLUNAS_INTERVENCAO_AI):
+            rotulo = Label(tabela, text=curto, **rotulo_coluna)
+            rotulo.grid(row=2, column=posicao + 1, sticky="nsew", padx=1, pady=1)
+            ToolTipSGA(rotulo, descricao)
+        for coluna, texto in ((13, "Status"), (14, "Cancelar")):
+            Label(tabela, text=texto, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8, "bold")
+                  ).grid(row=2, column=coluna, sticky="nsew")
+
+        for indice in range(DOC_LIB_LINHAS_INTERVENCOES_AI):
+            grade = 3 + indice
+            numero = Label(tabela, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"), width=9)
+            numero.grid(row=grade, column=0, sticky="nsew", padx=1, pady=1)
+            self.lbl_numero.append(numero)
+            entradas = []
+            for posicao, (chave, curto, descricao, tipo) in enumerate(DOC_LIB_COLUNAS_INTERVENCAO_AI):
+                entrada = Entry(tabela, font=(SGA_FONTE, 9), justify="center", width=1)
+                entrada.configure(readonlybackground=DOC_LIB_COR_BLOQUEADO)
+                entrada.grid(row=grade, column=posicao + 1, sticky="ew", padx=1, pady=1, ipady=2)
+                self.configurar_entrada(entrada, tipo, ano_curto=True,
+                                        atualiza_numeracao=chave in DOC_LIB_CAMPOS_PROGRAMADOS,
+                                        atualiza_estado=chave in DOC_LIB_CAMPOS_EXECUCAO)
+                if tipo == "data":
+                    entrada.bind("<Double-Button-1>", lambda e, w=entrada: self.abrir_calendario(w, True))
+                    ToolTipSGA(entrada, "Dê duplo clique para abrir o calendário")
+                entradas.append(entrada)
+            self.celulas.append(entradas)
+            situacao = Label(tabela, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 8, "bold"),
+                             wraplength=124, justify="center")
+            situacao.grid(row=grade, column=13, sticky="nsew")
+            self.lbl_status_linha.append(situacao)
+            botao = doc_lib_criar_botao(tabela, "Cancelar", lambda i=indice: self.cancelar_intervencao(i), "perigo",
+                                        fonte=(SGA_FONTE, 8, "bold"))
+            botao.grid(row=grade, column=14, sticky="ew", padx=(4, 1), pady=1)
+            self.btn_cancelar.append(botao)
+            doc_lib_estado_botao(botao, False)
+
+    # ------------------------------------------------------------------ construção de linhas do formulário
+    def _rotulo(self, texto, opcional=False, pai=None):
+        return Label(pai or self.card, text=texto + (" (opcional)" if opcional else ""), bg=SGA_CARD,
+                     fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold"), anchor="nw", justify="left", wraplength=225)
+
+    def _nova_linha(self, rotulo, conteudo, separador=True):
+        rotulo.grid(row=self._linha, column=0, sticky="nw", padx=(16, 8), pady=(12, 8))
+        conteudo.grid(row=self._linha, column=1, sticky="ew", padx=(0, 16), pady=(8, 8))
+        self._linha += 1
+        if separador:
+            self._separador()
+
+    def _separador(self):
+        Frame(self.card, bg="#E5EAF1", height=1).grid(row=self._linha, column=0, columnspan=2, sticky="ew")
+        self._linha += 1
+
+    @staticmethod
+    def forcar_maiusculas(widget):
+        """O que for digitado ou colado no campo passa para caixa alta na hora (o cursor não sai do lugar)."""
+        def converter(evento=None):
+            try:
+                if str(widget.cget("state")) != "normal":
+                    return
+                texto = widget.winfo_class() == "Text"
+                atual = widget.get("1.0", "end-1c") if texto else widget.get()
+                novo = atual.upper()
+                if novo == atual:
+                    return
+                posicao = widget.index(INSERT)
+                if texto:
+                    widget.delete("1.0", END)
+                    widget.insert("1.0", novo)
+                    widget.mark_set(INSERT, posicao)
+                else:
+                    widget.delete(0, END)
+                    widget.insert(0, novo)
+                    widget.icursor(posicao)
+            except TclError:
+                pass
+        widget.bind("<KeyRelease>", converter, add="+")
+        widget.bind("<<Paste>>", lambda e: widget.after_idle(converter), add="+")
+
+    def _campo_texto(self, chave, nome, linhas, barra=False, opcional=False, separador=True, maiusculas=False,
+                     dica=None):
+        """Linha com rótulo + campo de texto livre de várias linhas (maiusculas: converte a digitação para caixa
+        alta; dica: orientação em fonte 9, sob o nome do campo)."""
+        bloco = None
+        if dica:
+            bloco = Frame(self.card, bg=SGA_CARD)
+            rotulo = self._rotulo(nome, opcional, pai=bloco)
+            rotulo.pack(anchor="nw")
+            Label(bloco, text=dica, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w",
+                  justify="left").pack(anchor="nw", pady=(2, 0))
+        else:
+            rotulo = self._rotulo(nome, opcional)
+        quadro = Frame(self.card, bg=SGA_CARD)
+        texto = criar_area_texto_sga(quadro, wrap=WORD, height=linhas)
+        if barra:
+            rolagem = Scrollbar(quadro, orient=VERTICAL, command=texto.yview)
+            texto.configure(yscrollcommand=rolagem.set)
+            rolagem.pack(side=RIGHT, fill=Y)
+        texto.pack(side=LEFT, fill=BOTH, expand=True)
+        texto.bind("<Tab>", lambda e: (e.widget.tk_focusNext().focus_set(), "break")[1])
+        try:
+            texto.bind("<Shift-Tab>", lambda e: (e.widget.tk_focusPrev().focus_set(), "break")[1])
+            texto.bind("<ISO_Left_Tab>", lambda e: (e.widget.tk_focusPrev().focus_set(), "break")[1])
+        except TclError:
+            pass
+        texto.bind("<MouseWheel>", self._roda_texto)
+        texto.bind("<Key>", lambda e, w=texto: self._limpar_marca(w), add="+")
+        texto.bind("<FocusOut>", lambda e, w=texto: self._limpar_marca(w) if self._texto(w) else None, add="+")
+        if maiusculas:
+            self.forcar_maiusculas(texto)
+        self._controles.append(texto)
+        self._alvos[chave] = (texto, rotulo)
+        self._nova_linha(bloco or rotulo, quadro, separador)
+        return texto
+
+    def _par_automatico(self, pai, titulo, valor, espaco):
+        Label(pai, text=titulo, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT)
+        valor_label = Label(pai, text=valor, bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"))
+        valor_label.pack(side=LEFT, padx=(6, espaco))
+        return valor_label
+
+    def _roda_texto(self, evento):
+        """Roda do mouse sobre um texto: rola o próprio texto só se ele tiver o que rolar; senão,
+        quem rola é a janela."""
+        inicio, fim = evento.widget.yview()
+        if inicio <= 0.0 and fim >= 1.0:
+            return None
+        evento.widget.yview_scroll(int(-1 * (evento.delta / 120)), "units")
+        return "break"
+
+    # ------------------------------------------------------------------ campos de data/hora e marcação de erros
+    def configurar_entrada(self, entrada, tipo, ano_curto=False, atualiza_numeracao=False, atualiza_estado=False):
+        """Liga ao campo a formatação automática (data dd/mm/aa(aa), hora HH:MM) e a limpeza da marca de erro.
+        atualiza_estado: depois da emissão, alterar o campo deixa o documento com alterações a salvar."""
+        entrada.configure(readonlybackground=DOC_LIB_COR_BLOQUEADO)
+        if tipo in ("data", "hora"):
+            entrada.bind("<FocusOut>", lambda e, w=entrada: self._ao_sair_campo(w, tipo, ano_curto, atualiza_numeracao),
+                         add="+")
+        entrada.bind("<Key>", lambda e, w=entrada: self._limpar_marca(w), add="+")
+        if tipo not in ("data", "hora"):
+            entrada.bind("<FocusOut>", lambda e, w=entrada: self._limpar_marca(w) if w.get().strip() else None,
+                         add="+")
+        if atualiza_estado:
+            entrada.bind("<KeyRelease>", lambda e: self._ao_alterar_execucao(), add="+")
+            entrada.bind("<FocusOut>", lambda e: self._ao_alterar_execucao(), add="+")
+
+    def _ao_sair_campo(self, entrada, tipo, ano_curto, atualiza_numeracao):
+        try:
+            if str(entrada.cget("state")) != "normal":
+                return
+            texto = entrada.get().strip()
+            if texto:
+                novo = doc_lib_normalizar_data(texto, ano_curto) if tipo == "data" else doc_lib_normalizar_hora(texto)
+                if novo:
+                    self._limpar_marca(entrada)
+                    if novo != entrada.get():
+                        entrada.delete(0, END)
+                        entrada.insert(0, novo)
+                else:
+                    self._marcar(entrada)         # formato inválido: destaca já, sem esperar o Salvar
+        except TclError:
+            return
+        if atualiza_numeracao:
+            self._atualizar_numeracao_provisoria()
+
+    def abrir_calendario(self, entrada, ano_curto, entrada_hora=None):
+        """Abre o calendário do campo de data. Com 'entrada_hora' (campo "Hora" de Pessoal Notificado), depois de
+        escolhida a data o campo recebe a hora atual quando está vazio (o usuário pode alterá-la em seguida)."""
+        self._limpar_marca(entrada)
+        doc_lib_selecionar_data(self.janela, entrada, ano_curto, lambda: self._apos_escolher_data(entrada, entrada_hora))
+
+    def _apos_escolher_data(self, entrada, entrada_hora=None):
+        if entrada_hora is not None and str(entrada_hora.cget("state")) == "normal" and not entrada_hora.get().strip():
+            doc_lib_definir_entrada(entrada_hora, datetime.now().strftime("%H:%M"))
+            self._limpar_marca(entrada_hora)
+        if entrada in self._celulas_programadas():
+            self._atualizar_numeracao_provisoria()
+        self._ao_alterar_execucao()
+
+    def _ao_alterar_execucao(self):
+        """Depois da emissão, alterar os campos 18.1 a 18.8 deixa o documento com alterações ainda não salvas
+        (Salvar habilita e Gerar Documento desabilita até salvar)."""
+        if self.emitido:
+            try:
+                self._atualizar_estado()
+            except TclError:
+                pass
+
+    def _celulas_programadas(self):
+        indices = [self.indice_coluna[chave] for chave in DOC_LIB_CAMPOS_PROGRAMADOS]
+        return [linha[indice] for linha in self.celulas for indice in indices]
+
+    def _marcar(self, widget, rotulo=None):
+        """Destaca em vermelho um campo (contorno) e/ou seu rótulo."""
+        if widget is not None and widget not in self._marcados:
+            classe = widget.winfo_class()
+            if classe in ("Entry", "Text"):
+                self._marcados[widget] = {"highlightbackground": str(widget.cget("highlightbackground")),
+                                          "highlightcolor": str(widget.cget("highlightcolor"))}
+            elif classe == "TCombobox":
+                self._marcados[widget] = {"style": str(widget.cget("style"))}
+        if widget is not None and widget in self._marcados:
+            if widget.winfo_class() == "TCombobox":
+                widget.configure(style="DocLibErro.TCombobox")
+            else:
+                widget.configure(highlightbackground=SGA_VERMELHO, highlightcolor=SGA_VERMELHO)
+        if rotulo is not None and rotulo not in self._rotulos_marcados:
+            self._rotulos_marcados[rotulo] = str(rotulo.cget("fg"))
+            rotulo.configure(fg=SGA_VERMELHO)
+
+    def _limpar_marca(self, widget):
+        original = self._marcados.pop(widget, None)
+        if original:
+            try:
+                widget.configure(**original)
+            except TclError:
+                pass
+
+    def esquecer_marcas(self, widget):
+        """Chamado antes de destruir um campo que pode estar marcado."""
+        self._marcados.pop(widget, None)
+        for filho in widget.winfo_children():
+            self._marcados.pop(filho, None)
+
+    def _limpar_erros(self):
+        for widget in list(self._marcados):
+            self._limpar_marca(widget)
+        for rotulo, cor in list(self._rotulos_marcados.items()):
+            try:
+                rotulo.configure(fg=cor)
+            except TclError:
+                pass
+        self._rotulos_marcados.clear()
+
+    def _alvo_da_chave(self, chave):
+        """(widget, rótulo) do campo identificado pela chave devolvida pela validação."""
+        partes = chave.split(":")
+        if partes[0] in ("notif", "pessoal"):
+            lista = self.lista_notificacoes if partes[0] == "notif" else self.lista_pessoal
+            return lista.entrada(int(partes[1]), partes[2]), None
+        if partes[0] == "interv":
+            return self.celulas[int(partes[1]) - 1][self.indice_coluna[partes[2]]], None
+        return self._alvos.get(chave, (None, None))
+
+    def rolar_ate(self, widget):
+        """Rola a janela até deixar o campo visível."""
+        try:
+            self.janela.update_idletasks()
+            y = 0
+            atual = widget
+            while atual is not None and atual is not self.inner:
+                y += atual.winfo_y()
+                atual = atual.master
+            total = max(self.inner.winfo_height(), 1)
+            self.canvas.yview_moveto(max(0.0, (y - 120) / total))
+        except TclError:
+            pass
+
+    def _mostrar_erros(self, erros):
+        """Informa os campos pendentes (mensagem objetiva), destaca-os em vermelho e leva o usuário ao primeiro."""
+        primeiro = None
+        for chaves, _ in erros:
+            for chave in chaves:
+                widget, rotulo = self._alvo_da_chave(chave)
+                self._marcar(widget, rotulo)
+                if primeiro is None:
+                    primeiro = widget if widget is not None else rotulo
+        linhas = ["Existem campos obrigatórios não preenchidos ou incorretos.",
+                  "Os campos marcados em vermelho precisam ser corrigidos:", ""]
+        linhas += [f"• {mensagem}" for _, mensagem in erros[:14]]
+        if len(erros) > 14:
+            linhas.append(f"... e mais {len(erros) - 14} pendência(s).")
+        messagebox.showwarning("Campos obrigatórios", "\n".join(linhas), parent=self.janela)
+        if primeiro is not None:
+            self.rolar_ate(primeiro)
+            if primeiro.winfo_class() in ("Entry", "Text", "TCombobox"):
+                primeiro.focus_set()
+
+    # ------------------------------------------------------------------ empresa / numeração
+    def _ao_mudar_empresa(self, evento=None):
+        self._limpar_marca(self.cmb_empresa)
+        if self.cmb_empresa.get() == "OUTRA":
+            self.lbl_empresa_outra.pack(side=LEFT, padx=(18, 6))
+            self.ent_empresa_outra.pack(side=LEFT)
+            if evento is not None:
+                self.ent_empresa_outra.focus_set()
+        else:
+            self.lbl_empresa_outra.pack_forget()
+            self.ent_empresa_outra.pack_forget()
+            doc_lib_definir_entrada(self.ent_empresa_outra, "")
+            self._limpar_marca(self.ent_empresa_outra)
+
+    def _linha_programada_valida(self, indice):
+        valores = {chave: self.celulas[indice][self.indice_coluna[chave]].get().strip()
+                   for chave in DOC_LIB_CAMPOS_PROGRAMADOS}
+        return bool(doc_lib_normalizar_data(valores["prev_data_inicio"]) and doc_lib_normalizar_hora(
+            valores["prev_hora_inicio"]) and doc_lib_normalizar_data(valores["prev_data_termino"])
+                    and doc_lib_normalizar_hora(valores["prev_hora_termino"]))
+
+    def _atualizar_numeracao_provisoria(self):
+        """Mostra em cada linha com os 4 campos programados preenchidos o número que ela vai receber.
+        O número só é de fato consumido ao salvar; linhas incompletas não recebem número."""
+        pendentes = []
+        for indice, estado in enumerate(self.estado_intervencoes):
+            if estado["status"] == STATUS_ATEIE_CANCELADO or (estado["numero"] and not estado["provisorio"]):
+                continue
+            if self._linha_programada_valida(indice):
+                pendentes.append(indice)
+            else:
+                estado["numero"], estado["provisorio"] = "", False
+        try:
+            previstos = doc_lib_numeros_previstos(len(pendentes), "AI") if pendentes else []
+        except sqlite3.Error:
+            previstos = [""] * len(pendentes)
+        for indice, numero in zip(pendentes, previstos):
+            self.estado_intervencoes[indice]["numero"] = numero
+            self.estado_intervencoes[indice]["provisorio"] = bool(numero)
+        self._desenhar_numeros()
+
+    def _desenhar_numeros(self):
+        """Mostra, em cada linha, o número do AI (cinza e itálico = ainda não consumido) e o seu status."""
+        for indice, estado in enumerate(self.estado_intervencoes):
+            rotulo = self.lbl_numero[indice]
+            if estado["status"] == STATUS_ATEIE_CANCELADO:
+                rotulo.configure(text=estado["numero"], fg=SGA_VERMELHO, font=(SGA_FONTE, 9, "bold overstrike"))
+            elif estado["provisorio"]:
+                rotulo.configure(text=estado["numero"], fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "italic"))
+            else:
+                rotulo.configure(text=estado["numero"], fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"))
+            situacao = estado["status"] if estado["numero"] and not estado["provisorio"] else ""
+            self.lbl_status_linha[indice].configure(text=situacao, fg=DOC_LIB_COR_STATUS.get(situacao, SGA_TEXTO))
+        self._atualizar_botoes_cancelar()
+
+    def _atualizar_botoes_cancelar(self):
+        """Cancelar só vale para AI já numerado e ainda cancelável (Em análise, Aguarda De Acordo ou Aprovado para Execução), com
+        o documento sem alterações pendentes."""
+        permitido = self.ai_id is not None and not self._pendente()
+        for indice, estado in enumerate(self.estado_intervencoes):
+            botao = self.btn_cancelar[indice]
+            if estado["status"] == STATUS_ATEIE_CANCELADO:
+                botao.grid_remove()
+                continue
+            botao.grid()
+            numerada = bool(estado["numero"]) and not estado["provisorio"]
+            doc_lib_estado_botao(botao, permitido and numerada and estado["status"] in DOC_LIB_STATUS_CANCELAVEIS)
+
+    # ------------------------------------------------------------------ leitura e gravação dos campos
+    @staticmethod
+    def _texto(widget):
+        return widget.get("1.0", "end-1c").strip()
+
+    @staticmethod
+    def _definir_texto(widget, valor):
+        estado = str(widget.cget("state"))
+        widget.configure(state=NORMAL)
+        widget.delete("1.0", END)
+        widget.insert("1.0", valor or "")
+        widget.configure(state=estado)
+
+    def _coletar(self):
+        """Todos os dados da tela (como digitados, sem normalizar)."""
+        intervencoes = []
+        for indice in range(DOC_LIB_LINHAS_INTERVENCOES_AI):
+            estado = self.estado_intervencoes[indice]
+            item = {"ordem": indice + 1,
+                    "numero": "" if estado["provisorio"] else estado["numero"],
+                    "status": estado["status"]}
+            for posicao, (chave, _, _, _) in enumerate(DOC_LIB_COLUNAS_INTERVENCAO_AI):
+                item[chave] = self.celulas[indice][posicao].get().strip()
+            intervencoes.append(item)
+        empresa = self.cmb_empresa.get().strip()
+        modo = self.var_disponivel.get()
+        disponivel = DOC_LIB_TEXTO_INDISPONIVEL if modo == "indisponivel" \
+            else (self.ent_disponivel_tempo.get().strip() if modo == "tempo" else "")
+        return {
+            "id": self.ai_id, "revisao": self.revisao,
+            "classificacao": self.var_classificacao.get(),
+            "equipamento": self._texto(self.txt_equipamento),
+            "empresa": empresa,
+            "empresa_outra": self.ent_empresa_outra.get().strip() if empresa == "OUTRA" else "",
+            "local": self._texto(self.txt_local),
+            "tempo_manobras": self.ent_tempo_manobras.get().strip(),
+            "disponivel_em": disponivel,
+            "condicoes": self._texto(self.txt_condicoes),
+            "servicos": self._texto(self.txt_servicos),
+            "observacoes": self._texto(self.txt_observacoes),
+            "documentos_vinculados": self._texto(self.txt_documentos),
+            "solicitado_por": self.solicitado_por or "",
+            "solicitado_por_usuario": self.solicitado_por_usuario or "",
+            "data_preenchimento": self.data_preenchimento,
+            "hora_preenchimento": self.hora_preenchimento,
+            "notificacoes": self.lista_notificacoes.coletar(),
+            "pessoal": self.lista_pessoal.coletar(),
+            "intervencoes": intervencoes,
+        }
+
+    def _assinatura(self):
+        return json.dumps(self._coletar(), sort_keys=True, ensure_ascii=False)
+
+    def _preencher(self, doc):
+        """Mostra na tela um AI gravado no banco."""
+        self._limpar_erros()
+        self.ai_id, self.revisao = doc["id"], doc["revisao"]
+        if doc_lib_documento_reservado(doc):
+            # AI reservado: quem o preenche passa a constar como solicitante, com a data e a hora de agora
+            # (a reserva fica registrada em reservado_por e reservado_em)
+            agora = datetime.now()
+            self.solicitado_por_usuario = obter_nome_usuario_logado()
+            self.solicitado_por = obter_nome_completo_usuario(self.solicitado_por_usuario)
+            self.data_preenchimento, self.hora_preenchimento = agora.strftime("%d/%m/%Y"), agora.strftime("%H:%M")
+        else:
+            self.solicitado_por = doc["solicitado_por"]
+            self.solicitado_por_usuario = doc.get("solicitado_por_usuario") or doc["solicitado_por"]
+            self.data_preenchimento, self.hora_preenchimento = doc["data_preenchimento"], doc["hora_preenchimento"]
+        self.lbl_solicitante.configure(text=self.solicitado_por)
+        self.lbl_data.configure(text=self.data_preenchimento)
+        self.lbl_hora.configure(text=self.hora_preenchimento)
+        self.var_classificacao.set(doc["classificacao"])
+        for widget, chave in ((self.txt_equipamento, "equipamento"), (self.txt_local, "local"),
+                              (self.txt_condicoes, "condicoes"), (self.txt_servicos, "servicos"),
+                              (self.txt_observacoes, "observacoes"), (self.txt_documentos, "documentos_vinculados")):
+            valor = doc.get(chave)
+            self._definir_texto(widget, (valor or "").upper() if chave in DOC_LIB_CAMPOS_CAIXA_ALTA else valor)
+        estado_combo = str(self.cmb_empresa.cget("state"))
+        self.cmb_empresa.configure(state="readonly")
+        self.cmb_empresa.set(doc["empresa"])
+        self.cmb_empresa.configure(state=estado_combo)
+        doc_lib_definir_entrada(self.ent_empresa_outra, (doc.get("empresa_outra") or "").upper())
+        self._ao_mudar_empresa()
+        doc_lib_definir_entrada(self.ent_tempo_manobras, doc.get("tempo_manobras") or "")
+        disponivel = (doc.get("disponivel_em") or "").strip()
+        self.var_disponivel.set("indisponivel" if disponivel == DOC_LIB_TEXTO_INDISPONIVEL
+                                else ("tempo" if disponivel else ""))
+        doc_lib_definir_entrada(self.ent_disponivel_tempo, "" if disponivel == DOC_LIB_TEXTO_INDISPONIVEL else disponivel)
+        self._ajustar_entrada_disponivel()
+        self.lista_notificacoes.preencher(doc["notificacoes"])
+        self.lista_pessoal.preencher(doc["pessoal"])
+        por_ordem = {item["ordem"]: item for item in doc["intervencoes"]}
+        for indice in range(DOC_LIB_LINHAS_INTERVENCOES_AI):
+            item = por_ordem.get(indice + 1)
+            for posicao, (chave, _, _, _) in enumerate(DOC_LIB_COLUNAS_INTERVENCAO_AI):
+                doc_lib_definir_entrada(self.celulas[indice][posicao], (item or {}).get(chave) or "")
+            self.estado_intervencoes[indice] = {
+                "numero": item["numero"] if item else "", "status": item["status"] if item else "",
+                "provisorio": False,
+                "inicio_travado": bool(item) and all(str(item.get(c) or "").strip() for c in DOC_LIB_CAMPOS_INICIO),
+                "termino_travado": bool(item) and all(str(item.get(c) or "").strip() for c in DOC_LIB_CAMPOS_TERMINO)}
+        self._desenhar_numeros()
+
+    def _carregar_documento(self, doc):
+        """Mostra o AI gravado: travado (versão salva) e, se já foi gerado, no estado EMITIDO (somente os campos
+        18.1 a 18.8 editáveis). Um AI RESERVADO abre em modo editável (sem travar) para o preenchimento das informações
+        do AI que foi utilizado fisicamente."""
+        self._preencher(doc)
+        self._doc_gravado = doc
+        self.emitido = bool(doc.get("emitido"))
+        self.reservado = doc_lib_documento_reservado(doc) and not self.emitido
+        self.salvo = not self.reservado
+        self._aplicar_bloqueios()
+        self._assinatura_ref = self._assinatura()
+        self._atualizar_estado()
+
+    # ------------------------------------------------------------------ estados
+    def _aplicar_bloqueios(self):
+        """Libera/trava cada campo conforme o estado do documento:
+          - novo ou em edição ........ tudo editável (menos os campos 18.1 a 18.8)
+          - salvo (travado) .......... nada editável (Editar libera)
+          - EMITIDO (já gerado) ...... dados gerais, Nº e período previsto (17.1 a 17.4) travados para sempre. O
+                                       "De acordo" continua aberto para novas linhas (as já registradas não mudam). Os
+                                       campos 18.1 a 18.8
+                                       só são liberadas depois que o "De acordo" está preenchido e SALVO; a partir
+                                       daí ficam editáveis nos AI numerados e não cancelados, até que o grupo
+                                       de início (6 a 9) ou de término (10 a 13) esteja preenchido E salvo (esse
+                                       grupo deixa de mudar)
+        Os campos 18.1 a 18.8 só existem depois da emissão (antes dela ficam travados).
+        Linha de AI cancelado nunca é editada."""
+        geral = self.emitido or self.salvo
+        gravado = self._doc_gravado or {}
+        de_acordo_ok = doc_lib_de_acordo_completo(gravado.get("notificacoes"))
+        for widget in self._controles:
+            doc_lib_bloquear_widget(widget, geral)
+        if self.emitido:
+            self.lista_notificacoes.travar(False, fixas=len(gravado.get("notificacoes") or []))
+        else:
+            self.lista_notificacoes.travar(self.salvo)
+        self.lista_pessoal.travar(geral)
+        quantidade_programadas = len(DOC_LIB_CAMPOS_PROGRAMADOS)
+        for indice, entradas in enumerate(self.celulas):
+            estado = self.estado_intervencoes[indice]
+            cancelada = estado["status"] == STATUS_ATEIE_CANCELADO
+            numerada = bool(estado["numero"]) and not estado["provisorio"]
+            for posicao, entrada in enumerate(entradas):
+                if posicao < quantidade_programadas:                 # 17.1 a 17.4
+                    bloquear = geral or cancelada
+                elif not self.emitido:                               # 18.1 a 18.8: só depois de emitido
+                    bloquear = True
+                else:
+                    grupo_salvo = estado["inicio_travado"] if posicao < quantidade_programadas + 4 \
+                        else estado["termino_travado"]
+                    bloquear = cancelada or not numerada or not de_acordo_ok or grupo_salvo
+                doc_lib_bloquear_widget(entrada, bloquear)
+        self._ajustar_entrada_disponivel()          # campo 6: o tempo só é editável com a opção do tempo escolhida
+
+    def _pendente(self):
+        """True se existem dados ainda não salvos (documento novo, em edição ou, depois de emitido, com alteração
+        nos campos 18.1 a 18.8)."""
+        if self.ai_id is None:
+            return True
+        if self.emitido or self.reservado:      # reservado: já nasce editável, só há o que salvar depois de digitar
+            return self._assinatura() != self._assinatura_ref
+        return not self.salvo
+
+    def _atualizar_estado(self):
+        pendente = self._pendente()
+        self._ultimo_pendente = pendente
+        doc_lib_estado_botao(self.btn_voltar, True)
+        doc_lib_estado_botao(self.btn_salvar, pendente)
+        doc_lib_estado_botao(self.btn_editar, self.ai_id is not None and not self.emitido and self.salvo)
+        doc_lib_estado_botao(self.btn_gerar, self.ai_id is not None and not pendente)
+        if self.ai_id is None:
+            texto = "Novo documento (não salvo)"
+        elif self.emitido:
+            texto = f"AI ID {self.ai_id} - emitido (rev. {self.revisao})" \
+                    + (" - alterações não salvas" if pendente else "")
+        elif self.reservado:
+            texto = f"AI ID {self.ai_id} - reservado (rev. {self.revisao})" \
+                    + (" - alterações não salvas" if pendente else "")
+        elif self.salvo:
+            texto = f"AI ID {self.ai_id} - salvo (rev. {self.revisao})"
+        else:
+            texto = f"AI ID {self.ai_id} - em edição"
+        self.lbl_status.configure(text=texto)
+        self._atualizar_botoes_cancelar()
+
+    # ------------------------------------------------------------------ ações dos botões
+    def salvar(self):
+        self._limpar_erros()
+        dados = doc_lib_normalizar_ai(self._coletar())
+        erros = doc_lib_validar_ai(dados, self._doc_gravado)
+        if erros:
+            self._mostrar_erros(erros)
+            return
+        usuario = obter_nome_usuario_logado()
+        de_acordo_antes = doc_lib_de_acordo_completo((self._doc_gravado or {}).get("notificacoes"))
+        travas_antes = {i: (e["inicio_travado"], e["termino_travado"]) for i, e in enumerate(self.estado_intervencoes)}
+        provisorios = {i: e["numero"] for i, e in enumerate(self.estado_intervencoes) if e["provisorio"]}
+        status_antes = {i: e["status"] for i, e in enumerate(self.estado_intervencoes) if e["numero"]}
+        ja_emitido = self.emitido
+        era_reservado = self.reservado
+        try:
+            ai_id = doc_lib_salvar_ai(dados, usuario)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except DocLibBloqueado as erro:
+            messagebox.showwarning("Alteração não permitida", str(erro), parent=self.janela)
+            return
+        except DocLibRegra as erro:
+            messagebox.showwarning("Regra do AI", str(erro), parent=self.janela)
+            return
+        except (sqlite3.Error, OSError) as erro:
+            messagebox.showerror("Erro", f"Não foi possível salvar o AI: {erro}", parent=self.janela)
+            return
+        doc = doc_lib_carregar_ai(ai_id)
+        self._carregar_documento(doc)
+
+        if ja_emitido:
+            mensagem = "AI atualizado com sucesso!"
+            if not de_acordo_antes and doc_lib_de_acordo_completo(doc["notificacoes"]):
+                mensagem += ("\n\n'De acordo' registrado: os campos 18.1 a 18.8 foram liberados para digitação "
+                             "(execução).\n\nGere o documento novamente: o novo PDF não traz mais a linha vermelha "
+                             "nem o aviso 'Aguardando o De Acordo do documento'.")
+            mudancas = [f"{self.estado_intervencoes[i]['numero']}: {status_antes[i]} passou a "
+                        f"{self.estado_intervencoes[i]['status']}" for i in status_antes
+                        if self.estado_intervencoes[i]["status"] != status_antes[i]]
+            if mudancas:
+                mensagem += "\n\nStatus atualizado:\n" + "\n".join(mudancas)
+            travados = []
+            for i, estado in enumerate(self.estado_intervencoes):
+                if estado["inicio_travado"] and not travas_antes[i][0]:
+                    travados.append(f"{estado['numero']}: liberação para manutenção (18.1 a 18.4)")
+                if estado["termino_travado"] and not travas_antes[i][1]:
+                    travados.append(f"{estado['numero']}: liberação para operação (18.5 a 18.8)")
+            if travados:
+                mensagem += "\n\nRegistrados e bloqueados (não podem mais ser alterados):\n" + "\n".join(travados)
+        else:
+            numeros = ", ".join(item["numero"] for item in doc["intervencoes"] if item.get("numero"))
+            mensagem = ("AI reservado preenchido e salvo com sucesso!" if era_reservado
+                        else "AI salvo com sucesso!") + \
+                f"\n\nAI(s): {numeros}\nStatus: {STATUS_ATEIE_EM_ANALISE}"
+            trocados = [f"{provisorios[i]} passou a {self.estado_intervencoes[i]['numero']}" for i in provisorios
+                        if self.estado_intervencoes[i]["numero"] != provisorios[i]]
+            if trocados:
+                mensagem += ("\n\nA numeração foi atualizada porque outro usuário emitiu números enquanto este "
+                             "documento era preenchido: " + "; ".join(trocados) + ".")
+            mensagem += "\n\nUse 'Gerar Documento' para emitir o PDF."
+        messagebox.showinfo("Sucesso", mensagem, parent=self.janela)
+
+    def editar(self):
+        if not self.salvo or self.emitido:
+            return
+        self.salvo = False
+        self._aplicar_bloqueios()
+        self._atualizar_numeracao_provisoria()
+        self._assinatura_ref = self._assinatura()
+        self._atualizar_estado()
+
+    def gerar(self):
+        """Gera o PDF a partir da versão salva (revalida antes), arquiva e oferece abrir/imprimir. A primeira
+        geração EMITE o AI: status "Aguarda De Acordo" e proteção dos dados (só os campos 18.1 a 18.8 seguem editáveis)."""
+        if self.ai_id is None or self._pendente():
+            if self.reservado and self.ai_id is not None:
+                messagebox.showwarning(
+                    "Atenção", "Há dados digitados que ainda não foram salvos.\n\nSalve o preenchimento do AI "
+                               "reservado ou, para imprimir o formulário em branco, abra-o novamente pelo GRID AI.",
+                    parent=self.janela)
+            else:
+                messagebox.showwarning("Atenção", "Salve o AI antes de gerar o documento.", parent=self.janela)
+            return
+        try:
+            doc = doc_lib_carregar_ai(self.ai_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler o AI salvo: {erro}", parent=self.janela)
+            return
+        if doc is None or doc["revisao"] != self.revisao:
+            messagebox.showwarning("Documento alterado",
+                                   "Este AI foi alterado por outro usuário depois de aberto nesta janela.\n\n"
+                                   "Feche-o e abra-o novamente (GRID AI) antes de gerar o documento.",
+                                   parent=self.janela)
+            return
+        reservado = doc_lib_documento_reservado(doc)     # formulário em branco: nada a validar nem a emitir
+        erros = [] if reservado else doc_lib_validar_ai(doc, doc)
+        if erros:
+            messagebox.showwarning("Campos obrigatórios",
+                                   "O documento salvo possui pendências e não pode ser gerado:\n\n"
+                                   + "\n".join(f"• {mensagem}" for _, mensagem in erros[:14]), parent=self.janela)
+            return
+        if not self.emitido and not reservado and not messagebox.askyesno(
+                "Emitir AI",
+                "Ao gerar o documento o AI será considerado EMITIDO, com status 'Aguarda De Acordo').\n\n"
+                "A partir daí os dados do documento não poderão ser alterados.\n\n"
+                "Deseja gerar o documento?", parent=self.janela):
+            return
+        try:
+            caminho, aviso = doc_lib_arquivar_pdf_ai(doc, obter_nome_usuario_logado())
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except Exception as erro:
+            messagebox.showerror("Erro", f"Falha ao gerar/arquivar o documento AI: {erro}", parent=self.janela)
+            return
+        doc = doc_lib_carregar_ai(self.ai_id)
+        self._carregar_documento(doc)
+        lembrete = None
+        if reservado:
+            lembrete = ("AI reservado: o PDF é um formulário em branco (só o número). O AI "
+                        "continua Reservado e editável; depois de usá-lo, abra-o no GRID AI e preencha todos os "
+                        "campos.")
+        elif any(item.get("status") == STATUS_ATEIE_AGUARDA_DE_ACORDO for item in doc["intervencoes"]):
+            lembrete = ("Status: Aguarda De Acordo. AI não pode ser liberado para execução.")
+        doc_lib_dialogo_documento_gerado(self.janela, caminho, aviso, lembrete)
+
+    def reservar(self):
+        """Botão AI-Reservado: pede a quantidade (1 a 10) e reserva os números na sequência do último AI
+        emitido ou reservado. Cada número vira um AI individual no GRID AI, com status Reservado."""
+        usuario = obter_nome_usuario_logado()
+        reservados = doc_lib_dialogo_reserva(self.janela, usuario, obter_nome_completo_usuario(usuario), rotulo="AI",
+                                             tipo="AI", reservar_numeros=doc_lib_reservar_ai)
+        if not reservados:
+            return
+        try:
+            self._atualizar_numeracao_provisoria()       # os números previstos do documento aberto avançaram
+        except (TclError, sqlite3.Error):
+            pass
+        numeros = [item["numero"] for item in reservados]
+        messagebox.showinfo(
+            "AI-Reservado",
+            f"{len(numeros)} número(s) de AI reservado(s):\n\n{', '.join(numeros)}\n\n"
+            f"Os AIs reservados aparecem no GRID AI com status 'Reservado'. Para imprimir o formulário em "
+            f"branco, abra o AI reservado no GRID e use 'Gerar Documento'.", parent=self.janela)
+
+    def encaminhar(self):
+        """Botão Encaminhar AI: depois de confirmar numa janela, envia por e-mail (do remetente escolhido entre
+        EMAIL_ATEIE_REMETENTES), com o PDF do documento anexado, o(s) AI com status "Aguarda De Acordo". O
+        destinatário e os e-mails em cópia vêm da tabela por Empresa Solicitante (com escolha do usuário nas empresas
+        que têm mais de uma opção). Depois do envio cada AI passa a "Sim, em dd/mm/aaaa" em "Enviado e-mail"."""
+        titulo = "Encaminhar AI"
+        if self.ai_id is None or self._pendente():
+            messagebox.showwarning(titulo, "Salve o AI e gere o documento antes de encaminhá-lo.\n\nO envio só é "
+                                           "permitido para AI com status 'Aguarda De Acordo'.", parent=self.janela)
+            return
+        try:
+            doc = doc_lib_carregar_ai(self.ai_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler o AI salvo: {erro}", parent=self.janela)
+            return
+        if doc is None or doc["revisao"] != self.revisao:
+            messagebox.showwarning("Documento alterado",
+                                   "Este AI foi alterado por outro usuário depois de aberto nesta janela.\n\n"
+                                   "Feche-o e abra-o novamente (GRID AI) antes de encaminhá-lo.", parent=self.janela)
+            return
+        aguardando_de_acordo = [item["numero"] for item in doc["intervencoes"]
+                                if item.get("numero") and item.get("status") == STATUS_ATEIE_AGUARDA_DE_ACORDO]
+        # AI que já constam como "Enviado e-mail: Sim" não são encaminhados novamente
+        enviados = {item["numero"]: item["email_enviado_em"] for item in doc["intervencoes"]
+                    if item.get("numero") and item.get("email_enviado_em")}
+        aguardando = [numero for numero in aguardando_de_acordo if numero not in enviados]
+        ja_encaminhados = [numero for numero in aguardando_de_acordo if numero in enviados]
+        if not aguardando:
+            if ja_encaminhados:
+                messagebox.showwarning(
+                    titulo, "O e-mail deste AI já foi enviado e ele não pode ser encaminhado novamente.\n\n"
+                            + "\n".join(f"• {numero}: {doc_lib_texto_email_enviado(enviados[numero])}"
+                                        for numero in ja_encaminhados)
+                            + "\n\nSe o registro estiver errado, volte-o para 'Não' no GRID AI (botão 'Marcar "
+                              "e-mail enviado').", parent=self.janela)
+                return
+            situacao = "\n".join(f"• {item['numero']}: {item['status']}" for item in doc["intervencoes"]
+                                 if item.get("numero"))
+            dica = "" if doc.get("emitido") else "\n\nUse 'Gerar Documento' para emitir o AI."
+            messagebox.showwarning(titulo, f"O envio só é permitido para AI com status "
+                                           f"'{STATUS_ATEIE_AGUARDA_DE_ACORDO}'.\n\nSituação atual:\n{situacao}{dica}",
+                                   parent=self.janela)
+            return
+        if ja_encaminhados and not messagebox.askyesno(
+                titulo, "Já foram encaminhados e não serão incluídos neste envio:\n\n"
+                        + "\n".join(f"• {numero}: {doc_lib_texto_email_enviado(enviados[numero])}"
+                                    for numero in ja_encaminhados)
+                        + f"\n\nEncaminhar somente {doc_lib_texto_numeros(aguardando)}?", parent=self.janela):
+            return
+        usuario = obter_nome_usuario_logado()
+
+        # Ao clicar no botão, junto com a abertura da janela de envio, o PDF que vai anexado ao e-mail (sem a linha
+        # vermelha e sem o aviso de De Acordo) é gerado e uma cópia vai para a pasta Downloads, para o caso de ser
+        # preciso enviar manualmente. A cópia fica lá mesmo que o envio seja cancelado.
+        self.janela.configure(cursor="watch")
+        self.janela.update_idletasks()
+        try:
+            caminho_pdf, aviso = doc_lib_pdf_para_envio_ai(doc, usuario)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except (DocLibRegra, sqlite3.Error, OSError) as erro:
+            messagebox.showerror(titulo, f"Não foi possível preparar o PDF do documento para envio:\n\n{erro}",
+                                 parent=self.janela)
+            return
+        finally:
+            self.janela.configure(cursor="")
+        caminho_copia, erro_copia = doc_lib_copiar_para_downloads(caminho_pdf)
+
+        envio = doc_lib_dialogo_encaminhar(self.janela, doc, aguardando, usuario, caminho_pdf, caminho_copia,
+                                           erro_copia, rotulo="AI", assunto=EMAIL_AI_ASSUNTO, texto=EMAIL_AI_TEXTO)
+        if not envio:
+            return
+        remetente, destinatarios, copias = envio["remetente"], envio["destinatarios"], envio["copias"]
+        try:                  # conferência final: outro usuário pode ter encaminhado enquanto esta janela estava aberta
+            agora_enviados = doc_lib_emails_ja_enviados_ai(doc["id"], aguardando)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível conferir o envio dos AI: {erro}", parent=self.janela)
+            return
+        if agora_enviados:
+            messagebox.showwarning(
+                titulo, "O e-mail NÃO foi enviado: o(s) AI abaixo foi(ram) encaminhado(s) por outro usuário "
+                        "enquanto esta janela estava aberta.\n\n"
+                        + "\n".join(f"• {numero}: {doc_lib_texto_email_enviado(data)}"
+                                    for numero, data in agora_enviados.items()), parent=self.janela)
+            return
+
+        assunto = f"{EMAIL_AI_ASSUNTO}: {doc_lib_texto_numeros(aguardando)}"
+        corpo = EMAIL_AI_TEXTO.format(numeros=doc_lib_texto_numeros(aguardando))
+        manual = caminho_copia or caminho_pdf              # arquivo para enviar à mão se o e-mail falhar
+        self.janela.configure(cursor="watch")
+        self.janela.update_idletasks()
+        try:
+            metodo = doc_lib_enviar_email(remetente, destinatarios, copias, assunto, corpo, caminho_pdf)
+        except (DocLibEmailErro, OSError) as erro:
+            messagebox.showerror(titulo, f"O e-mail NÃO foi enviado.\n\n{erro}\n\n"
+                                         f"Para enviar manualmente, use o arquivo:\n{manual}\n\n"
+                                         f"Depois de enviar à mão, marque o e-mail como enviado no GRID AI "
+                                         f"(botão 'Marcar e-mail enviado').", parent=self.janela)
+            return
+        finally:
+            self.janela.configure(cursor="")
+        resumo = (f"E-mail enviado ({metodo}).\n\nDe: {remetente}\nPara: {'; '.join(destinatarios)}\n"
+                  + (f"Cc: {'; '.join(copias)}\n" if copias else "")
+                  + f"AI(s): {doc_lib_texto_numeros(aguardando)}\nAnexo: {os.path.basename(caminho_pdf)}")
+        if caminho_copia:
+            resumo += f"\nCópia do arquivo enviado: {caminho_copia}"
+        try:
+            doc_lib_registrar_envio_ai(doc["id"], aguardando, remetente, destinatarios, copias, assunto, caminho_pdf,
+                                    metodo, usuario)
+            resumo += f"\n\nGRID AI, Enviado e-mail: Sim, em {datetime.now().strftime('%d/%m/%Y')}"
+        except sqlite3.Error as erro:
+            resumo += (f"\n\nAtenção: o e-mail foi enviado, mas o envio não pôde ser registrado no banco: {erro}\n"
+                       f"Marque o e-mail como enviado no GRID AI (botão 'Marcar e-mail enviado').")
+        if aviso:
+            resumo += f"\n\n{aviso}"
+        messagebox.showinfo(titulo, resumo, parent=self.janela)
+
+    def cancelar_intervencao(self, indice):
+        """Cancela somente o AI da linha; os demais AI do documento mantêm o seu status."""
+        estado = self.estado_intervencoes[indice]
+        if self._pendente() or not estado["numero"] or estado["provisorio"] \
+                or estado["status"] not in DOC_LIB_STATUS_CANCELAVEIS:
+            return
+        numero = estado["numero"]
+        if not messagebox.askyesno(
+                "Confirmar cancelamento",
+                f"Deseja realmente cancelar somente o AI {numero}?\n\n"
+                f"Os demais AI deste documento não são afetados. O número {numero} fica registrado "
+                f"como cancelado e não será reaproveitado.", parent=self.janela):
+            return
+        justificativa = solicitar_justificativa(self.janela, numero, rotulo="AI")
+        if justificativa is None:
+            return
+        try:
+            doc_lib_cancelar_intervencao_ai(self.ai_id, indice + 1, obter_nome_usuario_logado(), justificativa,
+                                         self.revisao)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except (ValueError, sqlite3.Error) as erro:
+            messagebox.showerror("Erro", f"Não foi possível cancelar o AI: {erro}", parent=self.janela)
+            return
+        self._carregar_documento(doc_lib_carregar_ai(self.ai_id))
+        messagebox.showinfo("AI cancelado",
+                            f"O AI {numero} foi cancelado. Os demais continuam com o status que tinham.\n\n"
+                            f"Gere o documento novamente para que o PDF mostre o cancelamento.", parent=self.janela)
+
+    def _tem_alteracoes_pendentes(self):
+        return self._assinatura() != self._assinatura_ref
+
+    def abrir_salvo(self):
+        if self._tem_alteracoes_pendentes() and not messagebox.askyesno(
+                "Dados não salvos", "Existem dados não salvos neste AI. Abrir outro documento descarta essas "
+                                    "alterações.\n\nDeseja continuar?", parent=self.janela):
+            return
+        try:
+            escolha = doc_lib_escolher_ai(self.janela)
+            doc = doc_lib_carregar_ai(escolha[0]) if escolha else None
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler os AI salvos: {erro}", parent=self.janela)
+            return
+        if escolha is None:
+            return
+        if doc is None:
+            messagebox.showerror("Erro", "O AI selecionado não foi encontrado.", parent=self.janela)
+            return
+        self._carregar_documento(doc)
+        self.rolar_ate(self.lbl_numero[escolha[1] - 1])
+
+    def voltar(self):
+        if self._tem_alteracoes_pendentes() and not messagebox.askyesno(
+                "Dados não salvos", "Existem dados não salvos neste AI.\n\nDeseja sair mesmo assim?",
+                parent=self.janela):
+            return
+        self.janela.destroy()
+
+
 # ---------------------------------------------------
 # JANELAS DO MENU Doc_Lib. (CLICK_25)
 # ---------------------------------------------------
@@ -16661,7 +19367,20 @@ def doc_lib_pagina_em_construcao(nome_modulo):
 
 
 def cmd_click25_ai():
-    doc_lib_pagina_em_construcao("AI")
+    """Doc_Lib. > AI: cadastro, edição, salvamento e geração do documento AI (Autorização para Impedimento de Equipamento
+    de Interligação)."""
+    if not current_user:
+        messagebox.showwarning("Atenção", "Nenhum usuário está logado. Faça login primeiro.")
+        return
+    if not obter_nome_usuario_logado():
+        messagebox.showwarning("Atenção", "Não foi possível identificar o usuário logado.")
+        return
+    try:
+        garantir_banco_doc_lib()
+    except sqlite3.Error as erro:
+        messagebox.showerror("Erro", f"Não foi possível preparar o banco de dados do Doc_Lib.: {erro}")
+        return
+    JanelaAI()
 
 
 def cmd_click25_mo():
