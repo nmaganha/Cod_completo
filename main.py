@@ -18372,15 +18372,19 @@ class JanelaAI:
                                                  dica="(Não utilizar siglas, com exceção \ndaquelas já consagradas no setor, \ntais como: LT, UG, TR e SE)")
         self.txt_local = self._campo_texto("local", "Local", 3, maiusculas=True)
 
-        # 5. Tempo de Manobras (HH:MM)
-        rot = self._rotulo("Tempo de Manobras")
+        # 5. Tempo de Manobras (HH:MM), com o texto dica sob o nome do campo (como em Equipamento a Impedir)
+        bloco_tempo = Frame(card, bg=SGA_CARD)
+        rot = self._rotulo("Tempo de Manobras", pai=bloco_tempo)
+        rot.pack(anchor="nw")
+        Label(bloco_tempo, text="(considerado o mesmo tempo,\ntanto para liberação como\npara normalização)", bg=SGA_CARD,
+              fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left").pack(anchor="nw", pady=(2, 0))
         quadro = Frame(card, bg=SGA_CARD)
         self.ent_tempo_manobras = criar_entrada_sga(quadro, width=8, justify="center")
         self.ent_tempo_manobras.pack(side=LEFT)
         Label(quadro, text="(hh:mm)", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).pack(side=LEFT, padx=(8, 0))
         self.configurar_entrada(self.ent_tempo_manobras, "hora")
         self._controles.append(self.ent_tempo_manobras)
-        self._nova_linha(rot, quadro)
+        self._nova_linha(bloco_tempo, quadro)
         self._alvos["tempo_manobras"] = (self.ent_tempo_manobras, rot)
 
         # 6. Em caso de necessidade pode-se dispor do equipamento em: "Indisponível" ou o tempo de retorno (HH:MM)
