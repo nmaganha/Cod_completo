@@ -12574,7 +12574,7 @@ def doc_lib_numeros_previstos(quantidade, tipo="ATEIE"):
 def doc_lib_erros_datas_execucao(item, gravado=None):
     """Regras de data da execução de um ATEIE (item = linha da tabela):
       - coluna 6 (data de início efetivo) tem de ser IGUAL à coluna 2 (data de início programado);
-      - coluna 10 (data de término efetivo) não pode ser ANTERIOR à coluna 4 (data de término programado);
+      - coluna 10 (data de término efetivo) não pode ser ANTERIOR à coluna 2 (data de início programado);
         posterior pode.
     Um grupo que já está gravado e não foi alterado não é revalidado ('gravado' = linha como está no banco).
     Retorna [(campo, mensagem)]."""
@@ -12594,11 +12594,11 @@ def doc_lib_erros_datas_execucao(item, gravado=None):
         erros.append(("real_data_inicio",
                       f"a data de início efetivo (coluna 6) deve ser igual à data de início programado "
                       f"(coluna 2: {valor('prev_data_inicio')})."))
-    prog, real = dia(valor("prev_data_termino")), dia(valor("real_data_termino"))
+    prog, real = dia(valor("prev_data_inicio")), dia(valor("real_data_termino"))
     if prog and real and real < prog and not inalterado(DOC_LIB_CAMPOS_TERMINO):
         erros.append(("real_data_termino",
-                      f"a data de término efetivo (coluna 10) não pode ser anterior à data de término programado "
-                      f"(coluna 4: {valor('prev_data_termino')}); posterior pode."))
+                      f"a data de término efetivo (coluna 10) não pode ser anterior à data de início programado "
+                      f"(coluna 2: {valor('prev_data_inicio')}); posterior pode."))
     return erros
 
 
@@ -12688,7 +12688,7 @@ def doc_lib_salvar_ateie(dados, usuario):
     - Depois da emissão o "De acordo" só recebe linhas novas, e as colunas 6 a 13 só são aceitas depois que o
       "De acordo" estiver preenchido e salvo (DocLibBloqueado).
     - Antes da emissão as colunas 6 a 13 não podem ser informadas (DocLibBloqueado).
-    - Datas da execução: coluna 6 igual à coluna 2; coluna 10 não anterior à coluna 4 (DocLibRegra).
+    - Datas da execução: coluna 6 igual à coluna 2; coluna 10 não anterior à coluna 2 (DocLibRegra).
     - O status de cada ATEIE é recalculado a cada gravação (doc_lib_calcular_status).
     - Lança DocLibConflito se outra pessoa salvou o documento depois que ele foi aberto."""
     dados = doc_lib_normalizar_ateie(dados)
