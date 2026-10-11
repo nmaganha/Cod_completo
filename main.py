@@ -12366,6 +12366,13 @@ def garantir_banco_doc_lib():
     _doc_lib_migrar_dados()
 
 
+# MO emitida, que precisa do De acordo, "Concluído" sem que o Encerrado (tabela de controle) esteja preenchido e sem o botão
+# "Sem contato": o formato antigo, em que o De acordo bastava para concluir a MO
+_DOC_LIB_SQL_MO_CONCLUIDA_PELO_DE_ACORDO = (
+    "FROM doclib_mo WHERE emitido = 1 AND informativa = 0 AND COALESCE(sem_contato, 0) = 0 AND status = ? AND ("
+    + " OR ".join(f"TRIM(COALESCE({chave}, '')) = ''" for chave in DOC_LIB_CAMPOS_TERMINO) + ")")
+
+
 def _doc_lib_migrar_dados():
     """Ajusta ao modelo atual os registros gravados por versões anteriores do Click_25 (pode ser
     executada várias vezes: só mexe no que ainda está no formato antigo)."""
@@ -12391,6 +12398,9 @@ def _doc_lib_migrar_dados():
                            (STATUS_ATEIE_APROVADA_ANTIGO,)).fetchone()
             or cur.execute("SELECT 1 FROM doclib_ateie WHERE observacoes IS NULL OR TRIM(observacoes) = '' "
                            "LIMIT 1").fetchone()
+            or cur.execute("SELECT 1 " + _DOC_LIB_SQL_MO_CONCLUIDA_PELO_DE_ACORDO + " LIMIT 1",
+                           (STATUS_ATEIE_CONCLUIDO,)).fetchone()
+            or cur.execute("SELECT 1 FROM doclib_mo WHERE status = 'Liberado' LIMIT 1").fetchone()
             or any(solicitado_por == login and nomes.get((login or "").lower())
                    for solicitado_por, login in cur.execute(
                        "SELECT solicitado_por, solicitado_por_usuario FROM doclib_ateie").fetchall()))
@@ -12447,6 +12457,16 @@ def _doc_lib_migrar_dados():
         cursor.execute("SELECT id FROM doclib_ateie WHERE emitido = 1")
         for (ateie_id,) in cursor.fetchall():
             _doc_lib_recalcular_status(cursor, ateie_id, True)
+        # nome provisório "Liberado" do status da MO com as tratativas em curso: o status é "Em Execução", como no ATEIE e no AI
+        cursor.execute("UPDATE doclib_mo SET status = ? WHERE status = 'Liberado'", (STATUS_ATEIE_EM_EXECUCAO,))
+        # MO que ficou "Concluído" só por ter o De acordo (antes da tabela de controle de liberação) volta ao ponto certo do
+        # fluxo: "Aprovado para Execução", até que as tratativas em Tempo Real ou o botão "Sem contato" a concluam
+        cursor.execute("SELECT id " + _DOC_LIB_SQL_MO_CONCLUIDA_PELO_DE_ACORDO, (STATUS_ATEIE_CONCLUIDO,))
+        for (mo_id,) in cursor.fetchall():
+            doc_mo = _doc_lib_ler_mo(conexao, mo_id)
+            novo_status = doc_lib_calcular_status_mo(doc_mo, True)
+            if novo_status != doc_mo["status"]:
+                cursor.execute("UPDATE doclib_mo SET status = ? WHERE id = ?", (novo_status, mo_id))
         cursor.execute("COMMIT")
     except Exception:
         if conexao.in_transaction:
@@ -16881,7 +16901,7 @@ def _garantir_tabelas_doc_lib_ai(cursor):
 def doc_lib_erros_datas_execucao_ai(item, gravado=None):
     """Regras de data da execução de um AI (item = linha da tabela), as mesmas do ATEIE:
       - 18.1 (data da liberação para manutenção) tem de ser IGUAL a 17.1 (data de início previsto);
-      - 18.5 (data da liberação para operação) não pode ser ANTERIOR a 17.3 (data de término previsto); posterior pode.
+      - 18.5 (data da liberação para operação) não pode ser ANTERIOR a 17.1 (data de início previsto); posterior pode.
     Um grupo que já está gravado e não foi alterado não é revalidado ('gravado' = linha como está no banco).
     Retorna [(campo, mensagem)]."""
     def valor(chave):
@@ -16900,11 +16920,11 @@ def doc_lib_erros_datas_execucao_ai(item, gravado=None):
         erros.append(("real_data_inicio",
                       f"a data da liberação para manutenção (18.1) deve ser igual à data de início previsto "
                       f"(17.1: {valor('prev_data_inicio')})."))
-    prog, real = dia(valor("prev_data_termino")), dia(valor("real_data_termino"))
+    prog, real = dia(valor("prev_data_inicio")), dia(valor("real_data_termino"))
     if prog and real and real < prog and not inalterado(DOC_LIB_CAMPOS_TERMINO):
         erros.append(("real_data_termino",
-                      f"a data da liberação para operação (18.5) não pode ser anterior à data de término previsto "
-                      f"(17.3: {valor('prev_data_termino')}); posterior pode."))
+                      f"a data da liberação para operação (18.5) não pode ser anterior à data de início previsto "
+                      f"(17.1: {valor('prev_data_inicio')}); posterior pode."))
     return erros
 
 
@@ -16994,7 +17014,7 @@ def doc_lib_salvar_ai(dados, usuario):
       (DocLibBloqueado se houver tentativa); só o restante dos campos 18.1 a 18.8 é gravado.
     - Depois da emissão o "De acordo" só recebe linhas novas, e os campos 18.1 a 18.8 só são aceitos depois que o
       "De acordo" estiver preenchido e salvo (DocLibBloqueado). Antes da emissão eles não podem ser informados.
-    - Datas da execução: 18.1 igual a 17.1; 18.5 não anterior a 17.3 (DocLibRegra).
+    - Datas da execução: 18.1 igual a 17.1; 18.5 não anterior a 17.1 (DocLibRegra).
     - O status de cada AI é recalculado a cada gravação (doc_lib_calcular_status).
     - Lança DocLibConflito se outra pessoa salvou o documento depois que ele foi aberto."""
     dados = doc_lib_normalizar_ai(dados)
@@ -19390,13 +19410,54 @@ class JanelaAI:
 #   - 10 De acordo: uma só linha, ou a opção "Mensagem Operativa meramente informativa, sem necessidade de obtenção do De
 #     Acordo" (uma coisa ou outra, nunca as duas); o PDF traz sempre o item 10 no rodapé, com os subitens 10.1 a 10.3 ou
 #     com a mensagem informativa.
-# Status da MO: Em análise (salva, documento ainda não gerado), Aguarda De Acordo (gerada, precisa do De Acordo e ele
-# ainda não foi preenchido), Concluído (gerada e com o De Acordo preenchido, ou meramente informativa), Cancelado e
-# Reservado. Os status, as datas/horas, o cadastro de e-mails e os componentes visuais são os mesmos do ATEIE e do AI.
+# Tabela de controle de liberação (uso interno, só na tela: NÃO vai para o PDF), na parte inferior da janela, com uma só
+# linha por MO: Período programado da MO (Início e Término) e Período verificado nas tratativas em Tempo Real (Liberado e
+# Encerrado), com os mesmos campos e critérios das colunas de execução do ATEIE e do AI, mais a coluna "Sem contato",
+# o Status e o Cancelar. O botão MO-Referência abre uma MO nova com a Descrição da MO de origem.
+# Status da MO, na ordem do fluxo: Em análise (salva, documento ainda não gerado), Aguarda De Acordo (gerada, precisa do
+# De Acordo e ele ainda não foi preenchido), Aprovado para Execução (De Acordo preenchido), Em Execução (campos "Liberado" da
+# tabela preenchidos), Concluído (campos "Encerrado" preenchidos, botão "Sem contato" acionado ou MO meramente informativa),
+# Cancelado e Reservado. Os status, as datas/horas, o cadastro de e-mails e os componentes visuais são os mesmos do ATEIE
+# e do AI.
 DOC_LIB_CLASSIFICACOES_MO = ["Programado", "Urgência", "Emergência"]
 DOC_LIB_TEXTO_MO_INFORMATIVA = ("Mensagem Operativa meramente informativa, sem necessidade de obtenção do De Acordo")
-# a MO pode ser cancelada em qualquer momento depois de salva (o número cancelado nunca é reaproveitado)
-DOC_LIB_STATUS_CANCELAVEIS_MO = (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_AGUARDA_DE_ACORDO, STATUS_ATEIE_CONCLUIDO)
+# Mensagem fixada sob a tabela de controle quando o botão "Sem contato" é confirmado (ação irreversível)
+DOC_LIB_TEXTO_MO_SEM_CONTATO = "Não houve contato em Tempo Real entre as empresas envolvidas nesta MO"
+# Aviso sob a tabela de controle enquanto a MO é meramente informativa (não há contato em Tempo Real a registrar)
+DOC_LIB_TEXTO_MO_INFORMATIVA_TABELA = ("Mensagem Operativa meramente informativa: não há necessidade de contato em Tempo "
+                                       "Real, por isso os campos do Período verificado nas tratativas em Tempo Real e o "
+                                       "botão Sem contato ficam desabilitados.")
+# como no ATEIE e no AI, a MO só pode ser cancelada antes de entrar em execução ("Em análise", "Aguarda De Acordo" ou
+# "Aprovado para Execução"): em execução ela só pode ser concluída; Concluído e Cancelado também não podem ser cancelados.
+# O número cancelado nunca é reaproveitado.
+DOC_LIB_STATUS_CANCELAVEIS_MO = (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_AGUARDA_DE_ACORDO, STATUS_ATEIE_APROVADO_EXECUCAO)
+# o botão MO-Referência vale para qualquer MO, menos a que ainda está Reservada (só tem o número)
+DOC_LIB_STATUS_SEM_REFERENCIA_MO = (STATUS_ATEIE_RESERVADO,)
+# Colunas da tabela de controle: (campo no banco, cabeçalho, descrição, tipo). Os campos do banco são os mesmos das colunas
+# 2 a 13 do ATEIE, o que permite usar as mesmas listas (DOC_LIB_CAMPOS_PROGRAMADOS, _INICIO e _TERMINO): "Liberado" é o
+# grupo de início e "Encerrado" o grupo de término.
+DOC_LIB_COLUNAS_TABELA_MO = [
+    ("prev_data_inicio", "Data", "Data de início programado da MO", "data"),
+    ("prev_hora_inicio", "Hora", "Hora de início programado da MO", "hora"),
+    ("prev_data_termino", "Data", "Data de término programado da MO", "data"),
+    ("prev_hora_termino", "Hora", "Hora de término programado da MO", "hora"),
+    ("real_data_inicio", "Data", "Data da liberação, verificada nas tratativas em Tempo Real", "data"),
+    ("real_hora_inicio", "Hora", "Hora da liberação, verificada nas tratativas em Tempo Real", "hora"),
+    ("real_os_r_inicio", "OS-R.",
+     "OS-R.: operador da empresa responsável (emitente da MO) que informou a liberação", "texto"),
+    ("real_os_oe_inicio", "OS-OE",
+     "OS-OE: operador da outra empresa que concordou com a liberação", "texto"),
+    ("real_data_termino", "Data", "Data do encerramento, verificada nas tratativas em Tempo Real", "data"),
+    ("real_hora_termino", "Hora", "Hora do encerramento, verificada nas tratativas em Tempo Real", "hora"),
+    ("real_os_r_termino", "OS-R.",
+     "OS-R.: operador da empresa responsável (emitente da MO) que informou o encerramento", "texto"),
+    ("real_os_oe_termino", "OS-OE",
+     "OS-OE: operador da outra empresa que foi comunicado sobre o encerramento", "texto"),
+]
+# Campos novos de doclib_mo (a tabela é criada sem eles; _garantir_tabelas_doc_lib_mo os acrescenta se faltarem)
+DOC_LIB_COLUNAS_NOVAS_MO = (
+    [(chave, "TEXT") for chave, _, _, _ in DOC_LIB_COLUNAS_TABELA_MO]
+    + [("sem_contato", "INTEGER NOT NULL DEFAULT 0"), ("sem_contato_por", "TEXT"), ("sem_contato_em", "TEXT")])
 DOC_LIB_TEXTO_MO_RESERVADA = "MO RESERVADA"        # exibido no GRID MO, em Assunto, enquanto a MO está reservada
 DOC_LIB_PAGINAS_DESCRICAO_MO = 30                  # previsão do campo 9 Descrição (texto livre de até 30 páginas)
 DOC_LIB_ESPACO_ANTES_PARAGRAFO = "6p"              # espaço antes de cada parágrafo da Descrição (6 pt; o PDF usa o mesmo valor)
@@ -19429,8 +19490,10 @@ DOC_LIB_COLUNAS_LISTA_MO = [
 DOC_LIB_CAMPOS_MO = ("data_envio", "classificacao", "emitente_empresa", "emitente_empresa_outra", "emitente_orgao",
                      "emitente_nome", "destinatario_empresa", "destinatario_empresa_outra", "destinatario_orgao",
                      "destinatario_nome", "recebido_nome", "recebido_data", "recebido_hora", "assunto", "descricao",
-                     "observacoes")
+                     "observacoes") + DOC_LIB_CAMPOS_PROGRAMADOS      # + Período programado da MO (tabela de controle)
 DOC_LIB_CAMPOS_DE_ACORDO_MO = ("de_acordo_nome", "de_acordo_data", "de_acordo_hora")
+# Período verificado nas tratativas em Tempo Real (tabela de controle): grupo "Liberado" e grupo "Encerrado"
+DOC_LIB_CAMPOS_TRATATIVAS_MO = DOC_LIB_CAMPOS_EXECUCAO
 _DOC_LIB_NOMES_CAMPOS_MO = {
     "data_envio": "Data", "classificacao": "Classificação", "emitente_empresa": "Emitente, Empresa",
     "emitente_empresa_outra": "Emitente, Empresa (OUTRA)", "emitente_orgao": "Emitente, Órgão",
@@ -19438,7 +19501,14 @@ _DOC_LIB_NOMES_CAMPOS_MO = {
     "destinatario_empresa_outra": "Destinatário, Empresa (OUTRA)", "destinatario_orgao": "Destinatário, Órgão",
     "destinatario_nome": "Destinatário, Nome", "recebido_nome": "Recebido por", "recebido_data": "Recebido por, Data",
     "recebido_hora": "Recebido por, Hora", "assunto": "Assunto", "descricao": "Descrição",
-    "observacoes": "Observações", "informativa": "Mensagem Operativa meramente informativa"}
+    "observacoes": "Observações", "informativa": "Mensagem Operativa meramente informativa",
+    "prev_data_inicio": "Período programado, Início, Data", "prev_hora_inicio": "Período programado, Início, Hora",
+    "prev_data_termino": "Período programado, Término, Data", "prev_hora_termino": "Período programado, Término, Hora"}
+# descrição dos campos do Período verificado nas tratativas em Tempo Real, para as mensagens de validação
+_DOC_LIB_NOMES_TRATATIVAS_MO = {
+    "real_data_inicio": "Liberado, Data", "real_hora_inicio": "Liberado, Hora", "real_os_r_inicio": "Liberado, OS-R.",
+    "real_os_oe_inicio": "Liberado, OS-OE", "real_data_termino": "Encerrado, Data", "real_hora_termino": "Encerrado, Hora",
+    "real_os_r_termino": "Encerrado, OS-R.", "real_os_oe_termino": "Encerrado, OS-OE"}
 
 
 # ---------------------------------------------------
@@ -19514,6 +19584,10 @@ def _garantir_tabelas_doc_lib_mo(cursor):
                         metodo TEXT,
                         enviado_por TEXT,
                         enviado_em TEXT)''')
+    # tabela de controle de liberação (Período programado da MO, Período verificado nas tratativas em Tempo Real e o
+    # botão "Sem contato"): colunas acrescentadas às MO já gravadas, sem perder dados
+    for coluna, definicao in DOC_LIB_COLUNAS_NOVAS_MO:
+        _adicionar_coluna_se_necessario(cursor, "doclib_mo", coluna, definicao)
 
 
 def doc_lib_documento_reservado_mo(doc):
@@ -19529,11 +19603,15 @@ def doc_lib_de_acordo_mo_completo(doc):
 
 def doc_lib_calcular_status_mo(doc, emitido):
     """Status automático da MO, em função do que já aconteceu com ela:
-      Cancelado ............ foi cancelada (nunca volta atrás)
-      Reservado ............ número reservado e ainda sem o preenchimento (data, classificação, assunto e descrição)
-      Em análise ........... salva, mas o documento ainda não foi gerado
-      Concluído ............ documento gerado e meramente informativa, ou com o "De acordo" preenchido (nome, data e hora)
-      Aguarda De Acordo .... documento gerado, que precisa do "De acordo", ainda sem ele"""
+      Cancelado ............... foi cancelada (nunca volta atrás)
+      Reservado ............... número reservado e ainda sem o preenchimento (data, classificação, assunto e descrição)
+      Em análise .............. salva, mas o documento ainda não foi gerado
+      Concluído ............... documento gerado e meramente informativa, ou com o botão "Sem contato" acionado, ou com os
+                                campos "Encerrado" (Período verificado nas tratativas em Tempo Real) todos preenchidos
+      Em Execução ............. documento gerado e campos "Liberado" todos preenchidos
+      Aprovado para Execução .. documento gerado e "De acordo" preenchido (nome, data e hora)
+      Aguarda De Acordo ....... documento gerado, que precisa do "De acordo", ainda sem ele
+    Preenchimento parcial de um grupo (Liberado ou Encerrado) não muda o status."""
     if doc.get("status") == STATUS_ATEIE_CANCELADO:
         return STATUS_ATEIE_CANCELADO
     if doc.get("status") == STATUS_ATEIE_RESERVADO \
@@ -19541,9 +19619,33 @@ def doc_lib_calcular_status_mo(doc, emitido):
         return STATUS_ATEIE_RESERVADO
     if not emitido:
         return STATUS_ATEIE_EM_ANALISE
-    if doc.get("informativa") or doc_lib_de_acordo_mo_completo(doc):
+    if doc.get("informativa") or doc.get("sem_contato"):
         return STATUS_ATEIE_CONCLUIDO
-    return STATUS_ATEIE_AGUARDA_DE_ACORDO
+
+    def completo(chaves):
+        return all(str(doc.get(chave) or "").strip() for chave in chaves)
+
+    if completo(DOC_LIB_CAMPOS_TERMINO):
+        return STATUS_ATEIE_CONCLUIDO
+    if completo(DOC_LIB_CAMPOS_INICIO):
+        return STATUS_ATEIE_EM_EXECUCAO
+    return STATUS_ATEIE_APROVADO_EXECUCAO if doc_lib_de_acordo_mo_completo(doc) else STATUS_ATEIE_AGUARDA_DE_ACORDO
+
+
+def doc_lib_mo_aceita_tratativas(doc):
+    """True se os campos do Período verificado nas tratativas em Tempo Real podem receber dados: MO emitida (documento
+    gerado), não cancelada, que precisa do De Acordo (não é meramente informativa), com o De Acordo já preenchido e salvo e
+    sem o botão "Sem contato" acionado (ele encerra as tratativas)."""
+    doc = doc or {}
+    return bool(doc.get("emitido")) and doc.get("status") != STATUS_ATEIE_CANCELADO and not doc.get("informativa") \
+        and not doc.get("sem_contato") and doc_lib_de_acordo_mo_completo(doc)
+
+
+def doc_lib_mo_pode_sem_contato(doc):
+    """True se o botão "Sem contato" vale para a MO: ela aceita tratativas (doc_lib_mo_aceita_tratativas) e nenhum dos campos
+    do Período verificado nas tratativas em Tempo Real foi preenchido (preenchê-los significa que houve contato)."""
+    return doc_lib_mo_aceita_tratativas(doc) \
+        and not any(str((doc or {}).get(chave) or "").strip() for chave in DOC_LIB_CAMPOS_TRATATIVAS_MO)
 
 
 def _doc_lib_ler_mo(conexao, mo_id):
@@ -19576,16 +19678,18 @@ def doc_lib_empresa_emitente_mo(doc, destinatario=False):
 # NORMALIZAÇÃO E VALIDAÇÃO DA MO
 # ---------------------------------------------------
 def doc_lib_normalizar_mo(dados):
-    """Devolve uma cópia dos dados com as datas e horas válidas no padrão de cada campo (Data do envio: dd/mm/aa; Data de
-    Recebido por e do De acordo: dd/mm/aaaa; horas: HH:MM) e o Assunto em caixa alta. Valores inválidos ficam como foram
-    digitados (a validação os aponta)."""
+    """Devolve uma cópia dos dados com as datas e horas válidas no padrão de cada campo (Data do envio e datas da tabela de
+    controle: dd/mm/aa; Data de Recebido por e do De acordo: dd/mm/aaaa; horas: HH:MM) e o Assunto em caixa alta. Valores
+    inválidos ficam como foram digitados (a validação os aponta)."""
     novo = dict(dados)
-    for chave in DOC_LIB_CAMPOS_MO + DOC_LIB_CAMPOS_DE_ACORDO_MO:
+    for chave in DOC_LIB_CAMPOS_MO + DOC_LIB_CAMPOS_DE_ACORDO_MO + DOC_LIB_CAMPOS_TRATATIVAS_MO:
         novo[chave] = str(dados.get(chave) or "").strip()
-    novo["data_envio"] = doc_lib_normalizar_data(novo["data_envio"], True) or novo["data_envio"]
+    for chave in ("data_envio", "prev_data_inicio", "prev_data_termino", "real_data_inicio", "real_data_termino"):
+        novo[chave] = doc_lib_normalizar_data(novo[chave], True) or novo[chave]
     for chave in ("recebido_data", "de_acordo_data"):
         novo[chave] = doc_lib_normalizar_data(novo[chave]) or novo[chave]
-    for chave in ("recebido_hora", "de_acordo_hora"):
+    for chave in ("recebido_hora", "de_acordo_hora", "prev_hora_inicio", "prev_hora_termino", "real_hora_inicio",
+                  "real_hora_termino"):
         novo[chave] = doc_lib_normalizar_hora(novo[chave]) or novo[chave]
     for prefixo in ("emitente", "destinatario"):
         if novo[f"{prefixo}_empresa"] != "OUTRA":
@@ -19672,21 +19776,86 @@ def doc_lib_validar_mo(dados, atual=None):
             erros.append((("de_acordo_data",), "De acordo, Data: data inválida (use DD/MM/AAAA)."))
         if not vazio(dados.get("de_acordo_hora")) and not doc_lib_normalizar_hora(dados.get("de_acordo_hora")):
             erros.append((("de_acordo_hora",), "De acordo, Hora: hora inválida (use HH:MM)."))
+    erros += doc_lib_validar_tabela_controle_mo(dados, atual)
+    return erros
+
+
+def doc_lib_validar_tabela_controle_mo(dados, atual=None):
+    """Valida a tabela de controle de liberação da MO. Retorna uma lista de (chaves_dos_campos, mensagem).
+      - Período programado da MO: opcional, mas quando um dos quatro campos é preenchido os quatro são obrigatórios e o
+        término não pode ser anterior ao início;
+      - Período verificado nas tratativas em Tempo Real: campos opcionais com data e hora válidas (preenchimento parcial de
+        um grupo é aceito e só muda o status quando o grupo fica completo); o Encerrado não pode ser anterior ao Liberado e
+        a data do Encerrado não pode ser anterior à data de início programado (posterior pode). 'atual' é a MO como está
+        gravada: um Encerrado já gravado e não alterado não é revalidado contra o início programado."""
+    erros = []
+
+    def vazio(valor):
+        return not str(valor or "").strip()
+
+    def formato(chave, descricao, tipo):
+        valor = dados.get(chave)
+        if vazio(valor):
+            return False
+        if tipo == "data" and not doc_lib_normalizar_data(valor):
+            erros.append(((chave,), f"{descricao}: data inválida (use DD/MM/AA)."))
+            return False
+        if tipo == "hora" and not doc_lib_normalizar_hora(valor):
+            erros.append(((chave,), f"{descricao}: hora inválida (use HH:MM)."))
+            return False
+        return True
+
+    tipos = {chave: tipo for chave, _, _, tipo in DOC_LIB_COLUNAS_TABELA_MO}
+    if any(not vazio(dados.get(chave)) for chave in DOC_LIB_CAMPOS_PROGRAMADOS):
+        for chave in DOC_LIB_CAMPOS_PROGRAMADOS:
+            if vazio(dados.get(chave)):
+                erros.append(((chave,), f"{_DOC_LIB_NOMES_CAMPOS_MO[chave]}: preencha o campo (o Período programado da MO "
+                                        f"precisa de data e hora de início e de término)."))
+            else:
+                formato(chave, _DOC_LIB_NOMES_CAMPOS_MO[chave], tipos[chave])
+        inicio = _doc_lib_data_hora(dados.get("prev_data_inicio"), dados.get("prev_hora_inicio"))
+        termino = _doc_lib_data_hora(dados.get("prev_data_termino"), dados.get("prev_hora_termino"))
+        if inicio and termino and termino < inicio:
+            erros.append((("prev_data_termino", "prev_hora_termino"),
+                          "Período programado: o término não pode ser anterior ao início."))
+    for chave in DOC_LIB_CAMPOS_TRATATIVAS_MO:
+        if tipos[chave] in ("data", "hora"):
+            formato(chave, _DOC_LIB_NOMES_TRATATIVAS_MO[chave], tipos[chave])
+    liberado = _doc_lib_data_hora(dados.get("real_data_inicio"), dados.get("real_hora_inicio"))
+    encerrado = _doc_lib_data_hora(dados.get("real_data_termino"), dados.get("real_hora_termino"))
+    if liberado and encerrado and encerrado < liberado:
+        erros.append((("real_data_termino", "real_hora_termino"),
+                      "Tratativas em Tempo Real: o Encerrado não pode ser anterior ao Liberado."))
+    encerrado_inalterado = atual is not None and all(
+        str(atual.get(chave) or "").strip() == str(dados.get(chave) or "").strip() for chave in DOC_LIB_CAMPOS_TERMINO)
+    inicio_programado = doc_lib_normalizar_data(dados.get("prev_data_inicio"))
+    data_encerrado = doc_lib_normalizar_data(dados.get("real_data_termino"))
+    if inicio_programado and data_encerrado and not encerrado_inalterado \
+            and datetime.strptime(data_encerrado, "%d/%m/%Y") < datetime.strptime(inicio_programado, "%d/%m/%Y"):
+        erros.append((("real_data_termino",),
+                      f"Encerrado, Data: não pode ser anterior à data de início programado "
+                      f"({doc_lib_normalizar_data(dados.get('prev_data_inicio'), True)}); posterior pode."))
     return erros
 
 
 def doc_lib_diferencas_bloqueadas_mo(atual, dados, emitido=True):
     """Lista o que, nos dados recebidos, difere do gravado e NÃO pode ser alterado (mesmas regras do ATEIE e do AI).
 
-    MO já EMITIDA (documento gerado): todos os campos ficam protegidos, inclusive "Recebido por" e a opção da mensagem
-    informativa. Só o "De acordo" pode ser preenchido (nome, data e hora juntos), uma única vez e apenas se a MO não é
-    meramente informativa; depois de salvo ele não muda mais.
-    MO ainda NÃO emitida: nada é protegido. Lista vazia = nada protegido foi alterado."""
-    if not emitido:
-        return []
-
+    MO já EMITIDA (documento gerado): todos os campos ficam protegidos, inclusive "Recebido por", o Período programado e a
+    opção da mensagem informativa. Só podem ser preenchidos o "De acordo" (nome, data e hora juntos, uma única vez e apenas
+    se a MO não é meramente informativa; depois de salvo ele não muda mais) e os campos do Período verificado nas tratativas
+    em Tempo Real (tabela de controle), estes somente depois que o De acordo estiver preenchido e salvo, nunca numa MO
+    meramente informativa, cancelada ou com o botão "Sem contato" acionado; o grupo Liberado ou Encerrado já salvo por
+    completo não muda mais.
+    MO ainda NÃO emitida: nada é protegido, mas o Período verificado nas tratativas em Tempo Real só aceita dados depois que
+    o documento for gerado. Lista vazia = nada protegido foi alterado."""
     def texto(valor):
         return str(valor or "").strip()
+
+    nome_tratativas = "Período verificado nas tratativas em Tempo Real"
+    mudou_tratativas = any(texto(atual.get(chave)) != texto(dados.get(chave)) for chave in DOC_LIB_CAMPOS_TRATATIVAS_MO)
+    if not emitido:
+        return [f"{nome_tratativas} (só pode ser informado depois que o documento for gerado)"] if mudou_tratativas else []
 
     diferencas = []
     for chave in DOC_LIB_CAMPOS_MO:
@@ -19703,6 +19872,20 @@ def doc_lib_diferencas_bloqueadas_mo(atual, dados, emitido=True):
             diferencas.append("De acordo (a MO é meramente informativa)")
         elif not doc_lib_de_acordo_mo_completo(dados):
             diferencas.append("De acordo (informe nome, data e hora)")
+    if mudou_tratativas:
+        if atual.get("status") == STATUS_ATEIE_CANCELADO:
+            diferencas.append(f"{nome_tratativas} (a MO está cancelada)")
+        elif atual.get("informativa"):
+            diferencas.append(f"{nome_tratativas} (a MO é meramente informativa)")
+        elif atual.get("sem_contato"):
+            diferencas.append(f"{nome_tratativas} (já consta 'Sem contato' nesta MO)")
+        elif not doc_lib_de_acordo_mo_completo(atual):
+            diferencas.append(f"{nome_tratativas} (só depois que o De acordo estiver preenchido e salvo)")
+        else:
+            for chaves, nome in ((DOC_LIB_CAMPOS_INICIO, "Liberado"), (DOC_LIB_CAMPOS_TERMINO, "Encerrado")):
+                if all(texto(atual.get(chave)) for chave in chaves) \
+                        and any(texto(atual.get(chave)) != texto(dados.get(chave)) for chave in chaves):
+                    diferencas.append(f"{nome} (já registrado, não pode mais ser alterado)")
     return diferencas
 
 
@@ -19717,7 +19900,8 @@ def doc_lib_salvar_mo(dados, usuario):
     - MO RESERVADA sendo preenchida: mantém o número; "Emitente, Nome" passa a ser o de quem registra o documento (a
       reserva fica registrada em reservado_por e reservado_em).
     - Documento já EMITIDO (gerado): todos os campos ficam protegidos; só o "De acordo" pode ser preenchido, uma vez, e
-      não numa MO meramente informativa (DocLibBloqueado se houver tentativa).
+      não numa MO meramente informativa, e os campos do Período verificado nas tratativas em Tempo Real (Liberado e
+      Encerrado), depois que o De acordo estiver salvo (DocLibBloqueado se houver tentativa).
     - O status é recalculado a cada gravação (doc_lib_calcular_status_mo).
     - Lança DocLibConflito se outra pessoa salvou o documento depois que ele foi aberto."""
     dados = doc_lib_normalizar_mo(dados)
@@ -19740,8 +19924,13 @@ def doc_lib_salvar_mo(dados, usuario):
             emitido = bool(atual["emitido"])
         bloqueadas = doc_lib_diferencas_bloqueadas_mo(atual or {}, dados, emitido)
         if bloqueadas:
-            raise DocLibBloqueado("Esta MO já foi emitida (documento gerado). Só pode ser preenchido o De acordo (nome, "
-                                  "data e hora, uma única vez).\n\nAlterações recusadas: " + "; ".join(bloqueadas) + ".")
+            if emitido:
+                cabecalho = ("Esta MO já foi emitida (documento gerado). Só podem ser preenchidos o De acordo (nome, data "
+                             "e hora, uma única vez) e, depois que ele estiver salvo, o Período verificado nas tratativas "
+                             "em Tempo Real (o Liberado ou o Encerrado já salvo por completo não muda mais).")
+            else:
+                cabecalho = "O Período verificado nas tratativas em Tempo Real não é aceito antes da geração do documento."
+            raise DocLibBloqueado(cabecalho + "\n\nAlterações recusadas: " + "; ".join(bloqueadas) + ".")
 
         colunas_campos = list(DOC_LIB_CAMPOS_MO) + ["informativa"] + list(DOC_LIB_CAMPOS_DE_ACORDO_MO)
         if mo_id is None:
@@ -19755,10 +19944,13 @@ def doc_lib_salvar_mo(dados, usuario):
                 + [STATUS_ATEIE_EM_ANALISE, usuario, agora_texto, usuario, agora_texto])
             mo_id = cursor.lastrowid
         elif emitido:
-            cursor.execute("UPDATE doclib_mo SET de_acordo_nome = ?, de_acordo_data = ?, de_acordo_hora = ?, "
-                           "revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? WHERE id = ?",
-                           (dados["de_acordo_nome"], dados["de_acordo_data"], dados["de_acordo_hora"], usuario,
-                            agora_texto, mo_id))
+            # depois da emissão só mudam o De acordo e os campos das tratativas em Tempo Real (as demais alterações, e o
+            # que já está salvo por completo nos grupos Liberado e Encerrado, foram recusadas acima)
+            colunas_emitida = list(DOC_LIB_CAMPOS_DE_ACORDO_MO) + list(DOC_LIB_CAMPOS_TRATATIVAS_MO)
+            cursor.execute(
+                f"UPDATE doclib_mo SET {', '.join(f'{c} = ?' for c in colunas_emitida)}, revisao = revisao + 1, "
+                f"atualizado_por = ?, atualizado_em = ? WHERE id = ?",
+                [dados.get(c, "") for c in colunas_emitida] + [usuario, agora_texto, mo_id])
         else:
             cursor.execute(
                 f"UPDATE doclib_mo SET {', '.join(f'{c} = ?' for c in colunas_campos)}, revisao = revisao + 1, "
@@ -19806,8 +19998,8 @@ def doc_lib_listar_mo():
 
 
 def doc_lib_cancelar_mo(mo_id, usuario, justificativa, revisao_esperada):
-    """Cancela a MO: o número cancelado fica registrado e nunca é reaproveitado. Só não cancela a MO reservada e a que já está
-    cancelada (ValueError). Devolve a nova revisão do documento. DocLibConflito se a MO mudou desde que foi aberta."""
+    """Cancela a MO: o número cancelado fica registrado e nunca é reaproveitado. Só cancela a MO em Em análise, Aguarda De
+    Acordo ou Aprovado para Execução; Em Execução, Concluído, Reservado e Cancelado não podem ser cancelados (ValueError). Devolve a nova revisão do documento. DocLibConflito se a MO mudou desde que foi aberta."""
     agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
     conexao = doc_lib_conectar(manual=True)
     cursor = conexao.cursor()
@@ -19836,6 +20028,57 @@ def doc_lib_cancelar_mo(mo_id, usuario, justificativa, revisao_esperada):
         raise
     finally:
         conexao.close()
+
+
+def doc_lib_sem_contato_mo(mo_id, usuario, revisao_esperada):
+    """Botão "Sem contato" da tabela de controle: registra que NÃO houve contato em Tempo Real entre as empresas envolvidas
+    na MO e a conclui (status Concluído). A ação é irreversível: depois dela os campos do Período verificado nas tratativas
+    em Tempo Real nunca mais aceitam dados. Só vale para MO emitida, que precisa do De Acordo (já preenchido e salvo), não
+    cancelada, sem sem_contato registrado e sem nenhum campo das tratativas preenchido (DocLibRegra se alguma condição
+    falhar). Devolve a nova revisão do documento. DocLibConflito se a MO mudou desde que foi aberta."""
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        doc = _doc_lib_ler_mo(conexao, mo_id)
+        if doc is None or doc["revisao"] != revisao_esperada:
+            raise DocLibConflito("Esta MO foi alterada por outro usuário depois de aberta nesta janela.\n\n"
+                                 "Feche-a e abra-a novamente (GRID MO) para ver a versão atual.")
+        if doc["status"] == STATUS_ATEIE_CANCELADO:
+            raise DocLibRegra("Esta MO está cancelada.")
+        if doc["sem_contato"]:
+            raise DocLibRegra("Esta MO já consta como 'Sem contato'.")
+        if not doc["emitido"]:
+            raise DocLibRegra("O botão 'Sem contato' só vale depois que o documento da MO for gerado.")
+        if doc["informativa"]:
+            raise DocLibRegra("Uma MO meramente informativa não tem contato em Tempo Real: o botão 'Sem contato' não "
+                              "se aplica.")
+        if not doc_lib_de_acordo_mo_completo(doc):
+            raise DocLibRegra("O botão 'Sem contato' só vale depois que o De acordo estiver preenchido e salvo.")
+        if any(str(doc.get(chave) or "").strip() for chave in DOC_LIB_CAMPOS_TRATATIVAS_MO):
+            raise DocLibRegra("Já existem dados no Período verificado nas tratativas em Tempo Real: houve contato, então "
+                              "o botão 'Sem contato' não se aplica.")
+        cursor.execute("UPDATE doclib_mo SET sem_contato = 1, sem_contato_por = ?, sem_contato_em = ?, status = ?, "
+                       "revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? WHERE id = ?",
+                       (usuario, agora_texto, STATUS_ATEIE_CONCLUIDO, usuario, agora_texto, mo_id))
+        cursor.execute("SELECT revisao FROM doclib_mo WHERE id = ?", (mo_id,))
+        nova_revisao = cursor.fetchone()[0]
+        cursor.execute("COMMIT")
+        return nova_revisao
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_texto_referencia_mo(doc):
+    """Texto do campo Descrição de uma MO aberta pelo botão MO-Referência: o texto da Descrição da MO de origem, exatamente
+    como ela foi gravada (sem número, cabeçalho ou qualquer outro dado da MO de origem). É só um ponto de partida: o campo
+    continua totalmente editável."""
+    return str(doc.get("descricao") or "")
 
 
 def doc_lib_reservar_mo(quantidade, usuario, nome_completo=""):
@@ -20347,8 +20590,9 @@ def doc_lib_gerar_pdf_mo(doc, caminho, gerado_por="", para_envio=False):
 
 def doc_lib_registrar_geracao_mo(doc, caminho, usuario, tipo=None):
     """Registra o PDF gerado (tipo "envio" = PDF anexado ao e-mail, que nunca emite o documento) e, na PRIMEIRA geração, EMITE
-    a MO: o documento passa a ser protegido (só o De acordo pode ser preenchido) e o status passa a "Aguarda De Acordo" (ou
-    "Concluído", se a MO é meramente informativa ou se o De acordo já estiver preenchido). Uma MO RESERVADA ou CANCELADA não
+    a MO: o documento passa a ser protegido (só o De acordo e as tratativas em Tempo Real podem ser preenchidos) e o status
+    passa a "Aguarda De Acordo" (ou "Concluído", se a MO é meramente informativa, ou "Aprovado para Execução", se o De acordo
+    já estiver preenchido). Uma MO RESERVADA ou CANCELADA não
     é emitida: o PDF só fica registrado. Lança DocLibConflito se o documento mudou desde que foi lido. Devolve a revisão
     atual do documento."""
     agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
@@ -20472,22 +20716,31 @@ class JanelaMO:
     4.2 Órgão, 4.3 Nome), 5 Recebido por (Nome, Data, Hora), 8 Assunto, 9 Descrição, 9.1 Observações e 10 De acordo (10.1 a
     10.3) ou a opção "Mensagem Operativa meramente informativa".
 
+    Na parte inferior fica a tabela de controle de liberação (uso interno: ela NÃO vai para o PDF): Período programado da MO
+    (Início e Término), Período verificado nas tratativas em Tempo Real (Liberado e Encerrado), o botão "Sem contato", o
+    Status e o Cancelar. Os campos do Período verificado nas tratativas em Tempo Real só aceitam dados depois da emissão e do
+    De acordo salvo (nunca numa MO meramente informativa); o status acompanha o preenchimento: Aprovado para Execução,
+    Em Execução e Concluído.
+
     Estados dos botões:
       - janela nova ........ Voltar e Salvar habilitados; Editar e Gerar Documento desabilitados
       - depois de Salvar ... campos travados; Editar e Gerar Documento habilitados; Salvar desabilitado
       - depois de Editar ... campos liberados; Gerar Documento desabilitado até um novo Salvar
-      - depois de Gerar .... MO emitida: só o De acordo pode ser preenchido (uma vez)
+      - depois de Gerar .... MO emitida: só o De acordo e as tratativas em Tempo Real podem ser preenchidos
+      - MO-Referência ...... habilitado em qualquer MO já salva, menos a Reservada: abre uma MO nova com a Descrição
+                             da MO aberta
     """
 
-    def __init__(self):
+    def __init__(self, descricao_referencia=""):
         self.mo_id = None
         self.revisao = None
         self.numero = ""              # número da MO (vazio enquanto ela é nova; depois do primeiro Salvar nunca muda)
         self.status = ""
         self.salvo = False            # versão atual gravada e campos travados (documento ainda não emitido)
-        self.emitido = False          # documento já gerado: só o De acordo continua editável
+        self.emitido = False          # documento já gerado: só o De acordo e as tratativas em Tempo Real são editáveis
         self.reservado = False        # MO reservada aberta para preenchimento: editável, PDF em branco, não emite
         self.cancelada = False        # MO cancelada: nada mais pode ser alterado
+        self.sem_contato = False      # botão "Sem contato" já acionado (irreversível): tratativas encerradas
         self.numero_previsto = ""     # número que a MO nova vai receber ao ser salva (ainda não consumido)
         # "Emitente, Nome" mostra o nome completo do usuário logado
         self.usuario = obter_nome_usuario_logado()
@@ -20499,11 +20752,14 @@ class JanelaMO:
         self._marcados = {}           # widget -> cores originais do contorno
         self._rotulos_marcados = {}   # rótulo -> cor original
         self._empresas = {}           # "emitente"/"destinatario" -> (combobox, rótulo do nome, entrada do nome)
+        self.celulas = {}             # campo da tabela de controle -> Entry
+        self._grupo_salvo = {"inicio": False, "termino": False}   # Liberado / Encerrado já salvos por completo (travados)
+        self.descricao_referencia = descricao_referencia          # Descrição inicial de uma MO aberta pelo MO-Referência
 
         self.janela = Toplevel(root)
         self.janela.title('COG - DOC_LIB. - MO')
         self.janela.geometry('1240x820')
-        self.janela.minsize(1100, 640)
+        self.janela.minsize(1160, 640)        # largura mínima: cabem os 8 botões do rodapé
         self.janela.resizable(True, True)
         self.janela['bg'] = SGA_FUNDO
         self.janela.protocol("WM_DELETE_WINDOW", self.voltar)
@@ -20514,7 +20770,10 @@ class JanelaMO:
 
         self._montar_cabecalho()
         self._montar_formulario()
+        self._montar_tabela()
         self._montar_rodape()
+        if descricao_referencia:      # MO-Referência: só a Descrição vem preenchida; os demais campos ficam em branco
+            self._definir_texto(self.txt_descricao, descricao_referencia)
         self._atualizar_numero_provisorio()
         self._aplicar_bloqueios()
         self._atualizar_estado()
@@ -20615,7 +20874,7 @@ class JanelaMO:
         self._hora_da_data = {}                 # entrada de data -> entrada da hora que recebe a hora atual
 
         card = Frame(self.inner, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
-        card.pack(fill=X, padx=24, pady=(16, 24))
+        card.pack(fill=X, padx=24, pady=(16, 8))
         card.grid_columnconfigure(0, minsize=250)
         card.grid_columnconfigure(1, weight=1)
         self.card = card
@@ -20722,6 +20981,80 @@ class JanelaMO:
         self._alvos["de_acordo_data"] = (self.ent_de_acordo_data, rot)
         self._alvos["de_acordo_hora"] = (self.ent_de_acordo_hora, rot)
 
+    def _montar_tabela(self):
+        """Tabela de controle de liberação da MO (uso interno do COG, só na tela: NÃO vai para o PDF). Uma só linha, com os
+        mesmos campos do documento em papel (Período programado da MO e Período verificado nas tratativas em Tempo Real) e,
+        à direita, as colunas Sem contato (botão), Status e Cancelar. Sob a tabela aparece a mensagem de "Sem contato" ou o
+        aviso de MO meramente informativa."""
+        quadro = Frame(self.inner, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
+        quadro.pack(fill=X, padx=24, pady=(0, 24))
+        Label(quadro, text="Controle de liberação da MO", bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 11, "bold"),
+              anchor="w").pack(fill=X, padx=16, pady=(12, 0))
+        Label(quadro, text="Controle interno do COG: esta tabela só existe na tela e não vai para o documento em PDF. "
+                           "Depois do De acordo, registre o Período verificado nas tratativas em Tempo Real (Liberado e "
+                           "Encerrado). Se não houve contato em Tempo Real entre as empresas, use o botão Sem contato.",
+              bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left", wraplength=1100
+              ).pack(fill=X, padx=16, pady=(2, 8))
+
+        tabela = Frame(quadro, bg=SGA_CARD)
+        tabela.pack(fill=X, padx=12, pady=(0, 6))
+        tabela.grid_columnconfigure(0, minsize=64)
+        for coluna in range(1, 13):
+            tabela.grid_columnconfigure(coluna, weight=1, uniform="dados")
+        tabela.grid_columnconfigure(13, minsize=96)
+        tabela.grid_columnconfigure(14, minsize=124)
+        tabela.grid_columnconfigure(15, minsize=80)
+
+        cabecalho = dict(bg=SGA_AZUL, fg="white", font=(SGA_FONTE, 9, "bold"))
+        subcabecalho = dict(bg="#2F5F9E", fg="white", font=(SGA_FONTE, 9, "bold"))
+        rotulo_coluna = dict(bg="#DCE8F8", fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"))
+        Label(tabela, text="MO\nNº", **cabecalho).grid(row=0, column=0, rowspan=3, sticky="nsew", padx=1, pady=1)
+        Label(tabela, text="Período programado da MO:", wraplength=300, **cabecalho
+              ).grid(row=0, column=1, columnspan=4, sticky="nsew", padx=1, pady=1)
+        Label(tabela, text="Período verificado nas tratativas em Tempo Real:", **cabecalho
+              ).grid(row=0, column=5, columnspan=8, sticky="nsew", padx=1, pady=1)
+        for texto, coluna, extensao in (("Início", 1, 2), ("Término", 3, 2), ("Liberado", 5, 4), ("Encerrado", 9, 4)):
+            Label(tabela, text=texto, **subcabecalho).grid(row=1, column=coluna, columnspan=extensao, sticky="nsew",
+                                                           padx=1, pady=1)
+        for posicao, (chave, curto, descricao, tipo) in enumerate(DOC_LIB_COLUNAS_TABELA_MO):
+            rotulo = Label(tabela, text=curto, **rotulo_coluna)
+            rotulo.grid(row=2, column=posicao + 1, sticky="nsew", padx=1, pady=1)
+            ToolTipSGA(rotulo, descricao)
+        for coluna, texto in ((13, "Sem contato"), (14, "Status"), (15, "Cancelar")):
+            Label(tabela, text=texto, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8, "bold")
+                  ).grid(row=2, column=coluna, sticky="nsew")
+
+        self.lbl_numero_tabela = Label(tabela, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"), width=8)
+        self.lbl_numero_tabela.grid(row=3, column=0, sticky="nsew", padx=1, pady=1)
+        for posicao, (chave, curto, descricao, tipo) in enumerate(DOC_LIB_COLUNAS_TABELA_MO):
+            entrada = Entry(tabela, font=(SGA_FONTE, 9), justify="center", width=1)
+            entrada.configure(readonlybackground=DOC_LIB_COR_BLOQUEADO)
+            entrada.grid(row=3, column=posicao + 1, sticky="ew", padx=1, pady=1, ipady=2)
+            self.configurar_entrada(entrada, tipo, ano_curto=True, atualiza_estado=chave in DOC_LIB_CAMPOS_TRATATIVAS_MO)
+            if tipo == "data":
+                entrada.bind("<Double-Button-1>", lambda e, w=entrada: self.abrir_calendario(w, True))
+                ToolTipSGA(entrada, "Dê duplo clique para abrir o calendário")
+            if chave in DOC_LIB_CAMPOS_PROGRAMADOS:       # o Período programado trava e libera junto com o formulário
+                self._controles.append(entrada)
+            self.celulas[chave] = entrada
+            self._alvos[chave] = (entrada, None)
+        self.btn_sem_contato = doc_lib_criar_botao(tabela, "Sem contato", self.registrar_sem_contato, "aviso",
+                                                   fonte=(SGA_FONTE, 8, "bold"))
+        self.btn_sem_contato.grid(row=3, column=13, sticky="ew", padx=(4, 1), pady=1)
+        self.lbl_status_tabela = Label(tabela, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 8, "bold"),
+                                       wraplength=118, justify="center")
+        self.lbl_status_tabela.grid(row=3, column=14, sticky="nsew")
+        self.btn_cancelar_tabela = doc_lib_criar_botao(tabela, "Cancelar", self.cancelar_mo, "perigo",
+                                                       fonte=(SGA_FONTE, 8, "bold"))
+        self.btn_cancelar_tabela.grid(row=3, column=15, sticky="ew", padx=(4, 1), pady=1)
+        doc_lib_estado_botao(self.btn_sem_contato, False)
+        doc_lib_estado_botao(self.btn_cancelar_tabela, False)
+
+        # mensagem sob a tabela: "Sem contato" confirmado ou MO meramente informativa
+        self.lbl_aviso_tabela = Label(quadro, text="", bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 10, "bold"),
+                                      anchor="w", justify="left", wraplength=1100)
+        self.lbl_aviso_tabela.pack(fill=X, padx=16, pady=(0, 12))
+
     def _montar_rodape(self):
         rodape = criar_rodape_sga(self.janela)
         self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "neutro")
@@ -20731,10 +21064,11 @@ class JanelaMO:
         self.btn_encaminhar = doc_lib_criar_botao(rodape, "Encaminhar MO", self.encaminhar, "agendar")
         self.btn_reservar = doc_lib_criar_botao(rodape, "MO-Reservado", self.reservar, "aviso")
         self.btn_cancelar = doc_lib_criar_botao(rodape, "Cancelar MO", self.cancelar_mo, "perigo")
+        self.btn_referencia = doc_lib_criar_botao(rodape, "MO-Referência", self.referencia, "primario")
         botoes = (self.btn_voltar, self.btn_salvar, self.btn_editar, self.btn_gerar, self.btn_encaminhar,
-                  self.btn_reservar, self.btn_cancelar)
+                  self.btn_reservar, self.btn_cancelar, self.btn_referencia)
         for posicao, botao in enumerate(botoes):
-            botao.place(relx=0.5, x=-507 + posicao * 146, rely=0.5, anchor="w", width=138, height=42)
+            botao.place(relx=0.5, x=-549 + posicao * 138, rely=0.5, anchor="w", width=132, height=42)
 
     # ------------------------------------------------------------------ calendário e campos dependentes
 
@@ -20858,6 +21192,7 @@ class JanelaMO:
                 doc_lib_definir_entrada(entrada, "")
                 self._limpar_marca(entrada)
         self._ajustar_de_acordo()
+        self._desenhar_tabela()                  # aviso sob a tabela de controle (sem contato em Tempo Real)
 
     def _ajustar_de_acordo(self):
         """O De acordo fica editável conforme o estado da MO: em edição só se ela não é meramente informativa; depois de
@@ -20877,6 +21212,7 @@ class JanelaMO:
         consumido ao salvar)."""
         if self.numero:
             self.lbl_numero.configure(text=self.numero, fg=SGA_TEXTO, font=(SGA_FONTE, 12, "bold"))
+            self._desenhar_tabela()
             return
         try:
             self.numero_previsto = doc_lib_numeros_previstos(1, "MO")[0]
@@ -20884,11 +21220,36 @@ class JanelaMO:
             self.numero_previsto = ""
         self.lbl_numero.configure(text=(self.numero_previsto + "  (será consumido ao salvar)") if self.numero_previsto else "",
                                   fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 12, "italic"))
+        self._desenhar_tabela()
+
+    def _desenhar_tabela(self):
+        """Atualiza o que a tabela de controle mostra além dos campos: o número da MO (cinza e itálico = ainda não
+        consumido; riscado e vermelho = cancelada), o status, o botão Cancelar e a mensagem sob a tabela ("Sem contato"
+        confirmado ou MO meramente informativa)."""
+        if self.cancelada:
+            self.lbl_numero_tabela.configure(text=self.numero, fg=SGA_VERMELHO, font=(SGA_FONTE, 9, "bold overstrike"))
+        elif self.numero:
+            self.lbl_numero_tabela.configure(text=self.numero, fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"))
+        else:
+            self.lbl_numero_tabela.configure(text=self.numero_previsto, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "italic"))
+        situacao = self.status if self.mo_id is not None else ""
+        self.lbl_status_tabela.configure(text=situacao, fg=DOC_LIB_COR_STATUS.get(situacao, SGA_TEXTO))
+        if self.cancelada:
+            self.btn_cancelar_tabela.grid_remove()
+        else:
+            self.btn_cancelar_tabela.grid()
+        if self.sem_contato:
+            self.lbl_aviso_tabela.configure(text=DOC_LIB_TEXTO_MO_SEM_CONTATO, fg=SGA_AZUL)
+        elif self.var_informativa.get():
+            self.lbl_aviso_tabela.configure(text=DOC_LIB_TEXTO_MO_INFORMATIVA_TABELA, fg=SGA_TEXTO_SUAVE)
+        else:
+            self.lbl_aviso_tabela.configure(text="")
 
     # ------------------------------------------------------------------ leitura e gravação dos campos
 
-    def configurar_entrada(self, entrada, tipo, ano_curto=False):
+    def configurar_entrada(self, entrada, tipo, ano_curto=False, atualiza_estado=False):
         """Liga ao campo a formatação automática (data dd/mm/aa(aa), hora HH:MM) e a limpeza da marca de erro.
+        atualiza_estado: depois da emissão, alterar o campo deixa a MO com alterações a salvar (Salvar habilita na hora).
         """
         entrada.configure(readonlybackground=DOC_LIB_COR_BLOQUEADO)
         if tipo in ("data", "hora"):
@@ -20898,6 +21259,18 @@ class JanelaMO:
         if tipo not in ("data", "hora"):
             entrada.bind("<FocusOut>", lambda e, w=entrada: self._limpar_marca(w) if w.get().strip() else None,
                          add="+")
+        if atualiza_estado:
+            entrada.bind("<KeyRelease>", lambda e: self._ao_alterar_tratativas(), add="+")
+            entrada.bind("<FocusOut>", lambda e: self._ao_alterar_tratativas(), add="+")
+
+    def _ao_alterar_tratativas(self):
+        """Depois da emissão, alterar o Período verificado nas tratativas em Tempo Real deixa a MO com alterações ainda não
+        salvas (Salvar habilita e Gerar Documento desabilita até salvar)."""
+        if self.emitido:
+            try:
+                self._atualizar_estado()
+            except TclError:
+                pass
 
     def _ao_sair_campo(self, entrada, tipo, ano_curto):
         try:
@@ -21036,6 +21409,8 @@ class JanelaMO:
             empresa = combo.get().strip()
             dados[f"{prefixo}_empresa"] = empresa
             dados[f"{prefixo}_empresa_outra"] = entrada_outra.get().strip() if empresa == "OUTRA" else ""
+        for chave, entrada in self.celulas.items():             # tabela de controle de liberação
+            dados[chave] = entrada.get().strip()
         return dados
 
     def _preencher(self, doc):
@@ -21069,6 +21444,11 @@ class JanelaMO:
                               (self.txt_observacoes, "observacoes")):
             self._definir_texto(widget, (doc[chave] or "").upper() if chave == "assunto" else doc[chave])
         self.var_informativa.set(1 if doc["informativa"] else 0)
+        for chave, entrada in self.celulas.items():             # tabela de controle de liberação
+            doc_lib_definir_entrada(entrada, doc.get(chave) or "")
+        self.sem_contato = bool(doc.get("sem_contato"))
+        self._grupo_salvo = {"inicio": all(str(doc.get(c) or "").strip() for c in DOC_LIB_CAMPOS_INICIO),
+                             "termino": all(str(doc.get(c) or "").strip() for c in DOC_LIB_CAMPOS_TERMINO)}
         self._atualizar_numero_provisorio()
 
     def _carregar_documento(self, doc):
@@ -21099,6 +21479,16 @@ class JanelaMO:
         for prefixo, (_, _, entrada_outra) in self._empresas.items():
             doc_lib_bloquear_widget(entrada_outra, travar)
         self._ajustar_de_acordo()
+        self._ajustar_tratativas()
+
+    def _ajustar_tratativas(self):
+        """Período verificado nas tratativas em Tempo Real (Liberado e Encerrado): os campos só ficam editáveis com a MO
+        emitida, que precisa do De acordo, com o De acordo já salvo, sem "Sem contato" e não cancelada. O grupo Liberado ou
+        Encerrado já salvo por completo não muda mais. Em MO meramente informativa ficam sempre desabilitados."""
+        aceita = doc_lib_mo_aceita_tratativas(self._doc_gravado)
+        for chave in DOC_LIB_CAMPOS_TRATATIVAS_MO:
+            grupo = "inicio" if chave in DOC_LIB_CAMPOS_INICIO else "termino"
+            doc_lib_bloquear_widget(self.celulas[chave], not aceita or self._grupo_salvo[grupo])
 
     def _pendente(self):
         """True se existem dados ainda não salvos (MO nova, em edição ou, depois de emitida, com o De acordo alterado)."""
@@ -21118,8 +21508,13 @@ class JanelaMO:
         doc_lib_estado_botao(self.btn_editar, self.mo_id is not None and not self.emitido and self.salvo
                              and not self.cancelada)
         doc_lib_estado_botao(self.btn_gerar, self.mo_id is not None and not pendente)
-        doc_lib_estado_botao(self.btn_cancelar, self.mo_id is not None and not pendente
-                             and self.status in DOC_LIB_STATUS_CANCELAVEIS_MO)
+        pode_cancelar = self.mo_id is not None and not pendente and self.status in DOC_LIB_STATUS_CANCELAVEIS_MO
+        doc_lib_estado_botao(self.btn_cancelar, pode_cancelar)
+        doc_lib_estado_botao(self.btn_cancelar_tabela, pode_cancelar)
+        doc_lib_estado_botao(self.btn_sem_contato, self.mo_id is not None and not pendente
+                             and doc_lib_mo_pode_sem_contato(self._doc_gravado))
+        # MO-Referência vale para qualquer MO já salva, em qualquer status, menos a Reservada (só tem o número)
+        doc_lib_estado_botao(self.btn_referencia, self.mo_id is not None and self.status not in DOC_LIB_STATUS_SEM_REFERENCIA_MO)
         if self.mo_id is None:
             texto = "Nova MO (não salva)"
         else:
@@ -21128,6 +21523,7 @@ class JanelaMO:
             texto = f"MO {self.numero} - {situacao} (rev. {self.revisao})" \
                     + (" - alterações não salvas" if pendente and (self.emitido or self.reservado) else "")
         self.lbl_status.configure(text=texto)
+        self._desenhar_tabela()
 
     # ------------------------------------------------------------------ ações dos botões
 
@@ -21140,6 +21536,8 @@ class JanelaMO:
             return
         usuario = obter_nome_usuario_logado()
         de_acordo_antes = doc_lib_de_acordo_mo_completo(self._doc_gravado)
+        status_antes = self.status
+        grupos_antes = dict(self._grupo_salvo)
         numero_previsto = self.numero_previsto if self.mo_id is None else ""
         ja_emitida = self.emitido
         era_reservada = self.reservado
@@ -21165,6 +21563,15 @@ class JanelaMO:
             if not de_acordo_antes and doc_lib_de_acordo_mo_completo(doc):
                 mensagem += (f"\n\n'De acordo' registrado: status {doc['status']}.\n\nGere o documento novamente: o novo "
                              f"PDF traz o De acordo e não tem mais o aviso 'Aguardando o De Acordo do documento'.")
+                if doc_lib_mo_aceita_tratativas(doc):
+                    mensagem += ("\n\nOs campos do 'Período verificado nas tratativas em Tempo Real' foram liberados para "
+                                 "digitação. Se não houve contato em Tempo Real entre as empresas, use o botão 'Sem contato'.")
+            elif status_antes != doc["status"]:
+                mensagem += f"\n\nStatus atualizado: {status_antes} passou a {doc['status']}."
+            travados = [nome for chave, nome in (("inicio", "Liberado"), ("termino", "Encerrado"))
+                        if self._grupo_salvo[chave] and not grupos_antes[chave]]
+            if travados:
+                mensagem += ("\n\nRegistrado e bloqueado (não pode mais ser alterado): " + ", ".join(travados) + ".")
         else:
             mensagem = ("MO reservada preenchida e salva com sucesso!" if era_reservada else "MO salva com sucesso!") + \
                 f"\n\nMO Nº COG: {doc['numero']}\nStatus: {doc['status']}"
@@ -21282,6 +21689,69 @@ class JanelaMO:
         self._carregar_documento(doc_lib_carregar_mo(self.mo_id))
         messagebox.showinfo("MO cancelada", f"A MO {self.numero} foi cancelada.\n\nGere o documento novamente para que o "
                                             f"PDF mostre o cancelamento.", parent=self.janela)
+
+    def registrar_sem_contato(self):
+        """Botão "Sem contato" da tabela de controle: depois de uma confirmação, registra que não houve contato em Tempo Real
+        entre as empresas envolvidas na MO e a conclui. A ação é irreversível: os campos do Período verificado nas
+        tratativas em Tempo Real ficam desabilitados e a mensagem fixa aparece sob a tabela."""
+        titulo = "Sem contato"
+        if self.mo_id is None or self._pendente() or not doc_lib_mo_pode_sem_contato(self._doc_gravado):
+            return
+        if not messagebox.askyesno(
+                "Confirmar 'Sem contato'",
+                f"Confirma que NÃO houve contato em Tempo Real entre as empresas envolvidas na MO {self.numero}?\n\n"
+                f"ATENÇÃO: esta ação é IRREVERSÍVEL.\n"
+                f"• a MO passará para o status '{STATUS_ATEIE_CONCLUIDO}';\n"
+                f"• os campos do 'Período verificado nas tratativas em Tempo Real' ficarão desabilitados e não poderão "
+                f"mais ser preenchidos;\n"
+                f"• será exibida a mensagem: \"{DOC_LIB_TEXTO_MO_SEM_CONTATO}\".\n\n"
+                f"Deseja concluir a MO como 'Sem contato'?", icon="warning", default="no", parent=self.janela):
+            return
+        try:
+            doc_lib_sem_contato_mo(self.mo_id, obter_nome_usuario_logado(), self.revisao)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except DocLibRegra as erro:
+            messagebox.showwarning(titulo, str(erro), parent=self.janela)
+            return
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível registrar o 'Sem contato': {erro}", parent=self.janela)
+            return
+        self._carregar_documento(doc_lib_carregar_mo(self.mo_id))
+        messagebox.showinfo(titulo, f"MO {self.numero} concluída.\n\n{DOC_LIB_TEXTO_MO_SEM_CONTATO}.", parent=self.janela)
+
+    def referencia(self):
+        """Botão MO-Referência: reabre a janela da MO como se fosse aberta na fase inicial, para elaborar uma nova MO, com o
+        número previsto (só consumido ao salvar) e o campo Descrição preenchido com a Descrição da MO aberta. Os
+        demais campos ficam em branco e todos podem ser editados, inclusive a Descrição. Vale para qualquer status, menos
+        Reservado."""
+        titulo = "MO-Referência"
+        if self.mo_id is None or self.status in DOC_LIB_STATUS_SEM_REFERENCIA_MO:
+            return
+        if self._tem_alteracoes_pendentes() and not messagebox.askyesno(
+                "Dados não salvos", "Existem dados não salvos nesta MO. Abrir a MO-Referência descarta essas "
+                                    "alterações.\n\nDeseja continuar?", parent=self.janela):
+            return
+        try:
+            doc = doc_lib_carregar_mo(self.mo_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler a MO salva: {erro}", parent=self.janela)
+            return
+        if doc is None:
+            messagebox.showerror("Erro", "A MO selecionada não foi encontrada.", parent=self.janela)
+            return
+        if doc["status"] in DOC_LIB_STATUS_SEM_REFERENCIA_MO:
+            messagebox.showwarning(titulo, f"A MO {doc['numero']} está com status '{doc['status']}' e não pode ser usada "
+                                           f"como referência.", parent=self.janela)
+            return
+        geometria = self.janela.geometry()
+        nova = JanelaMO(descricao_referencia=doc_lib_texto_referencia_mo(doc))
+        try:
+            nova.janela.geometry(geometria)          # a nova MO abre no mesmo lugar e no mesmo tamanho desta janela
+        except TclError:
+            pass
+        self.janela.destroy()
 
     def encaminhar(self):
         """Botão Encaminhar MO: depois de confirmar numa janela, envia por e-mail (do remetente escolhido entre
