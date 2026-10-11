@@ -12401,6 +12401,7 @@ def _doc_lib_migrar_dados():
             or cur.execute("SELECT 1 " + _DOC_LIB_SQL_MO_CONCLUIDA_PELO_DE_ACORDO + " LIMIT 1",
                            (STATUS_ATEIE_CONCLUIDO,)).fetchone()
             or cur.execute("SELECT 1 FROM doclib_mo WHERE status = 'Liberado' LIMIT 1").fetchone()
+            or _doc_lib_mo_descricoes_legadas(cur)
             or any(solicitado_por == login and nomes.get((login or "").lower())
                    for solicitado_por, login in cur.execute(
                        "SELECT solicitado_por, solicitado_por_usuario FROM doclib_ateie").fetchall()))
@@ -12467,6 +12468,12 @@ def _doc_lib_migrar_dados():
             novo_status = doc_lib_calcular_status_mo(doc_mo, True)
             if novo_status != doc_mo["status"]:
                 cursor.execute("UPDATE doclib_mo SET status = ? WHERE id = ?", (novo_status, mo_id))
+        # Descrição que ainda traz o texto da primeira versão do botão MO-Referência (cabeçalho com os dados da MO de origem,
+        # Observações e a linha "De acordo: ..."): fica só o que é da própria MO. O texto original é guardado em
+        # descricao_legado (cópia de segurança) e a revisão do documento não muda.
+        for mo_id, _, limpa in _doc_lib_mo_descricoes_legadas(cursor):
+            cursor.execute("UPDATE doclib_mo SET descricao_legado = COALESCE(descricao_legado, descricao), descricao = ? "
+                           "WHERE id = ?", (limpa, mo_id))
         cursor.execute("COMMIT")
     except Exception:
         if conexao.in_transaction:
@@ -19457,7 +19464,9 @@ DOC_LIB_COLUNAS_TABELA_MO = [
 # Campos novos de doclib_mo (a tabela é criada sem eles; _garantir_tabelas_doc_lib_mo os acrescenta se faltarem)
 DOC_LIB_COLUNAS_NOVAS_MO = (
     [(chave, "TEXT") for chave, _, _, _ in DOC_LIB_COLUNAS_TABELA_MO]
-    + [("sem_contato", "INTEGER NOT NULL DEFAULT 0"), ("sem_contato_por", "TEXT"), ("sem_contato_em", "TEXT")])
+    + [("sem_contato", "INTEGER NOT NULL DEFAULT 0"), ("sem_contato_por", "TEXT"), ("sem_contato_em", "TEXT"),
+       # texto original da Descrição das MO limpas por doc_lib_limpar_descricao_referencia_mo (cópia de segurança)
+       ("descricao_legado", "TEXT")])
 DOC_LIB_TEXTO_MO_RESERVADA = "MO RESERVADA"        # exibido no GRID MO, em Assunto, enquanto a MO está reservada
 DOC_LIB_PAGINAS_DESCRICAO_MO = 30                  # previsão do campo 9 Descrição (texto livre de até 30 páginas)
 DOC_LIB_ESPACO_ANTES_PARAGRAFO = "6p"              # espaço antes de cada parágrafo da Descrição (6 pt; o PDF usa o mesmo valor)
@@ -20074,11 +20083,77 @@ def doc_lib_sem_contato_mo(mo_id, usuario, revisao_esperada):
         conexao.close()
 
 
+# A primeira versão do botão MO-Referência gravava na Descrição um cabeçalho com os dados da MO de origem e, no fim, as
+# Observações e uma linha "De acordo: ..." (inclusive "De acordo: Mensagem Operativa meramente informativa, ..."). Esses textos,
+# já gravados, só são reconhecidos nos formatos exatos em que eram escritos.
+_DOC_LIB_RE_REFERENCIA_CABECALHO = re.compile(r"^MO DE REFERÊNCIA: MO Nº COG-\S+ \(status: .*\)$")
+_DOC_LIB_PREFIXOS_REFERENCIA = ("Data: ", "Classificação: ", "Emitente: ", "Destinatário: ", "Recebido por: ", "Assunto: ")
+_DOC_LIB_RE_REFERENCIA_DE_ACORDO = re.compile(
+    r"^De acordo: (?:" + re.escape(DOC_LIB_TEXTO_MO_INFORMATIVA) + r"|ainda não registrado|.+ - \d{2}/\d{2}/\d{4} às \d{2}:\d{2})$")
+
+
+def doc_lib_limpar_descricao_referencia_mo(texto):
+    """Tira da Descrição o texto que a primeira versão do botão MO-Referência gravava nela: o cabeçalho "MO DE REFERÊNCIA ..."
+    com as 6 linhas seguintes e o marcador "Descrição:", as "Observações: ..." copiadas da MO de origem e a linha final
+    "De acordo: ..." (informativa, "ainda não registrado" ou "nome - data às hora"). O que o usuário escreveu fica como está.
+    O que sobra do cabeçalho ou da linha "De acordo" é removido mesmo quando o usuário apagou à mão só uma parte do texto, e
+    blocos aninhados (MO de referência de uma MO que já era de referência) são desfeitos um a um. Um texto sem nada disso é
+    devolvido idêntico."""
+    original = str(texto or "")
+    atual = original.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    mudou = False
+    for _ in range(20):                                  # blocos aninhados: uma camada por passada
+        linhas, achou_cabecalho, i, saida = atual, False, 0, []
+        while i < len(linhas):
+            if not achou_cabecalho and _DOC_LIB_RE_REFERENCIA_CABECALHO.match(linhas[i].strip()):
+                achou_cabecalho = True
+                i += 1
+                for prefixo in _DOC_LIB_PREFIXOS_REFERENCIA:
+                    if i < len(linhas) and linhas[i].startswith(prefixo):
+                        i += 1
+                    else:
+                        break
+                if i < len(linhas) and linhas[i].startswith("Descrição:"):
+                    resto = linhas[i][len("Descrição:"):].strip()      # "Descrição: texto" (uma linha) ou "Descrição:" + linhas
+                    i += 1
+                    if resto:
+                        saida.append(resto)
+                continue
+            saida.append(linhas[i])
+            i += 1
+        de_acordo = [k for k, linha in enumerate(saida) if _DOC_LIB_RE_REFERENCIA_DE_ACORDO.match(linha.strip())]
+        if de_acordo:
+            remover = {de_acordo[-1]}
+            if achou_cabecalho:                          # "Observações: ..." gravadas logo antes da linha "De acordo"
+                observacoes = [k for k in range(de_acordo[-1]) if saida[k].startswith("Observações: ")]
+                if observacoes:
+                    remover |= set(range(observacoes[-1], de_acordo[-1] + 1))
+            saida = [linha for k, linha in enumerate(saida) if k not in remover]
+        if not achou_cabecalho and not de_acordo:
+            break
+        mudou = True
+        atual = saida
+    return "\n".join(atual).strip() if mudou else original
+
+
 def doc_lib_texto_referencia_mo(doc):
     """Texto do campo Descrição de uma MO aberta pelo botão MO-Referência: o texto da Descrição da MO de origem, exatamente
-    como ela foi gravada (sem número, cabeçalho ou qualquer outro dado da MO de origem). É só um ponto de partida: o campo
-    continua totalmente editável."""
-    return str(doc.get("descricao") or "")
+    como ela foi gravada (sem número, cabeçalho ou qualquer outro dado da MO de origem), a não ser que ainda traga o texto da
+    primeira versão do botão (doc_lib_limpar_descricao_referencia_mo). É só um ponto de partida: o campo continua totalmente
+    editável."""
+    return doc_lib_limpar_descricao_referencia_mo(doc.get("descricao"))
+
+
+def _doc_lib_mo_descricoes_legadas(cursor):
+    """[(id, Descrição gravada, Descrição limpa)] das MO cuja Descrição ainda traz o texto da primeira versão do botão
+    MO-Referência. Não mexe na MO se, sem esse texto, a Descrição ficaria vazia."""
+    resultado = []
+    for mo_id, descricao in cursor.execute("SELECT id, descricao FROM doclib_mo WHERE descricao LIKE '%De acordo: %' "
+                                           "OR descricao LIKE '%MO DE REFER%'").fetchall():
+        limpa = doc_lib_limpar_descricao_referencia_mo(descricao)
+        if limpa != (descricao or "") and limpa.strip():
+            resultado.append((mo_id, descricao, limpa))
+    return resultado
 
 
 def doc_lib_reservar_mo(quantidade, usuario, nome_completo=""):
