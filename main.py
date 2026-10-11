@@ -12060,10 +12060,8 @@ STATUS_ATEIE_CANCELADO = "Cancelado"
 # Número de ATEIE reservado (botão "ATEIE-Reservado"): registro individual só com o número e as Observações padrão,
 # aguardando o preenchimento posterior. Ao ser preenchido e salvo passa a "Em análise" e segue o fluxo normal.
 STATUS_ATEIE_RESERVADO = "Reservado"
-# MO com os campos "Liberado" (Período verificado nas tratativas em Tempo Real) preenchidos, ainda sem o "Encerrado"
-STATUS_MO_LIBERADO = "Liberado"
 DOC_LIB_STATUS_ATEIE = [STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_AGUARDA_DE_ACORDO, STATUS_ATEIE_APROVADO_EXECUCAO,
-                        STATUS_ATEIE_EM_EXECUCAO, STATUS_MO_LIBERADO, STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO,
+                        STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO,
                         STATUS_ATEIE_RESERVADO]
 DOC_LIB_LIMITE_RESERVA = 10            # máximo de números reservados em uma única operação
 DOC_LIB_LIMITE_AGRUPAMENTO = 10        # máximo de ATEIEs reservados agrupados em um único documento
@@ -12402,6 +12400,7 @@ def _doc_lib_migrar_dados():
                            "LIMIT 1").fetchone()
             or cur.execute("SELECT 1 " + _DOC_LIB_SQL_MO_CONCLUIDA_PELO_DE_ACORDO + " LIMIT 1",
                            (STATUS_ATEIE_CONCLUIDO,)).fetchone()
+            or cur.execute("SELECT 1 FROM doclib_mo WHERE status = 'Liberado' LIMIT 1").fetchone()
             or any(solicitado_por == login and nomes.get((login or "").lower())
                    for solicitado_por, login in cur.execute(
                        "SELECT solicitado_por, solicitado_por_usuario FROM doclib_ateie").fetchall()))
@@ -12458,6 +12457,8 @@ def _doc_lib_migrar_dados():
         cursor.execute("SELECT id FROM doclib_ateie WHERE emitido = 1")
         for (ateie_id,) in cursor.fetchall():
             _doc_lib_recalcular_status(cursor, ateie_id, True)
+        # nome provisório "Liberado" do status da MO com as tratativas em curso: o status é "Em Execução", como no ATEIE e no AI
+        cursor.execute("UPDATE doclib_mo SET status = ? WHERE status = 'Liberado'", (STATUS_ATEIE_EM_EXECUCAO,))
         # MO que ficou "Concluído" só por ter o De acordo (antes da tabela de controle de liberação) volta ao ponto certo do
         # fluxo: "Aprovado para Execução", até que as tratativas em Tempo Real ou o botão "Sem contato" a concluam
         cursor.execute("SELECT id " + _DOC_LIB_SQL_MO_CONCLUIDA_PELO_DE_ACORDO, (STATUS_ATEIE_CONCLUIDO,))
@@ -14197,7 +14198,6 @@ DOC_LIB_COR_STATUS = {STATUS_ATEIE_EM_ANALISE: "#00A0E3",
                       STATUS_ATEIE_AGUARDA_DE_ACORDO: "#6F7273",
                       STATUS_ATEIE_APROVADO_EXECUCAO: "#373435",
                       STATUS_ATEIE_EM_EXECUCAO: "#079541",
-                      STATUS_MO_LIBERADO: "#079541",
                       STATUS_ATEIE_CONCLUIDO: "#024593",
                       STATUS_ATEIE_CANCELADO: "#FF0000",
                       STATUS_ATEIE_RESERVADO: "#FFA500"}
@@ -19415,7 +19415,7 @@ class JanelaAI:
 # Encerrado), com os mesmos campos e critérios das colunas de execução do ATEIE e do AI, mais a coluna "Sem contato",
 # o Status e o Cancelar. O botão MO-Referência abre uma MO nova com a Descrição preenchida com os dados da MO de origem.
 # Status da MO, na ordem do fluxo: Em análise (salva, documento ainda não gerado), Aguarda De Acordo (gerada, precisa do
-# De Acordo e ele ainda não foi preenchido), Aprovado para Execução (De Acordo preenchido), Liberado (campos "Liberado" da
+# De Acordo e ele ainda não foi preenchido), Aprovado para Execução (De Acordo preenchido), Em Execução (campos "Liberado" da
 # tabela preenchidos), Concluído (campos "Encerrado" preenchidos, botão "Sem contato" acionado ou MO meramente informativa),
 # Cancelado e Reservado. Os status, as datas/horas, o cadastro de e-mails e os componentes visuais são os mesmos do ATEIE
 # e do AI.
@@ -19427,7 +19427,7 @@ DOC_LIB_TEXTO_MO_SEM_CONTATO = "Não houve contato em Tempo Real entre as empres
 DOC_LIB_TEXTO_MO_INFORMATIVA_TABELA = ("Mensagem Operativa meramente informativa: não há necessidade de contato em Tempo "
                                        "Real, por isso os campos do Período verificado nas tratativas em Tempo Real e o "
                                        "botão Sem contato ficam desabilitados.")
-# a MO pode ser cancelada depois de salva e até entrar em tratativa em Tempo Real (Liberado); o número cancelado nunca é
+# a MO pode ser cancelada depois de salva e até entrar em tratativa em Tempo Real (Em Execução); o número cancelado nunca é
 # reaproveitado. Concluído continua cancelável porque é o status da MO meramente informativa.
 DOC_LIB_STATUS_CANCELAVEIS_MO = (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_AGUARDA_DE_ACORDO, STATUS_ATEIE_APROVADO_EXECUCAO,
                                  STATUS_ATEIE_CONCLUIDO)
@@ -19608,7 +19608,7 @@ def doc_lib_calcular_status_mo(doc, emitido):
       Em análise .............. salva, mas o documento ainda não foi gerado
       Concluído ............... documento gerado e meramente informativa, ou com o botão "Sem contato" acionado, ou com os
                                 campos "Encerrado" (Período verificado nas tratativas em Tempo Real) todos preenchidos
-      Liberado ................ documento gerado e campos "Liberado" todos preenchidos
+      Em Execução ............. documento gerado e campos "Liberado" todos preenchidos
       Aprovado para Execução .. documento gerado e "De acordo" preenchido (nome, data e hora)
       Aguarda De Acordo ....... documento gerado, que precisa do "De acordo", ainda sem ele
     Preenchimento parcial de um grupo (Liberado ou Encerrado) não muda o status."""
@@ -19628,7 +19628,7 @@ def doc_lib_calcular_status_mo(doc, emitido):
     if completo(DOC_LIB_CAMPOS_TERMINO):
         return STATUS_ATEIE_CONCLUIDO
     if completo(DOC_LIB_CAMPOS_INICIO):
-        return STATUS_MO_LIBERADO
+        return STATUS_ATEIE_EM_EXECUCAO
     return STATUS_ATEIE_APROVADO_EXECUCAO if doc_lib_de_acordo_mo_completo(doc) else STATUS_ATEIE_AGUARDA_DE_ACORDO
 
 
@@ -20736,7 +20736,7 @@ class JanelaMO:
     (Início e Término), Período verificado nas tratativas em Tempo Real (Liberado e Encerrado), o botão "Sem contato", o
     Status e o Cancelar. Os campos do Período verificado nas tratativas em Tempo Real só aceitam dados depois da emissão e do
     De acordo salvo (nunca numa MO meramente informativa); o status acompanha o preenchimento: Aprovado para Execução,
-    Liberado e Concluído.
+    Em Execução e Concluído.
 
     Estados dos botões:
       - janela nova ........ Voltar e Salvar habilitados; Editar e Gerar Documento desabilitados
