@@ -1,4 +1,4 @@
-# Código atualizado em 10-10-26 - 2135 - Click_25: MO (Mensagem Operativa) e AI (Autorização para Impedimento de Equipamento de Interligação) implantados no menu Doc_Lib.; ATEIE: remetente à escolha, e-mails em cópia, coluna Enviado e-mail
+# Código atualizado em 11-10-26 - 1601 - Click_25: (Ajuste na MO, ATEIE e AI)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
