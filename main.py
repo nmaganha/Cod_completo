@@ -1,4 +1,4 @@
-# Código atualizado em 10-10-26 - Click_25: MO (Mensagem Operativa) e AI (Autorização para Impedimento de Equipamento de Interligação) implantados no menu Doc_Lib.; ATEIE: remetente à escolha, e-mails em cópia, coluna Enviado e-mail
+# Código atualizado em 10-10-26 - 1749 - Click_25: MO (Mensagem Operativa) e AI (Autorização para Impedimento de Equipamento de Interligação) implantados no menu Doc_Lib.; ATEIE: remetente à escolha, e-mails em cópia, coluna Enviado e-mail
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -11996,7 +11996,7 @@ LOGO_ATEIE = os.path.join(PASTA_BASE, "logo_ateie.png")
 DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE = ["FOZ DO RIO CLARO ENERGIA SA", "IJUÍ ENERGIA SA", "US. PAULISTA LAVRINHAS DE ENERGIA SA",
                                        "FERREIRA GOMES ENERGIA SA", "ENERGIA DOS VENTOS SA",
                                        "EÓLICA DO AGRESTE POTIGUAR SA", "VERDE 08 ENERGIA SA", "OUTRA"]  # combobox "Empresa Solicitante"
-DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "EDP", "ENGIE", "CELEO_REDES", "ENERGISA", "ISA-ENERGIA", "CBA", "EQUATORIAL",
+DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "EDP", "ENGIE", "CELEO_REDES", "ENERGISA", "ISA ENERGIA BRASIL SA", "CBA", "EQUATORIAL",
                                       "CPFL-RGE", "ARGO", "CIMY", "OUTRA"]         # combobox "Empresa" de "Pessoal Notificado"
 DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
 
@@ -12023,7 +12023,7 @@ EMAIL_ATEIE_TEXTO = ("Prezados,\n\n"
 DOC_LIB_DESTINATARIOS_INICIAIS = [
     ("FOZ DO RIO CLARO ENERGIA SA", "CELEO_REDES", "nivaldo.maganha@gmail.com"),
     ("IJUÍ ENERGIA SA", "CPFL-RGE", "nivaldo.maganha@gmail.com"),
-    ("US. PAULISTA LAVRINHAS DE ENERGIA SA", "ISA-ENERGIA", "nivaldo.maganha@gmail.com"),
+    ("US. PAULISTA LAVRINHAS DE ENERGIA SA", "ISA ENERGIA BRASIL SA", "nivaldo.maganha@gmail.com"),
     ("FERREIRA GOMES ENERGIA SA", "ENERGISA", "nivaldo.maganha@gmail.com"),
     ("FERREIRA GOMES ENERGIA SA", "ENGIE", "nmaganha@alupar.com.br"),
     ("VERDE 08 ENERGIA SA", "EQUATORIAL", "nivaldo.maganha@gmail.com"),
@@ -18372,15 +18372,19 @@ class JanelaAI:
                                                  dica="(Não utilizar siglas, com exceção \ndaquelas já consagradas no setor, \ntais como: LT, UG, TR e SE)")
         self.txt_local = self._campo_texto("local", "Local", 3, maiusculas=True)
 
-        # 5. Tempo de Manobras (HH:MM)
-        rot = self._rotulo("Tempo de Manobras")
+        # 5. Tempo de Manobras (HH:MM), com o texto dica sob o nome do campo)
+        bloco_tempo = Frame(card, bg=SGA_CARD)
+        rot = self._rotulo("Tempo de Manobras", pai=bloco_tempo)
+        rot.pack(anchor="nw")
+        Label(bloco_tempo, text="(considerado o mesmo tempo,\ntanto para liberação como\npara normalização)", bg=SGA_CARD,
+              fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left").pack(anchor="nw", pady=(2, 0))
         quadro = Frame(card, bg=SGA_CARD)
         self.ent_tempo_manobras = criar_entrada_sga(quadro, width=8, justify="center")
         self.ent_tempo_manobras.pack(side=LEFT)
         Label(quadro, text="(hh:mm)", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).pack(side=LEFT, padx=(8, 0))
         self.configurar_entrada(self.ent_tempo_manobras, "hora")
         self._controles.append(self.ent_tempo_manobras)
-        self._nova_linha(rot, quadro)
+        self._nova_linha(bloco_tempo, quadro)
         self._alvos["tempo_manobras"] = (self.ent_tempo_manobras, rot)
 
         # 6. Em caso de necessidade pode-se dispor do equipamento em: "Indisponível" ou o tempo de retorno (HH:MM)
@@ -18490,7 +18494,8 @@ class JanelaAI:
         quadro.pack(fill=X, padx=24, pady=(0, 24))
         Label(quadro, text="Períodos dos Impedimentos (até 10 AIs por documento)", bg=SGA_CARD, fg=SGA_AZUL,
               font=(SGA_FONTE, 11, "bold"), anchor="w").pack(fill=X, padx=16, pady=(12, 0))
-        Label(quadro, text="Cada linha um AI e no máximo 10 AIs por documento.",
+        Label(quadro, text="Cada linha uma AI e no máximo 10 AIs por documento. No período total previsto para o"
+                           " impedimento está incluído o tempo de manobras (Liberação + Normalização)",
               bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left", wraplength=1100
               ).pack(fill=X, padx=16, pady=(2, 8))
 
@@ -20681,8 +20686,7 @@ class JanelaMO:
         # 8. Assunto (duas linhas) / 9. Descrição (até 30 páginas) / 9.1 Observações (opcional, sem texto padrão)
         self.txt_assunto = self._campo_texto("assunto", "Assunto", 2, maiusculas=True)
         self.txt_descricao = self._campo_texto("descricao", "Descrição", 16, barra=True,
-                                               dica=f"(texto livre, com previsão de até\n{DOC_LIB_PAGINAS_DESCRICAO_MO} páginas; "
-                                                    f"justificado no documento, com 6 pt antes de cada parágrafo)")
+                                               dica=f"(texto livre, com previsão de até\n{DOC_LIB_PAGINAS_DESCRICAO_MO} páginas.)")
         self.txt_descricao.configure(spacing1=DOC_LIB_ESPACO_ANTES_PARAGRAFO)    # 6 pt antes de cada parágrafo
         self.txt_observacoes = self._campo_texto("observacoes", "Observações", 4, opcional=True, barra=True,
                                                  separador=False)
