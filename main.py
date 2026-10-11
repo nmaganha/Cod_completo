@@ -19482,16 +19482,18 @@ EMAIL_MO_TEXTO_INFORMATIVA = ("Prezados,\n\n"
                               "Atenciosamente,\n"
                               "COG-ALUPAR")
 
-# Colunas da janela "GRID MO": (campo, título, largura em pixels, exibir sempre em caixa alta)
+# Colunas da janela "GRID MO": (campo, título, largura em pixels, exibir sempre em caixa alta). Programação Início e Término
+# são o Período programado da MO (tabela de controle de liberação), com data e hora, como nos GRIDs do ATEIE e do AI.
 DOC_LIB_COLUNAS_LISTA_MO = [
     ("numero", "N° MO", 105, False),
-    ("data", "Data", 90, False),
+    ("prog_inicio", "Programação Início", 135, False),
+    ("prog_termino", "Programação Término", 135, False),
     ("classificacao", "Classificação", 110, False),
-    ("emitente", "Emitente", 190, True),
-    ("destinatario", "Destinatário", 190, True),
-    ("assunto", "Assunto", 300, True),
-    ("recebido", "Recebido por", 150, False),
-    ("email_enviado", "Enviado e-mail", 150, False),
+    ("emitente", "Emitente", 160, True),
+    ("destinatario", "Destinatário", 160, True),
+    ("assunto", "Assunto", 250, True),
+    ("recebido", "Recebido por", 120, False),
+    ("email_enviado", "Enviado e-mail", 140, False),
     ("status", "Status", 160, False),
 ]
 
@@ -19980,6 +19982,11 @@ def doc_lib_salvar_mo(dados, usuario):
         conexao.close()
 
 
+def _doc_lib_data_hora_texto(data, hora):
+    """"dd/mm/aa HH:MM" de uma data e uma hora gravadas (vazio quando a MO não tem Período programado)."""
+    return " ".join(parte for parte in (str(data or "").strip(), str(hora or "").strip()) if parte)
+
+
 def doc_lib_listar_mo():
     """Um registro por MO, da mais recente para a mais antiga, no formato que o GRID espera (a chave "ateie_id" é o id do
     documento, nome herdado do GRID ATEIE; a MO tem uma só "linha", a de ordem 1)."""
@@ -19996,10 +20003,12 @@ def doc_lib_listar_mo():
                     "sequencia": doc["sequencia"], "status": doc["status"],
                     "email_enviado": doc_lib_texto_email_enviado(doc["email_enviado_em"])}
         if doc["status"] == STATUS_ATEIE_RESERVADO:      # só o número e a expressão MO RESERVADA; o resto em branco
-            registro.update(data="", classificacao="", emitente="", destinatario="", assunto=DOC_LIB_TEXTO_MO_RESERVADA,
-                            recebido="")
+            registro.update(prog_inicio="", prog_termino="", classificacao="", emitente="", destinatario="",
+                            assunto=DOC_LIB_TEXTO_MO_RESERVADA, recebido="")
         else:
-            registro.update(data=doc["data_envio"] or "", classificacao=doc["classificacao"] or "",
+            registro.update(prog_inicio=_doc_lib_data_hora_texto(doc["prev_data_inicio"], doc["prev_hora_inicio"]),
+                            prog_termino=_doc_lib_data_hora_texto(doc["prev_data_termino"], doc["prev_hora_termino"]),
+                            classificacao=doc["classificacao"] or "",
                             emitente=doc_lib_empresa_emitente_mo(doc), destinatario=doc_lib_empresa_emitente_mo(doc, True),
                             assunto=doc["assunto"] or "", recebido=doc["recebido_nome"] or "")
         resultado.append(registro)
@@ -20008,7 +20017,8 @@ def doc_lib_listar_mo():
 
 def doc_lib_cancelar_mo(mo_id, usuario, justificativa, revisao_esperada):
     """Cancela a MO: o número cancelado fica registrado e nunca é reaproveitado. Só cancela a MO em Em análise, Aguarda De
-    Acordo ou Aprovado para Execução; Em Execução, Concluído, Reservado e Cancelado não podem ser cancelados (ValueError). Devolve a nova revisão do documento. DocLibConflito se a MO mudou desde que foi aberta."""
+    Acordo ou Aprovado para Execução; Em Execução, Concluído, Reservado e Cancelado não podem ser cancelados (ValueError).
+    Devolve a nova revisão do documento. DocLibConflito se a MO mudou desde que foi aberta."""
     agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
     conexao = doc_lib_conectar(manual=True)
     cursor = conexao.cursor()
