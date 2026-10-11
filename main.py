@@ -16901,7 +16901,7 @@ def _garantir_tabelas_doc_lib_ai(cursor):
 def doc_lib_erros_datas_execucao_ai(item, gravado=None):
     """Regras de data da execução de um AI (item = linha da tabela), as mesmas do ATEIE:
       - 18.1 (data da liberação para manutenção) tem de ser IGUAL a 17.1 (data de início previsto);
-      - 18.5 (data da liberação para operação) não pode ser ANTERIOR a 17.3 (data de término previsto); posterior pode.
+      - 18.5 (data da liberação para operação) não pode ser ANTERIOR a 17.1 (data de início previsto); posterior pode.
     Um grupo que já está gravado e não foi alterado não é revalidado ('gravado' = linha como está no banco).
     Retorna [(campo, mensagem)]."""
     def valor(chave):
@@ -16920,11 +16920,11 @@ def doc_lib_erros_datas_execucao_ai(item, gravado=None):
         erros.append(("real_data_inicio",
                       f"a data da liberação para manutenção (18.1) deve ser igual à data de início previsto "
                       f"(17.1: {valor('prev_data_inicio')})."))
-    prog, real = dia(valor("prev_data_termino")), dia(valor("real_data_termino"))
+    prog, real = dia(valor("prev_data_inicio")), dia(valor("real_data_termino"))
     if prog and real and real < prog and not inalterado(DOC_LIB_CAMPOS_TERMINO):
         erros.append(("real_data_termino",
-                      f"a data da liberação para operação (18.5) não pode ser anterior à data de término previsto "
-                      f"(17.3: {valor('prev_data_termino')}); posterior pode."))
+                      f"a data da liberação para operação (18.5) não pode ser anterior à data de início previsto "
+                      f"(17.1: {valor('prev_data_inicio')}); posterior pode."))
     return erros
 
 
@@ -17014,7 +17014,7 @@ def doc_lib_salvar_ai(dados, usuario):
       (DocLibBloqueado se houver tentativa); só o restante dos campos 18.1 a 18.8 é gravado.
     - Depois da emissão o "De acordo" só recebe linhas novas, e os campos 18.1 a 18.8 só são aceitos depois que o
       "De acordo" estiver preenchido e salvo (DocLibBloqueado). Antes da emissão eles não podem ser informados.
-    - Datas da execução: 18.1 igual a 17.1; 18.5 não anterior a 17.3 (DocLibRegra).
+    - Datas da execução: 18.1 igual a 17.1; 18.5 não anterior a 17.1 (DocLibRegra).
     - O status de cada AI é recalculado a cada gravação (doc_lib_calcular_status).
     - Lança DocLibConflito se outra pessoa salvou o documento depois que ele foi aberto."""
     dados = doc_lib_normalizar_ai(dados)
@@ -19413,7 +19413,7 @@ class JanelaAI:
 # Tabela de controle de liberação (uso interno, só na tela: NÃO vai para o PDF), na parte inferior da janela, com uma só
 # linha por MO: Período programado da MO (Início e Término) e Período verificado nas tratativas em Tempo Real (Liberado e
 # Encerrado), com os mesmos campos e critérios das colunas de execução do ATEIE e do AI, mais a coluna "Sem contato",
-# o Status e o Cancelar. O botão MO-Referência abre uma MO nova com a Descrição preenchida com os dados da MO de origem.
+# o Status e o Cancelar. O botão MO-Referência abre uma MO nova com a Descrição da MO de origem.
 # Status da MO, na ordem do fluxo: Em análise (salva, documento ainda não gerado), Aguarda De Acordo (gerada, precisa do
 # De Acordo e ele ainda não foi preenchido), Aprovado para Execução (De Acordo preenchido), Em Execução (campos "Liberado" da
 # tabela preenchidos), Concluído (campos "Encerrado" preenchidos, botão "Sem contato" acionado ou MO meramente informativa),
@@ -19427,10 +19427,10 @@ DOC_LIB_TEXTO_MO_SEM_CONTATO = "Não houve contato em Tempo Real entre as empres
 DOC_LIB_TEXTO_MO_INFORMATIVA_TABELA = ("Mensagem Operativa meramente informativa: não há necessidade de contato em Tempo "
                                        "Real, por isso os campos do Período verificado nas tratativas em Tempo Real e o "
                                        "botão Sem contato ficam desabilitados.")
-# a MO pode ser cancelada depois de salva e até entrar em tratativa em Tempo Real (Em Execução); o número cancelado nunca é
-# reaproveitado. Concluído continua cancelável porque é o status da MO meramente informativa.
-DOC_LIB_STATUS_CANCELAVEIS_MO = (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_AGUARDA_DE_ACORDO, STATUS_ATEIE_APROVADO_EXECUCAO,
-                                 STATUS_ATEIE_CONCLUIDO)
+# como no ATEIE e no AI, a MO só pode ser cancelada antes de entrar em execução ("Em análise", "Aguarda De Acordo" ou
+# "Aprovado para Execução"): em execução ela só pode ser concluída; Concluído e Cancelado também não podem ser cancelados.
+# O número cancelado nunca é reaproveitado.
+DOC_LIB_STATUS_CANCELAVEIS_MO = (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_AGUARDA_DE_ACORDO, STATUS_ATEIE_APROVADO_EXECUCAO)
 # o botão MO-Referência vale para qualquer MO, menos a que ainda está Reservada (só tem o número)
 DOC_LIB_STATUS_SEM_REFERENCIA_MO = (STATUS_ATEIE_RESERVADO,)
 # Colunas da tabela de controle: (campo no banco, cabeçalho, descrição, tipo). Os campos do banco são os mesmos das colunas
@@ -19776,16 +19776,18 @@ def doc_lib_validar_mo(dados, atual=None):
             erros.append((("de_acordo_data",), "De acordo, Data: data inválida (use DD/MM/AAAA)."))
         if not vazio(dados.get("de_acordo_hora")) and not doc_lib_normalizar_hora(dados.get("de_acordo_hora")):
             erros.append((("de_acordo_hora",), "De acordo, Hora: hora inválida (use HH:MM)."))
-    erros += doc_lib_validar_tabela_controle_mo(dados)
+    erros += doc_lib_validar_tabela_controle_mo(dados, atual)
     return erros
 
 
-def doc_lib_validar_tabela_controle_mo(dados):
+def doc_lib_validar_tabela_controle_mo(dados, atual=None):
     """Valida a tabela de controle de liberação da MO. Retorna uma lista de (chaves_dos_campos, mensagem).
       - Período programado da MO: opcional, mas quando um dos quatro campos é preenchido os quatro são obrigatórios e o
         término não pode ser anterior ao início;
       - Período verificado nas tratativas em Tempo Real: campos opcionais com data e hora válidas (preenchimento parcial de
-        um grupo é aceito e só muda o status quando o grupo fica completo); o Encerrado não pode ser anterior ao Liberado."""
+        um grupo é aceito e só muda o status quando o grupo fica completo); o Encerrado não pode ser anterior ao Liberado e
+        a data do Encerrado não pode ser anterior à data de início programado (posterior pode). 'atual' é a MO como está
+        gravada: um Encerrado já gravado e não alterado não é revalidado contra o início programado."""
     erros = []
 
     def vazio(valor):
@@ -19824,6 +19826,15 @@ def doc_lib_validar_tabela_controle_mo(dados):
     if liberado and encerrado and encerrado < liberado:
         erros.append((("real_data_termino", "real_hora_termino"),
                       "Tratativas em Tempo Real: o Encerrado não pode ser anterior ao Liberado."))
+    encerrado_inalterado = atual is not None and all(
+        str(atual.get(chave) or "").strip() == str(dados.get(chave) or "").strip() for chave in DOC_LIB_CAMPOS_TERMINO)
+    inicio_programado = doc_lib_normalizar_data(dados.get("prev_data_inicio"))
+    data_encerrado = doc_lib_normalizar_data(dados.get("real_data_termino"))
+    if inicio_programado and data_encerrado and not encerrado_inalterado \
+            and datetime.strptime(data_encerrado, "%d/%m/%Y") < datetime.strptime(inicio_programado, "%d/%m/%Y"):
+        erros.append((("real_data_termino",),
+                      f"Encerrado, Data: não pode ser anterior à data de início programado "
+                      f"({doc_lib_normalizar_data(dados.get('prev_data_inicio'), True)}); posterior pode."))
     return erros
 
 
@@ -19987,8 +19998,8 @@ def doc_lib_listar_mo():
 
 
 def doc_lib_cancelar_mo(mo_id, usuario, justificativa, revisao_esperada):
-    """Cancela a MO: o número cancelado fica registrado e nunca é reaproveitado. Só não cancela a MO reservada e a que já está
-    cancelada (ValueError). Devolve a nova revisão do documento. DocLibConflito se a MO mudou desde que foi aberta."""
+    """Cancela a MO: o número cancelado fica registrado e nunca é reaproveitado. Só cancela a MO em Em análise, Aguarda De
+    Acordo ou Aprovado para Execução; Em Execução, Concluído, Reservado e Cancelado não podem ser cancelados (ValueError). Devolve a nova revisão do documento. DocLibConflito se a MO mudou desde que foi aberta."""
     agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
     conexao = doc_lib_conectar(manual=True)
     cursor = conexao.cursor()
@@ -20064,37 +20075,10 @@ def doc_lib_sem_contato_mo(mo_id, usuario, revisao_esperada):
 
 
 def doc_lib_texto_referencia_mo(doc):
-    """Texto da Descrição de uma MO aberta pelo botão MO-Referência: reúne todas as informações da MO de origem (número,
-    status, data, classificação, emitente, destinatário, recebido por, assunto, descrição, observações e De acordo), para
-    que a nova MO parta delas. O texto é só um ponto de partida: o campo Descrição continua totalmente editável."""
-    def valor(chave):
-        return str(doc.get(chave) or "").strip()
-
-    def pessoa(prefixo):
-        partes = [doc_lib_empresa_emitente_mo(doc, prefixo == "destinatario"), valor(f"{prefixo}_orgao"),
-                  valor(f"{prefixo}_nome")]
-        return " / ".join(parte for parte in partes if parte) or "-"
-
-    recebido = " - ".join(parte for parte in (valor("recebido_nome"), " às ".join(
-        parte for parte in (valor("recebido_data"), valor("recebido_hora")) if parte)) if parte) or "-"
-    if doc.get("informativa"):
-        de_acordo = DOC_LIB_TEXTO_MO_INFORMATIVA
-    elif doc_lib_de_acordo_mo_completo(doc):
-        de_acordo = f"{valor('de_acordo_nome')} - {valor('de_acordo_data')} às {valor('de_acordo_hora')}"
-    else:
-        de_acordo = "ainda não registrado"
-    linhas = [f"MO DE REFERÊNCIA: MO Nº COG-{valor('numero')} (status: {valor('status')})",
-              f"Data: {valor('data_envio') or '-'}",
-              f"Classificação: {valor('classificacao') or '-'}",
-              f"Emitente: {pessoa('emitente')}",
-              f"Destinatário: {pessoa('destinatario')}",
-              f"Recebido por: {recebido}",
-              f"Assunto: {valor('assunto') or '-'}",
-              ("Descrição:\n" if "\n" in valor("descricao") else "Descrição: ") + (valor("descricao") or "-")]
-    if valor("observacoes"):
-        linhas.append(f"Observações: {valor('observacoes')}")
-    linhas.append(f"De acordo: {de_acordo}")
-    return "\n".join(linhas)
+    """Texto do campo Descrição de uma MO aberta pelo botão MO-Referência: o texto da Descrição da MO de origem, exatamente
+    como ela foi gravada (sem número, cabeçalho ou qualquer outro dado da MO de origem). É só um ponto de partida: o campo
+    continua totalmente editável."""
+    return str(doc.get("descricao") or "")
 
 
 def doc_lib_reservar_mo(quantidade, usuario, nome_completo=""):
@@ -20744,7 +20728,7 @@ class JanelaMO:
       - depois de Editar ... campos liberados; Gerar Documento desabilitado até um novo Salvar
       - depois de Gerar .... MO emitida: só o De acordo e as tratativas em Tempo Real podem ser preenchidos
       - MO-Referência ...... habilitado em qualquer MO já salva, menos a Reservada: abre uma MO nova com a Descrição
-                             preenchida com os dados da MO aberta
+                             da MO aberta
     """
 
     def __init__(self, descricao_referencia=""):
@@ -21739,7 +21723,7 @@ class JanelaMO:
 
     def referencia(self):
         """Botão MO-Referência: reabre a janela da MO como se fosse aberta na fase inicial, para elaborar uma nova MO, com o
-        número previsto (só consumido ao salvar) e o campo Descrição preenchido com todas as informações da MO aberta. Os
+        número previsto (só consumido ao salvar) e o campo Descrição preenchido com a Descrição da MO aberta. Os
         demais campos ficam em branco e todos podem ser editados, inclusive a Descrição. Vale para qualquer status, menos
         Reservado."""
         titulo = "MO-Referência"
