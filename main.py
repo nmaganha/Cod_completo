@@ -19425,6 +19425,9 @@ class JanelaAI:
 # e do AI.
 DOC_LIB_CLASSIFICACOES_MO = ["Programado", "Urgência", "Emergência"]
 DOC_LIB_TEXTO_MO_INFORMATIVA = ("Mensagem Operativa meramente informativa, sem necessidade de obtenção do De Acordo")
+# Mensagem quando o Período programado da MO (campos obrigatórios da tabela de controle) não foi informado
+DOC_LIB_TEXTO_MO_PROGRAMADO_OBRIGATORIO = ("Período programado da MO: informe a data e a hora de início e de término "
+                                           "(campos obrigatórios).")
 # Mensagem fixada sob a tabela de controle quando o botão "Sem contato" é confirmado (ação irreversível)
 DOC_LIB_TEXTO_MO_SEM_CONTATO = "Não houve contato em Tempo Real entre as empresas envolvidas nesta MO"
 # Aviso sob a tabela de controle enquanto a MO é meramente informativa (não há contato em Tempo Real a registrar)
@@ -19790,8 +19793,9 @@ def doc_lib_validar_mo(dados, atual=None):
 
 def doc_lib_validar_tabela_controle_mo(dados, atual=None):
     """Valida a tabela de controle de liberação da MO. Retorna uma lista de (chaves_dos_campos, mensagem).
-      - Período programado da MO: opcional, mas quando um dos quatro campos é preenchido os quatro são obrigatórios e o
-        término não pode ser anterior ao início;
+      - Período programado da MO: OBRIGATÓRIO (data e hora de início e de término) enquanto a MO não foi emitida; o término
+        não pode ser anterior ao início. Depois da emissão o período fica protegido e não é mais exigido (MO antigas,
+        emitidas sem ele, continuam podendo gerar o documento);
       - Período verificado nas tratativas em Tempo Real: campos opcionais com data e hora válidas (preenchimento parcial de
         um grupo é aceito e só muda o status quando o grupo fica completo); o Encerrado não pode ser anterior ao Liberado e
         a data do Encerrado não pode ser anterior à data de início programado (posterior pode). 'atual' é a MO como está
@@ -19814,11 +19818,15 @@ def doc_lib_validar_tabela_controle_mo(dados, atual=None):
         return True
 
     tipos = {chave: tipo for chave, _, _, tipo in DOC_LIB_COLUNAS_TABELA_MO}
-    if any(not vazio(dados.get(chave)) for chave in DOC_LIB_CAMPOS_PROGRAMADOS):
+    obrigatorio = not bool((atual or {}).get("emitido"))         # emitida: o período está protegido e não muda mais
+    programado_vazio = all(vazio(dados.get(chave)) for chave in DOC_LIB_CAMPOS_PROGRAMADOS)
+    if obrigatorio and programado_vazio:
+        erros.append((tuple(DOC_LIB_CAMPOS_PROGRAMADOS), DOC_LIB_TEXTO_MO_PROGRAMADO_OBRIGATORIO))
+    elif not programado_vazio:
         for chave in DOC_LIB_CAMPOS_PROGRAMADOS:
             if vazio(dados.get(chave)):
                 erros.append(((chave,), f"{_DOC_LIB_NOMES_CAMPOS_MO[chave]}: preencha o campo (o Período programado da MO "
-                                        f"precisa de data e hora de início e de término)."))
+                                        f"é obrigatório: data e hora de início e de término)."))
             else:
                 formato(chave, _DOC_LIB_NOMES_CAMPOS_MO[chave], tipos[chave])
         inicio = _doc_lib_data_hora(dados.get("prev_data_inicio"), dados.get("prev_hora_inicio"))
@@ -19910,6 +19918,8 @@ def doc_lib_salvar_mo(dados, usuario):
     - Documento já EMITIDO (gerado): todos os campos ficam protegidos; só o "De acordo" pode ser preenchido, uma vez, e
       não numa MO meramente informativa, e os campos do Período verificado nas tratativas em Tempo Real (Liberado e
       Encerrado), depois que o De acordo estiver salvo (DocLibBloqueado se houver tentativa).
+    - MO ainda não emitida: o Período programado da MO (data e hora de início e de término) é OBRIGATÓRIO; sem os quatro
+      campos a MO não é salva e o número não é consumido (DocLibRegra).
     - O status é recalculado a cada gravação (doc_lib_calcular_status_mo).
     - Lança DocLibConflito se outra pessoa salvou o documento depois que ele foi aberto."""
     dados = doc_lib_normalizar_mo(dados)
@@ -19940,6 +19950,9 @@ def doc_lib_salvar_mo(dados, usuario):
                 cabecalho = "O Período verificado nas tratativas em Tempo Real não é aceito antes da geração do documento."
             raise DocLibBloqueado(cabecalho + "\n\nAlterações recusadas: " + "; ".join(bloqueadas) + ".")
 
+        if not emitido and not all(dados.get(chave) for chave in DOC_LIB_CAMPOS_PROGRAMADOS):
+            raise DocLibRegra(DOC_LIB_TEXTO_MO_PROGRAMADO_OBRIGATORIO + "\n\nA MO não pode ser salva sem o Período "
+                              "programado.")
         colunas_campos = list(DOC_LIB_CAMPOS_MO) + ["informativa"] + list(DOC_LIB_CAMPOS_DE_ACORDO_MO)
         if mo_id is None:
             sequencia = _doc_lib_consumir_numero(cursor, "MO", agora.year)
@@ -21073,8 +21086,9 @@ class JanelaMO:
         Label(quadro, text="Controle de liberação da MO", bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 11, "bold"),
               anchor="w").pack(fill=X, padx=16, pady=(12, 0))
         Label(quadro, text="Controle interno do COG: esta tabela só existe na tela e não vai para o documento em PDF. "
-                           "Depois do De acordo, registre o Período verificado nas tratativas em Tempo Real (Liberado e "
-                           "Encerrado). Se não houve contato em Tempo Real entre as empresas, use o botão Sem contato.",
+                           "O Período programado da MO é obrigatório para salvar. Depois do De acordo, registre o Período "
+                           "verificado nas tratativas em Tempo Real (Liberado e Encerrado). Se não houve contato em Tempo "
+                           "Real entre as empresas, use o botão Sem contato.",
               bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left", wraplength=1100
               ).pack(fill=X, padx=16, pady=(2, 8))
 
@@ -21091,7 +21105,7 @@ class JanelaMO:
         subcabecalho = dict(bg="#2F5F9E", fg="white", font=(SGA_FONTE, 9, "bold"))
         rotulo_coluna = dict(bg="#DCE8F8", fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"))
         Label(tabela, text="MO\nNº COG", **cabecalho).grid(row=0, column=0, rowspan=3, sticky="nsew", padx=1, pady=1)
-        Label(tabela, text="Período programado da MO:", wraplength=300, **cabecalho
+        Label(tabela, text="Período programado da MO (obrigatório):", wraplength=300, **cabecalho
               ).grid(row=0, column=1, columnspan=4, sticky="nsew", padx=1, pady=1)
         Label(tabela, text="Período verificado nas tratativas em Tempo Real:", **cabecalho
               ).grid(row=0, column=5, columnspan=8, sticky="nsew", padx=1, pady=1)
