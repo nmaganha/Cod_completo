@@ -12037,9 +12037,9 @@ DOC_LIB_DESTINATARIOS_INICIAIS = [
 
 # Texto padrão do campo "Observações": obrigatório em todos os documentos (entra já preenchido no formulário)
 DOC_LIB_TEXTO_PADRAO_OBSERVACOES = (
-    "Bloquear ou manter bloqueado o religamento automático de todos os disjuntores que alimentam os "
-    "equipamentos de interligação sob intervenção, condicionando qualquer religamento manual ao prévio contato "
-    "e à autorização do COG-Alupar.")
+    "Durante todo o período da intervenção (do início ao término dos serviços), o religamento automático dos "
+    "disjuntores que alimentam os equipamentos envolvidos deve permanecer bloqueado. O religamento manual, destes "
+    "disjuntores, fica condicionado à prévia autorização do COG-Alupar.")
 # campos do formulário sempre apresentados em caixa alta (tela, lista e PDF), qualquer que seja a digitação
 DOC_LIB_CAMPOS_CAIXA_ALTA = ("equipamento", "empresa", "empresa_outra", "local")
 DOC_LIB_LIMITE_NOTIFICACOES = 3        # linhas de "De acordo" (Pessoas/Áreas notificadas)
@@ -12715,10 +12715,9 @@ def doc_lib_salvar_ateie(dados, usuario):
         bloqueadas = doc_lib_diferencas_bloqueadas(atual or {}, dados, emitido)
         if bloqueadas:
             if emitido:
-                cabecalho = ("Este ATEIE já foi emitido (documento gerado). Só podem ser alterados: o De acordo "
-                             "(novas linhas) e as colunas 6 a 13 da tabela de intervenções (depois que o De acordo "
-                             "estiver preenchido e salvo); o início efetivo (6 a 9) ou o término efetivo (10 a 13) "
-                             "já salvo não muda mais.")
+                cabecalho = ("Este ATEIE já foi gerado. Só pode ser alterado o campo: De acordo "
+                             "As colunas de Liberação e Normalização só podem ser editadas depois do "
+                             "campo De Acordo estiver preenchido e salvo.")
             else:
                 cabecalho = "Dados de execução não são aceitos antes da geração do documento."
             raise DocLibBloqueado(cabecalho + "\n\nAlterações recusadas: " + "; ".join(bloqueadas) + ".")
@@ -12883,9 +12882,7 @@ def doc_lib_listar_ateie():
 
 def doc_lib_cancelar_intervencao(ateie_id, ordem, usuario, justificativa, revisao_esperada):
     """Cancela SOMENTE o ATEIE (intervenção) indicado: os demais ATEIE do mesmo documento continuam com o
-    status que tinham. O número cancelado fica registrado e nunca é reaproveitado. Só é possível cancelar um
-    ATEIE "Em análise", "Aguarda De Acordo" ou "Aprovado para Execução": em execução ele somente pode ser concluído, e concluído ou já cancelado
-    não cancela (ValueError). Devolve a nova revisão do documento."""
+    status que tinham."""
     agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
     conexao = doc_lib_conectar(manual=True)
     cursor = conexao.cursor()
@@ -13951,7 +13948,7 @@ def doc_lib_gerar_pdf_ateie(doc, caminho, gerado_por="", para_envio=False):
     pdf.set_xy(X0, yt + 7.0)
     pdf.cell(larg_col[0], 5.0, "ATEIE", align="C")
     pdf.set_xy(X0, yt + 12.0)
-    pdf.cell(larg_col[0], 5.0, "Nº", align="C")
+    pdf.cell(larg_col[0], 5.0, "Nº COG", align="C")
 
     def titulo_centralizado(x_ini, x_fim, y_base, numero, texto, tamanho):
         largura = (largura_texto(f"{numero}.", "I", tamanho * 0.62) if numero else 0) + largura_texto(texto, "I", tamanho)
@@ -15872,7 +15869,7 @@ class JanelaAteie:
         cabecalho = dict(bg=SGA_AZUL, fg="white", font=(SGA_FONTE, 9, "bold"))
         subcabecalho = dict(bg="#2F5F9E", fg="white", font=(SGA_FONTE, 9, "bold"))
         rotulo_coluna = dict(bg="#DCE8F8", fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"))
-        Label(tabela, text="ATEIE\nNº", **cabecalho).grid(row=0, column=0, rowspan=4, sticky="nsew", padx=1, pady=1)
+        Label(tabela, text="ATEIE\nNº COG", **cabecalho).grid(row=0, column=0, rowspan=4, sticky="nsew", padx=1, pady=1)
         Label(tabela, text="Período dos Serviços", **cabecalho).grid(row=0, column=1, columnspan=12, sticky="nsew",
                                                                     padx=1, pady=1)
         Label(tabela, text="Previsto", **cabecalho).grid(row=1, column=1, columnspan=4, sticky="nsew", padx=1, pady=1)
@@ -18020,7 +18017,7 @@ def doc_lib_gerar_pdf_ai(doc, caminho, gerado_por="", para_envio=False):
     pdf.cell(larg_col[0], 6.0, "AI", align="C")
     pdf.set_font("DejaVuC", "", 10)
     pdf.set_xy(X0, yt + 16.0)
-    pdf.cell(larg_col[0], 4.0, "Nº", align="C")
+    pdf.cell(larg_col[0], 4.0, "Nº COG", align="C")
 
     def titulo_centralizado(x_ini, x_fim, y_base, numero, texto, tamanho, estilo="I"):
         largura = (largura_texto(f"{numero}.", "I", tamanho * 0.62) if numero else 0) + largura_texto(texto, estilo, tamanho)
@@ -18537,7 +18534,7 @@ class JanelaAI:
         cabecalho = dict(bg=SGA_AZUL, fg="white", font=(SGA_FONTE, 9, "bold"))
         subcabecalho = dict(bg="#2F5F9E", fg="white", font=(SGA_FONTE, 9, "bold"))
         rotulo_coluna = dict(bg="#DCE8F8", fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"))
-        Label(tabela, text="AI\nNº", **cabecalho).grid(row=0, column=0, rowspan=3, sticky="nsew", padx=1, pady=1)
+        Label(tabela, text="AI\nNº COG", **cabecalho).grid(row=0, column=0, rowspan=3, sticky="nsew", padx=1, pady=1)
         Label(tabela, text="17. Período Total Previsto para os Impedimentos", wraplength=420, **cabecalho
               ).grid(row=0, column=1, columnspan=4, sticky="nsew", padx=1, pady=1)
         Label(tabela, text="18. Período Verificado na Execução dos Serviços", **cabecalho
@@ -21093,7 +21090,7 @@ class JanelaMO:
         cabecalho = dict(bg=SGA_AZUL, fg="white", font=(SGA_FONTE, 9, "bold"))
         subcabecalho = dict(bg="#2F5F9E", fg="white", font=(SGA_FONTE, 9, "bold"))
         rotulo_coluna = dict(bg="#DCE8F8", fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"))
-        Label(tabela, text="MO\nNº", **cabecalho).grid(row=0, column=0, rowspan=3, sticky="nsew", padx=1, pady=1)
+        Label(tabela, text="MO\nNº COG", **cabecalho).grid(row=0, column=0, rowspan=3, sticky="nsew", padx=1, pady=1)
         Label(tabela, text="Período programado da MO:", wraplength=300, **cabecalho
               ).grid(row=0, column=1, columnspan=4, sticky="nsew", padx=1, pady=1)
         Label(tabela, text="Período verificado nas tratativas em Tempo Real:", **cabecalho
