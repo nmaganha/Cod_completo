@@ -20982,7 +20982,7 @@ class JanelaMO:
         self._nova_linha(rot, self.lbl_numero)
 
         # 2. Data (do envio da MO, dd/mm/aa, com calendário)
-        rot = self._rotulo("Data (envio da MO)")
+        rot = self._rotulo("Data (emissão da MO)")
         quadro = Frame(card, bg=SGA_CARD)
         self.ent_data, icone = self._entrada_com_data(quadro, True)
         Label(quadro, text="(dd/mm/aa)", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).pack(side=LEFT, padx=(8, 0))
