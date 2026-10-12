@@ -10876,6 +10876,7 @@ SGA_ESTILOS_BOTAO = {
     "aviso": ("#CC8400", "#A86D00", "white"),
     "neutro": ("#E3E8EF", "#D0D7E2", SGA_TEXTO),
     "agendar": ("#5E35B1", "#4A2A8C", "white"),
+    "voltar": ("#145BE8", "#1049BA", "white"),         # botão Voltar do Click_25 (ATEIE, AI e MO)
 }
 
 
@@ -14634,7 +14635,7 @@ class JanelaListaAteie:
         if self.PERMITE_AGRUPAR:
             botoes.append((f"Agrupar {self.PLURAL}", self.agrupar, "aviso", 170))
         botoes += [("Marcar e-mail enviado", self.marcar_email_enviado, "agendar", 230),
-                   ("Voltar", janela.destroy, "neutro", 120)]
+                   ("Voltar", janela.destroy, "voltar", 120)]
         x_botao = -(sum(b[3] for b in botoes) + 10 * (len(botoes) - 1)) // 2 - 5      # botões centralizados
         for texto_botao, comando, estilo_botao, largura_botao in botoes:
             doc_lib_criar_botao(janela, texto_botao, comando, estilo_botao
@@ -15107,7 +15108,7 @@ def doc_lib_dialogo_reserva(parent, usuario, nome_completo="", rotulo="ATEIE", t
     atualizar_previsao()
     doc_lib_criar_botao(janela, "Reservar", reservar, "aviso"
                         ).place(relx=0.5, x=-145, rely=1.0, y=-22, anchor="sw", width=140, height=42)
-    doc_lib_criar_botao(janela, "Voltar", janela.destroy, "neutro"
+    doc_lib_criar_botao(janela, "Voltar", janela.destroy, "voltar"
                         ).place(relx=0.5, x=5, rely=1.0, y=-22, anchor="sw", width=140, height=42)
     janela.bind("<Return>", reservar)
     janela.bind("<Escape>", lambda evento: janela.destroy())
@@ -15836,7 +15837,7 @@ class JanelaAteie:
 
     def _montar_rodape(self):
         rodape = criar_rodape_sga(self.janela)
-        self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "neutro")
+        self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "voltar")
         self.btn_salvar = doc_lib_criar_botao(rodape, "Salvar", self.salvar, "sucesso")
         self.btn_editar = doc_lib_criar_botao(rodape, "Editar", self.editar, "aviso")
         self.btn_gerar = doc_lib_criar_botao(rodape, "Gerar Documento", self.gerar, "primario")
@@ -18478,7 +18479,7 @@ class JanelaAI:
 
     def _montar_rodape(self):
         rodape = criar_rodape_sga(self.janela)
-        self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "neutro")
+        self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "voltar")
         self.btn_salvar = doc_lib_criar_botao(rodape, "Salvar", self.salvar, "sucesso")
         self.btn_editar = doc_lib_criar_botao(rodape, "Editar", self.editar, "aviso")
         self.btn_gerar = doc_lib_criar_botao(rodape, "Gerar Documento", self.gerar, "primario")
@@ -21153,7 +21154,7 @@ class JanelaMO:
 
     def _montar_rodape(self):
         rodape = criar_rodape_sga(self.janela)
-        self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "neutro")
+        self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "voltar")
         self.btn_salvar = doc_lib_criar_botao(rodape, "Salvar", self.salvar, "sucesso")
         self.btn_editar = doc_lib_criar_botao(rodape, "Editar", self.editar, "aviso")
         self.btn_gerar = doc_lib_criar_botao(rodape, "Gerar Documento", self.gerar, "primario")
