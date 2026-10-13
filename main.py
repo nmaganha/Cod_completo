@@ -1,4 +1,4 @@
-# Código atualizado em 11-10-26 - 1601 - Click_25: (Ajuste na MO, ATEIE e AI)
+# Código atualizado em 12-10-26 - 2132 - Click_25: (Ajuste na MO, ATEIE e AI)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
