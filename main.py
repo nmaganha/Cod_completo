@@ -12006,7 +12006,8 @@ DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
 # Para incluir outro emitente basta acrescentá-lo à lista. Como o e-mail é enviado (SMTP ou Outlook) é definido no
 # arquivo local config_email_ateie.json (modelo: config_email_ateie.exemplo.json). Esse arquivo NÃO vai para o GitHub
 # porque pode conter senha.
-EMAIL_ATEIE_REMETENTES = ["nmaganha@alupar.com.br", "jbarros@alupar.com.br"]
+EMAIL_ATEIE_REMETENTES = ["nmaganha@alupar.com.br", "jbarros@alupar.com.br",
+                          "preoperacao@alupar.com.br", "temporeal@alupar.com.br"]
 EMAIL_ATEIE_REMETENTE = EMAIL_ATEIE_REMETENTES[0]          # remetente padrão
 ARQUIVO_CONFIG_EMAIL_ATEIE = os.path.join(PASTA_BASE, "config_email_ateie.json")
 # Pasta onde o botão Encaminhar ATEIE guarda uma cópia do PDF que será anexado ao e-mail (para enviar manualmente se
