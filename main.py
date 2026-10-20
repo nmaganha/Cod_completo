@@ -1,4 +1,4 @@
-# Código atualizado em 12-10-26 - 2132 - Click_25: (Ajuste na MO, ATEIE e AI)
+# Código atualizado em 13-10-26 - 1902 - Click_25: (MO-Referência com Assunto, data do término previsto do ATEIE e botões NOVA ATEIE/AI/MO)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -12006,7 +12006,8 @@ DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
 # Para incluir outro emitente basta acrescentá-lo à lista. Como o e-mail é enviado (SMTP ou Outlook) é definido no
 # arquivo local config_email_ateie.json (modelo: config_email_ateie.exemplo.json). Esse arquivo NÃO vai para o GitHub
 # porque pode conter senha.
-EMAIL_ATEIE_REMETENTES = ["nmaganha@alupar.com.br", "jbarros@alupar.com.br"]
+EMAIL_ATEIE_REMETENTES = ["nmaganha@alupar.com.br", "jbarros@alupar.com.br",
+                          "preoperacao@alupar.com.br", "temporeal@alupar.com.br"]
 EMAIL_ATEIE_REMETENTE = EMAIL_ATEIE_REMETENTES[0]          # remetente padrão
 ARQUIVO_CONFIG_EMAIL_ATEIE = os.path.join(PASTA_BASE, "config_email_ateie.json")
 # Pasta onde o botão Encaminhar ATEIE guarda uma cópia do PDF que será anexado ao e-mail (para enviar manualmente se
@@ -12570,6 +12571,24 @@ def doc_lib_numeros_previstos(quantidade, tipo="ATEIE"):
     finally:
         conexao.close()
     return [doc_lib_formatar_numero(ultimo + posicao, ano) for posicao in range(1, quantidade + 1)]
+
+
+def doc_lib_erros_datas_programadas(item, gravado=None):
+    """Regra de data do período previsto de um ATEIE (item = linha da tabela): a data do término previsto (coluna 4)
+    não pode ser diferente da data do início previsto (coluna 2). Uma linha já gravada cujas duas datas não foram
+    alteradas não é revalidada ('gravado' = linha como está no banco). Retorna [(campo, mensagem)]."""
+    def valor(chave):
+        return str(item.get(chave) or "").strip()
+
+    chaves = ("prev_data_inicio", "prev_data_termino")
+    if gravado is not None and all(str(gravado.get(c) or "").strip() == valor(c) for c in chaves):
+        return []
+    inicio, termino = doc_lib_normalizar_data(valor("prev_data_inicio")), doc_lib_normalizar_data(valor("prev_data_termino"))
+    if inicio and termino and inicio != termino:
+        return [("prev_data_termino",
+                 f"a data de término previsto (coluna 4) deve ser igual à data de início previsto "
+                 f"(coluna 2: {valor('prev_data_inicio')}).")]
+    return []
 
 
 def doc_lib_erros_datas_execucao(item, gravado=None):
@@ -13615,6 +13634,11 @@ def doc_lib_validar_ateie(dados, atual=None):
             erros.append(((f"interv:{ordem}:prev_data_termino", f"interv:{ordem}:prev_hora_termino"),
                           f"{titulo}: o término programado não pode ser anterior ao início programado."))
 
+        # a data do término previsto (coluna 4) tem de ser igual à data do início previsto (coluna 2); uma linha já
+        # gravada cujas duas datas não mudaram não é revalidada (ATEIE antigo)
+        for erro in doc_lib_erros_datas_programadas(valores, gravadas.get(ordem)):
+            erros.append(((f"interv:{ordem}:{erro[0]}",), f"{titulo}: {erro[1]}"))
+
         for chave_data, chave_hora, nome in (("real_data_inicio", "real_hora_inicio", "início efetivo"),
                                              ("real_data_termino", "real_hora_termino", "término efetivo")):
             if bool(valores[chave_data]) != bool(valores[chave_hora]):
@@ -14631,7 +14655,8 @@ class JanelaListaAteie:
         self.contador.place(x=24, rely=1.0, y=-30, anchor="sw")
 
         self.busca_var.trace_add("write", lambda *args: self.aplicar())
-        botoes = [("Abrir", self.abrir, "primario", 120)]
+        botoes = [("Abrir", self.abrir, "primario", 120),
+                  (f"NOVA {self.ROTULO}", self.nova, "sucesso", 150)]
         if self.PERMITE_AGRUPAR:
             botoes.append((f"Agrupar {self.PLURAL}", self.agrupar, "aviso", 170))
         botoes += [("Marcar e-mail enviado", self.marcar_email_enviado, "agendar", 230),
@@ -14831,6 +14856,41 @@ class JanelaListaAteie:
             return
         self.resultado = escolha
         self.janela.destroy()
+
+    @staticmethod
+    def _criar_documento():
+        """Abre a janela "COG-DOC_LIB - ATEIE" em branco (as subclasses trocam pela janela do AI e da MO)."""
+        return JanelaAteie()
+
+    def nova(self):
+        """Botão NOVA ATEIE / NOVA AI / NOVA MO: fecha o GRID e abre a janela do documento em branco, para elaborar um novo
+        documento (a mesma janela aberta pelo menu Doc_Lib.). O GRID é aberto a partir da janela de um documento: essa janela
+        é substituída pela nova, no mesmo lugar e no mesmo tamanho. As alterações não salvas dela já foram confirmadas antes
+        de o GRID abrir (botão GRID)."""
+        documento = self.parent                       # janela do documento que abriu o GRID
+        geometria = None
+        try:
+            if documento is not root and documento.winfo_exists():
+                geometria = documento.geometry()
+        except TclError:
+            documento = None
+        self.resultado = None
+        self.janela.destroy()
+        try:
+            nova = self._criar_documento()
+        except Exception as erro:
+            messagebox.showerror(f"NOVA {self.ROTULO}", f"Não foi possível abrir a janela do {self.ROTULO}: {erro}")
+            return
+        try:
+            if geometria:
+                nova.janela.geometry(geometria)
+        except (TclError, AttributeError):
+            pass
+        try:
+            if geometria and documento is not None and documento.winfo_exists():
+                documento.destroy()
+        except TclError:
+            pass
 
     def marcar_email_enviado(self):
         """Marca na coluna "Enviado e-mail" os documentos selecionados (Ctrl+clique ou Shift+clique para vários) como
@@ -16041,8 +16101,28 @@ class JanelaAteie:
                     self._marcar(entrada)         # formato inválido: destaca já, sem esperar o Salvar
         except TclError:
             return
+        self._copiar_data_inicio_para_termino(entrada)
         if atualiza_numeracao:
             self._atualizar_numeracao_provisoria()
+
+    def _copiar_data_inicio_para_termino(self, entrada):
+        """Ao informar a data do início previsto (coluna 2), copia-a para a data do término previsto (coluna 4) da mesma
+        linha: as duas datas têm de ser iguais. O usuário não precisa digitar a coluna 4 (se alterar a coluna 2, a coluna 4
+        acompanha). Só copia uma data válida e só se a coluna 4 estiver liberada para edição."""
+        try:
+            indice_inicio = self.indice_coluna["prev_data_inicio"]
+            indice_termino = self.indice_coluna["prev_data_termino"]
+            for linha in self.celulas:
+                if linha[indice_inicio] is not entrada:
+                    continue
+                destino = linha[indice_termino]
+                nova = doc_lib_normalizar_data(entrada.get().strip(), True)
+                if nova and str(destino.cget("state")) == "normal" and destino.get().strip() != nova:
+                    doc_lib_definir_entrada(destino, nova)
+                    self._limpar_marca(destino)
+                break
+        except (TclError, AttributeError, KeyError):
+            return
 
     def abrir_calendario(self, entrada, ano_curto, entrada_hora=None):
         """Abre o calendário do campo de data. Com 'entrada_hora' (campo "Hora" de Pessoal Notificado), depois de
@@ -16054,6 +16134,7 @@ class JanelaAteie:
         if entrada_hora is not None and str(entrada_hora.cget("state")) == "normal" and not entrada_hora.get().strip():
             doc_lib_definir_entrada(entrada_hora, datetime.now().strftime("%H:%M"))
             self._limpar_marca(entrada_hora)
+        self._copiar_data_inicio_para_termino(entrada)
         if entrada in self._celulas_programadas():
             self._atualizar_numeracao_provisoria()
         self._ao_alterar_execucao()
@@ -18226,6 +18307,10 @@ class JanelaListaAI(JanelaListaAteie):
     ROTULO = "AI"
     PLURAL = "AIs"
     COLUNAS = DOC_LIB_COLUNAS_LISTA_AI
+
+    @staticmethod
+    def _criar_documento():
+        return JanelaAI()
 
     @staticmethod
     def _listar():
@@ -20785,6 +20870,10 @@ class JanelaListaMO(JanelaListaAteie):
     COLUNAS_COM_QUEBRA = ("assunto",)
 
     @staticmethod
+    def _criar_documento():
+        return JanelaMO()
+
+    @staticmethod
     def _listar():
         return doc_lib_listar_mo()
 
@@ -20823,11 +20912,11 @@ class JanelaMO:
       - depois de Salvar ... campos travados; Editar e Gerar Documento habilitados; Salvar desabilitado
       - depois de Editar ... campos liberados; Gerar Documento desabilitado até um novo Salvar
       - depois de Gerar .... MO emitida: só o De acordo e as tratativas em Tempo Real podem ser preenchidos
-      - MO-Referência ...... habilitado em qualquer MO já salva, menos a Reservada: abre uma MO nova com a Descrição
-                             da MO aberta
+      - MO-Referência ...... habilitado em qualquer MO já salva, menos a Reservada: abre uma MO nova com o Assunto e a
+                             Descrição da MO aberta
     """
 
-    def __init__(self, descricao_referencia=""):
+    def __init__(self, descricao_referencia="", assunto_referencia=""):
         self.mo_id = None
         self.revisao = None
         self.numero = ""              # número da MO (vazio enquanto ela é nova; depois do primeiro Salvar nunca muda)
@@ -20851,6 +20940,7 @@ class JanelaMO:
         self.celulas = {}             # campo da tabela de controle -> Entry
         self._grupo_salvo = {"inicio": False, "termino": False}   # Liberado / Encerrado já salvos por completo (travados)
         self.descricao_referencia = descricao_referencia          # Descrição inicial de uma MO aberta pelo MO-Referência
+        self.assunto_referencia = assunto_referencia              # Assunto inicial de uma MO aberta pelo MO-Referência
 
         self.janela = Toplevel(root)
         self.janela.title('COG - DOC_LIB. - MO')
@@ -20868,8 +20958,10 @@ class JanelaMO:
         self._montar_formulario()
         self._montar_tabela()
         self._montar_rodape()
-        if descricao_referencia:      # MO-Referência: só a Descrição vem preenchida; os demais campos ficam em branco
+        if descricao_referencia:      # MO-Referência: só a Descrição e o Assunto vêm preenchidos; os demais ficam em branco
             self._definir_texto(self.txt_descricao, descricao_referencia)
+        if assunto_referencia:        # o Assunto é sempre em caixa alta (como no carregamento de uma MO gravada)
+            self._definir_texto(self.txt_assunto, assunto_referencia.upper())
         self._atualizar_numero_provisorio()
         self._aplicar_bloqueios()
         self._atualizar_estado()
@@ -21820,9 +21912,9 @@ class JanelaMO:
 
     def referencia(self):
         """Botão MO-Referência: reabre a janela da MO como se fosse aberta na fase inicial, para elaborar uma nova MO, com o
-        número previsto (só consumido ao salvar) e o campo Descrição preenchido com a Descrição da MO aberta. Os
-        demais campos ficam em branco e todos podem ser editados, inclusive a Descrição. Vale para qualquer status, menos
-        Reservado."""
+        número previsto (só consumido ao salvar) e os campos Assunto e Descrição preenchidos com os da MO aberta. Os
+        demais campos ficam em branco e todos podem ser editados, inclusive o Assunto e a Descrição. Vale para qualquer
+        status, menos Reservado."""
         titulo = "MO-Referência"
         if self.mo_id is None or self.status in DOC_LIB_STATUS_SEM_REFERENCIA_MO:
             return
@@ -21843,7 +21935,8 @@ class JanelaMO:
                                            f"como referência.", parent=self.janela)
             return
         geometria = self.janela.geometry()
-        nova = JanelaMO(descricao_referencia=doc_lib_texto_referencia_mo(doc))
+        nova = JanelaMO(descricao_referencia=doc_lib_texto_referencia_mo(doc),
+                        assunto_referencia=(doc.get("assunto") or "").strip())
         try:
             nova.janela.geometry(geometria)          # a nova MO abre no mesmo lugar e no mesmo tamanho desta janela
         except TclError:
