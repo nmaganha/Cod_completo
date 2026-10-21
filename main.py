@@ -1,4 +1,4 @@
-# Código atualizado em 20-10-26 - 2207 - Click_25: (destinatário do e-mail pré-selecionado, Órgão/Setor com Operação e sem a opção OUTRA nas empresas solicitantes)
+# Código atualizado em 21-10-26 - 1637 - (Alterado nome página principal para SIGO)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -12000,7 +12000,7 @@ DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE = ["FOZ DO RIO CLARO ENERGIA SA", "IJUÍ ENE
                                        "FERREIRA GOMES ENERGIA SA", "ENERGIA DOS VENTOS SA",
                                        "EÓLICA DO AGRESTE POTIGUAR SA", "VERDE 08 ENERGIA SA"]  # combobox "Empresa Solicitante"
 DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "ENGIE", "CELEO_REDES", "ENERGISA", "ISA ENERGIA BRASIL SA", "CBA", "EQUATORIAL",
-                                      "CPFL-RGE", "ARGO", "CIMY", "OUTRA"]         # combobox "Empresa" de "Pessoal Notificado"
+                                      "CPFL-RGE", "ARGO", "CIMY", "WEG", "OUTRA"]         # combobox "Empresa" de "Pessoal Notificado"
 DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
 # Texto que já vem nos campos "Órgão" (MO) e "Setor" (Pessoal Notificado do ATEIE e do AI) de um documento novo, para evitar
 # a digitação: na grande maioria dos casos é a área de Operação. Quando não for, o emitente altera o campo.
@@ -12011,14 +12011,14 @@ DOC_LIB_TEXTO_PADRAO_OPERACAO = "Operação"
 # Para incluir outro emitente basta acrescentá-lo à lista. Como o e-mail é enviado (SMTP ou Outlook) é definido no
 # arquivo local config_email_ateie.json (modelo: config_email_ateie.exemplo.json). Esse arquivo NÃO vai para o GitHub
 # porque pode conter senha.
-EMAIL_ATEIE_REMETENTES = ["nmaganha@alupar.com.br", "preoperacao@alupar.com.br"]
+EMAIL_ATEIE_REMETENTES = ["preoperacao@alupar.com.br", "temporeal@alupar.com.br"]
 EMAIL_ATEIE_REMETENTE = EMAIL_ATEIE_REMETENTES[0]          # remetente padrão
-ARQUIVO_CONFIG_EMAIL_ATEIE = os.path.join(PASTA_BASE, "config_email_ateie.json")
+ARQUIVO_CONFIG_EMAIL_ATEIE = os.path.join(PASTA_BASE, "config_email_ateie.exemplo.json")
 # Pasta onde o botão Encaminhar ATEIE guarda uma cópia do PDF que será anexado ao e-mail (para enviar manualmente se
 # o envio falhar). None = pasta Downloads do usuário no Windows. Para usar outra, informe o caminho, por exemplo
 #     PASTA_DOWNLOAD_ATEIE = r"C:\Users\nmaganha\Downloads"
 PASTA_DOWNLOAD_ATEIE = None
-EMAIL_ATEIE_ASSUNTO = "ATEIE - Para análise e De Acordo"
+EMAIL_ATEIE_ASSUNTO = "TESTE DE ENVIO DE E-MAIL (ATEIE - Para análise e De Acordo) TESTE DE E-MAIL"
 EMAIL_ATEIE_TEXTO = ("Prezados,\n\n"
                      "Segue para análise e o De Acordo o(s) ATEIEs números: {numeros}.\n\n"
                      "Atenciosamente,\n"
@@ -16844,7 +16844,7 @@ DOC_LIB_LIMITE_PESSOAL_AI = 3                    # linhas de "Pessoal Notificado
 DOC_LIB_LINHAS_INTERVENCOES_AI = 10              # AIs (linhas da tabela 17/18) por documento
 # Texto exibido no GRID AI, em "Equipamento a Impedir", enquanto o registro permanece reservado
 DOC_LIB_TEXTO_EQUIPAMENTO_RESERVADO_AI = "AI RESERVADO"
-EMAIL_AI_ASSUNTO = "AI - Para análise e De Acordo"
+EMAIL_AI_ASSUNTO = "TESTE DE ENVIO DE E-MAIL - AI - Para análise e De Acordo"
 EMAIL_AI_TEXTO = ("Prezados,\n\n"
                   "Segue para análise e o De Acordo o(s) AIs números: {numeros}.\n\n"
                   "Atenciosamente,\n"
@@ -19572,12 +19572,12 @@ DOC_LIB_COLUNAS_NOVAS_MO = (
 DOC_LIB_TEXTO_MO_RESERVADA = "MO RESERVADA"        # exibido no GRID MO, em Assunto, enquanto a MO está reservada
 DOC_LIB_PAGINAS_DESCRICAO_MO = 30                  # previsão do campo 9 Descrição (texto livre de até 30 páginas)
 DOC_LIB_ESPACO_ANTES_PARAGRAFO = "6p"              # espaço antes de cada parágrafo da Descrição (6 pt; o PDF usa o mesmo valor)
-EMAIL_MO_ASSUNTO = "MO - Para análise e De Acordo"
+EMAIL_MO_ASSUNTO = "TESTE DE ENVIO DE E-MAIL - MO - Para análise e De Acordo"
 EMAIL_MO_TEXTO = ("Prezados,\n\n"
                   "Segue para análise e o De Acordo a(s) MOs números: {numeros}.\n\n"
                   "Atenciosamente,\n"
                   "COG-ALUPAR")
-EMAIL_MO_ASSUNTO_INFORMATIVA = "MO - Para conhecimento"
+EMAIL_MO_ASSUNTO_INFORMATIVA = "TESTE DE ENVIO DE E-MAIL - MO - Para conhecimento"
 EMAIL_MO_TEXTO_INFORMATIVA = ("Prezados,\n\n"
                               "Segue, para conhecimento, a(s) MOs números: {numeros}.\n\n"
                               + DOC_LIB_TEXTO_MO_INFORMATIVA + ".\n\n"
@@ -22543,7 +22543,7 @@ def cmd_click_cadastrar_usuario():
 # CONFIGURAÇÃO DA JANELA PRINCIPAL
 # ---------------------------------------------------
 root = Tk()
-root.title('COG-ALUPAR - TROCA DE TURNO')
+root.title('SIGO - SISTEMA INTEGRADADO DE GESTÃO DA OPERAÇÃO - COG-ALUPAR')
 root.geometry('1539x780')
 root.resizable(True, True)
 root['bg'] = '#024593'
