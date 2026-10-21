@@ -1,4 +1,4 @@
-# Código atualizado em 20-10-26 - 2115 - Click_25: (MO-Referência com Assunto, data do término previsto do ATEIE e botões NOVA ATEIE/AI/MO)
+# Código atualizado em 20-10-26 - 2207 - Click_25: (destinatário do e-mail pré-selecionado, Órgão/Setor com Operação e sem a opção OUTRA nas empresas solicitantes)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -11993,13 +11993,18 @@ LOGO_ATEIE = os.path.join(PASTA_BASE, "logo_ateie.png")
 
 # Empresas do ATEIE: duas listas independentes (hoje com os mesmos nomes), porque as empresas que solicitam o ATEIE
 # são diferentes das empresas que recebem a notificação. Para alterar uma lista basta editá-la aqui, sem mexer na
-# outra; "OUTRA" deve continuar como última opção (ela libera o campo para digitar o nome da empresa).
+# outra. A lista dos solicitantes (ATEIE "Empresa Solicitante", AI "Empresa" e MO "Emitente, Empresa") não tem mais a opção
+# "OUTRA": só as empresas abaixo podem ser escolhidas. Documentos antigos gravados com OUTRA continuam abrindo normalmente.
+# Na lista dos notificados "OUTRA" deve continuar como última opção (ela libera o campo para digitar o nome da empresa).
 DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE = ["FOZ DO RIO CLARO ENERGIA SA", "IJUÍ ENERGIA SA", "US. PAULISTA LAVRINHAS DE ENERGIA SA",
                                        "FERREIRA GOMES ENERGIA SA", "ENERGIA DOS VENTOS SA",
-                                       "EÓLICA DO AGRESTE POTIGUAR SA", "VERDE 08 ENERGIA SA", "OUTRA"]  # combobox "Empresa Solicitante"
+                                       "EÓLICA DO AGRESTE POTIGUAR SA", "VERDE 08 ENERGIA SA"]  # combobox "Empresa Solicitante"
 DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "ENGIE", "CELEO_REDES", "ENERGISA", "ISA ENERGIA BRASIL SA", "CBA", "EQUATORIAL",
                                       "CPFL-RGE", "ARGO", "CIMY", "OUTRA"]         # combobox "Empresa" de "Pessoal Notificado"
 DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
+# Texto que já vem nos campos "Órgão" (MO) e "Setor" (Pessoal Notificado do ATEIE e do AI) de um documento novo, para evitar
+# a digitação: na grande maioria dos casos é a área de Operação. Quando não for, o emitente altera o campo.
+DOC_LIB_TEXTO_PADRAO_OPERACAO = "Operação"
 
 # ---- Encaminhar ATEIE (e-mail) -------------------------------------------------------------------------------------
 # Remetentes (emitentes) do e-mail: o usuário escolhe um deles na janela do Encaminhar ATEIE. O primeiro é o padrão.
@@ -15355,8 +15360,9 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
                                rotulo_empresa="Empresa solicitante:", subtitulo=None, descricao_anexo=None):
     """Janela de confirmação do botão Encaminhar ATEIE. Mostra o remetente (a escolher entre EMAIL_ATEIE_REMETENTES),
     empresa, ATEIE(s), anexo, onde ficou a cópia do PDF na pasta Downloads (ou o motivo de não ter sido salva),
-    destinatários, e-mails em cópia e o texto do e-mail. Quando a empresa tem mais de um destinatário possível o
-    usuário escolhe um; empresa sem e-mail cadastrado (por exemplo OUTRA) permite digitar o endereço.
+    destinatários, e-mails em cópia e o texto do e-mail. O destinatário já vem selecionado (a opção sugerida ou, na falta
+    dela, a primeira cadastrada); quando a empresa tem mais de um possível o usuário pode trocar a seleção. Empresa sem
+    e-mail cadastrado (por exemplo OUTRA) permite digitar o endereço.
     Devolve {"remetente", "destinatarios", "copias"} ou None se o envio for cancelado.
     rotulo, assunto e texto trocam o nome do documento, o assunto e o texto do e-mail (padrão: os do ATEIE); o Encaminhar
     AI e o Encaminhar MO usam a mesma janela. opcao_inicial = destinatário já escolhido (a MO sugere a empresa do campo
@@ -15440,7 +15446,7 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
         opcoes, para, _ = doc_lib_destinatarios_da_empresa(empresa)
         linha = 0
         if escolha.get() not in opcoes:
-            escolha.set("")
+            escolha.set(opcoes[0] if opcoes else "")      # sempre vem uma opção selecionada: a sugerida ou a primeira
         if opcoes:
             Label(zona, text="Destinatário:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"),
                   anchor="nw").grid(row=linha, column=0, sticky="nw", padx=(0, 10))
@@ -15448,8 +15454,14 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
             opcoes_quadro.grid(row=linha, column=1, sticky="w")
             for opcao in opcoes:
                 Radiobutton(opcoes_quadro, text=opcao, variable=escolha, value=opcao, tristatevalue="-",
-                            command=mostrar_para, font=(SGA_FONTE, 10), bg=SGA_CARD).pack(side=LEFT, padx=(0, 20))
+                            command=mostrar_para, font=(SGA_FONTE, 10, "bold"), bg=SGA_CARD
+                            ).pack(side=LEFT, padx=(0, 20))
             linha += 1
+            if len(opcoes) > 1:
+                Label(zona, text="Há mais de um destinatário cadastrado: confira o selecionado acima e o campo Para.",
+                      bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8), anchor="w"
+                      ).grid(row=linha, column=1, sticky="w")
+                linha += 1
         elif not para.get(""):
             Label(zona, text="Empresa sem e-mail cadastrado. Informe o(s) e-mail(s) (separe por ponto e vírgula) ou "
                              "use 'Cadastrar e-mails':", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9),
@@ -15518,8 +15530,9 @@ class LinhasDinamicasDocLib:
     hora_automatica=True: ao escolher a data no calendário da linha, o campo "Hora" da mesma linha recebe a hora atual
     (se estiver vazio), podendo ser alterado depois pelo usuário."""
 
-    def __init__(self, ateie, pai, colunas, limite, empresas=None, hora_automatica=False):
+    def __init__(self, ateie, pai, colunas, limite, empresas=None, hora_automatica=False, padroes=None):
         self.ateie = ateie
+        self.padroes = padroes or {}      # campo -> texto que já vem numa linha nova (em branco); linha gravada não muda
         self.pai = pai
         self.colunas = colunas
         self.limite = limite
@@ -15588,6 +15601,8 @@ class LinhasDinamicasDocLib:
                     self._ao_mudar_empresa(linha, chave, False)
                 else:
                     doc_lib_definir_entrada(entrada, valores.get(chave) or "")
+            elif tipo == "texto" and chave in self.padroes:     # linha nova: o campo já vem com o texto padrão
+                doc_lib_definir_entrada(entrada, self.padroes[chave])
             if self.bloqueado:
                 doc_lib_bloquear_widget(entrada, True)
                 if tipo == "empresa":
@@ -15881,7 +15896,8 @@ class JanelaAteie:
         bloco = Frame(card, bg=SGA_CARD)
         bloco.grid(row=self._linha, column=0, columnspan=2, sticky="ew", padx=12, pady=(2, 10))
         self.lista_pessoal = LinhasDinamicasDocLib(self, bloco, DOC_LIB_COLUNAS_PESSOAL, DOC_LIB_LIMITE_PESSOAL,
-                                                   DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE, hora_automatica=True)
+                                                   DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE, hora_automatica=True,
+                                                   padroes={"setor": DOC_LIB_TEXTO_PADRAO_OPERACAO})
         self._linha += 1
 
         self._montar_tabela()
@@ -18556,7 +18572,8 @@ class JanelaAI:
         bloco = Frame(card, bg=SGA_CARD)
         bloco.grid(row=self._linha, column=0, columnspan=2, sticky="ew", padx=12, pady=(2, 10))
         self.lista_pessoal = LinhasDinamicasDocLib(self, bloco, DOC_LIB_COLUNAS_PESSOAL_AI, DOC_LIB_LIMITE_PESSOAL_AI,
-                                                   DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE, hora_automatica=True)
+                                                   DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE, hora_automatica=True,
+                                                   padroes={"setor": DOC_LIB_TEXTO_PADRAO_OPERACAO})
         self._linha += 1
 
         self._montar_tabela()          # 17 e 18 (no AI não há o campo Nota)
@@ -20961,6 +20978,8 @@ class JanelaMO:
             self._definir_texto(self.txt_descricao, descricao_referencia)
         if assunto_referencia:        # o Assunto é sempre em caixa alta (como no carregamento de uma MO gravada)
             self._definir_texto(self.txt_assunto, assunto_referencia.upper())
+        for entrada in (self.ent_emitente_orgao, self.ent_destinatario_orgao):     # MO nova: Órgão já vem preenchido
+            doc_lib_definir_entrada(entrada, DOC_LIB_TEXTO_PADRAO_OPERACAO)
         self._atualizar_numero_provisorio()
         self._aplicar_bloqueios()
         self._atualizar_estado()
@@ -21627,7 +21646,10 @@ class JanelaMO:
                                (self.ent_recebido_data, "recebido_data"), (self.ent_recebido_hora, "recebido_hora"),
                                (self.ent_de_acordo_nome, "de_acordo_nome"), (self.ent_de_acordo_data, "de_acordo_data"),
                                (self.ent_de_acordo_hora, "de_acordo_hora")):
-            doc_lib_definir_entrada(entrada, doc[chave] or "")
+            valor = doc[chave] or ""
+            if not valor and chave in ("emitente_orgao", "destinatario_orgao") and doc_lib_documento_reservado_mo(doc):
+                valor = DOC_LIB_TEXTO_PADRAO_OPERACAO       # MO reservada: ainda não preenchida
+            doc_lib_definir_entrada(entrada, valor)
         for widget, chave in ((self.txt_assunto, "assunto"), (self.txt_descricao, "descricao"),
                               (self.txt_observacoes, "observacoes")):
             self._definir_texto(widget, (doc[chave] or "").upper() if chave == "assunto" else doc[chave])
