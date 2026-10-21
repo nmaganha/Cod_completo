@@ -11997,7 +11997,7 @@ LOGO_ATEIE = os.path.join(PASTA_BASE, "logo_ateie.png")
 DOC_LIB_EMPRESAS_SOLICITANTES_ATEIE = ["FOZ DO RIO CLARO ENERGIA SA", "IJUÍ ENERGIA SA", "US. PAULISTA LAVRINHAS DE ENERGIA SA",
                                        "FERREIRA GOMES ENERGIA SA", "ENERGIA DOS VENTOS SA",
                                        "EÓLICA DO AGRESTE POTIGUAR SA", "VERDE 08 ENERGIA SA", "OUTRA"]  # combobox "Empresa Solicitante"
-DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "EDP", "ENGIE", "CELEO_REDES", "ENERGISA", "ISA ENERGIA BRASIL SA", "CBA", "EQUATORIAL",
+DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE = ["AXIA", "ENGIE", "CELEO_REDES", "ENERGISA", "ISA ENERGIA BRASIL SA", "CBA", "EQUATORIAL",
                                       "CPFL-RGE", "ARGO", "CIMY", "OUTRA"]         # combobox "Empresa" de "Pessoal Notificado"
 DOC_LIB_CLASSIFICACOES_ATEIE = ["Programado", "Urgência"]
 
