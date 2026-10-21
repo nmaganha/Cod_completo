@@ -9321,6 +9321,36 @@ def cmd_click22():
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.3.%20Nordeste%2F3.7.3.4.%20%C3%81rea%20230%20kV%20Norte%2FIO-OI.NE.PTM_Rev.{rev}.pdf"
             }
         },
+
+        # ===== PCHs =====
+        # As PCHs não têm cadastro no Procedimento de Rede do ONS: "CADASTRO" vazio faz o botão
+        # exibir a mensagem de "sem dados cadastrados". Em "INSTRUÇÕES" só existe o AJUSTAMENTO
+        # OPERATIVO; ao trocar o texto "INSERIR URL..." pelo link ({rev} no lugar da revisão), o botão
+        # e o "Resumo" associado passam a funcionar como nas demais localidades.
+
+        # ===== PCH LAVRINHAS =====
+        "PCH Lavrinhas": {
+            "CADASTRO": {},
+            "INSTRUÇÕES": {
+                "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - PCH Lavrinhas ⚠️"
+            }
+        },
+
+        # ===== PCH QUELUZ =====
+        "PCH Queluz": {
+            "CADASTRO": {},
+            "INSTRUÇÕES": {
+                "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - PCH Queluz ⚠️"
+            }
+        },
+
+        # ===== PCH VERDE 8 =====
+        "PCH Verde 8": {
+            "CADASTRO": {},
+            "INSTRUÇÕES": {
+                "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - PCH Verde 8 ⚠️"
+            }
+        },
     }
     # ===== CONFIGURAÇÕES GLOBAIS PARA BUSCA =====
     MAX_REVISAO = 500
@@ -9621,11 +9651,20 @@ def cmd_click22():
         janela.focus_force()
 
     # ===== JANELA DE SUBTIPOS =====
-    def abrir_subtipos(localidade, categoria):
+    def abrir_subtipos(localidade, categoria, janela_pai=None):
         """Abre a janela com os subtipos (4 para CADASTRO, 8 para INSTRUÇÕES)"""
 
         dados = procedimentos[localidade][categoria]
         subtipos = list(dados.keys())
+
+        if not subtipos:
+            # Categoria sem nenhum documento (ex.: PCHs não têm cadastro no Procedimento de Rede do ONS)
+            tipo_instalacao = "PCH" if localidade.startswith("PCH") else "instalação"
+            messagebox.showinfo(f"{categoria} - {localidade}",
+                                f"Não existem dados cadastrados, desta {tipo_instalacao}, "
+                                f"no Procedimento de Rede do ONS.",
+                                parent=janela_pai or frame_principal)
+            return
 
         cores = ["#3498DB", "#2ECC71", "#E74C3C", "#F39C12", "#9B59B6", "#1ABC9C", "#E67E22", "#34495E"]
 
@@ -9736,7 +9775,7 @@ def cmd_click22():
         subtitulo.pack(pady=20)
 
         btn_cadastro = Button(janela_opcoes, text="📋 CADASTRO",
-                              command=lambda: abrir_subtipos(localidade, "CADASTRO"),
+                              command=lambda: abrir_subtipos(localidade, "CADASTRO", janela_opcoes),
                               bg="#3498DB", fg="white",
                               font=("Arial", 12, "bold"), height=2)
         btn_cadastro.pack(fill='x', padx=50, pady=10)
@@ -9745,7 +9784,7 @@ def cmd_click22():
               bg="#a4bad2", font=("Arial", 9), fg="#555").pack(pady=(0, 20))
 
         btn_instrucoes = Button(janela_opcoes, text="📖 INSTRUÇÕES",
-                                command=lambda: abrir_subtipos(localidade, "INSTRUÇÕES"),
+                                command=lambda: abrir_subtipos(localidade, "INSTRUÇÕES", janela_opcoes),
                                 bg="#2ECC71", fg="white",
                                 font=("Arial", 12, "bold"), height=2)
         btn_instrucoes.pack(fill='x', padx=50, pady=10)
@@ -9759,7 +9798,8 @@ def cmd_click22():
     # ===== CRIAÇÃO DA JANELA PRINCIPAL =====
     frame_principal = Toplevel(root)
     frame_principal.title('Acesso a Procedimentos ONS - Localidades')
-    frame_principal.geometry('960x600')
+    # 12 localidades em 4 linhas de 3 botões (altura limitada à da tela)
+    frame_principal.geometry(f'960x{min(720, frame_principal.winfo_screenheight() - 80)}')
     frame_principal.resizable(True, True)
     frame_principal['bg'] = "#a4bad2"
 
@@ -10774,7 +10814,8 @@ def excluir_lancamento(lancamento_id):
 
 def gerar_pdf_processo(titulo, localidade, lancamentos, status, cancelado_por):
     """Gera o PDF completo do processo (título, localidade, todos os lançamentos com
-    data/hora, descrição e relação de documentos anexados) e abre o arquivo gerado."""
+    data/hora, descrição e relação de documentos anexados), salva na pasta Downloads do
+    usuário e abre o arquivo gerado."""
     try:
         pdf = FPDF(orientation='P', unit='mm', format='A4')
         pdf.set_auto_page_break(auto=True, margin=15)
@@ -10820,12 +10861,14 @@ def gerar_pdf_processo(titulo, localidade, lancamentos, status, cancelado_por):
             pdf.ln(4)
 
         nome_base = "".join(c if c.isalnum() else "_" for c in titulo)[:50]
-        nome_arquivo = os.path.join(PASTA_BASE, f"processo_{nome_base}.pdf")
+        pasta_downloads = doc_lib_pasta_downloads()           # mesma pasta Downloads usada pelo Doc_Lib. (Click_25)
+        os.makedirs(pasta_downloads, exist_ok=True)
+        nome_arquivo = os.path.join(pasta_downloads, f"processo_{nome_base}.pdf")
         pdf.output(nome_arquivo)
 
         total_paginas = pdf.page_no()
         os.startfile(nome_arquivo)
-        messagebox.showinfo("Sucesso", "PDF do processo gerado com sucesso!")
+        messagebox.showinfo("Sucesso", f"PDF do processo gerado com sucesso!\n\nSalvo em:\n{nome_arquivo}")
 
         if total_paginas > LIMITE_PAGINAS_AVISO:
             messagebox.showinfo(
@@ -12025,21 +12068,26 @@ EMAIL_ATEIE_TEXTO = ("Prezados,\n\n"
                      "COG-ALUPAR")
 # Destinatários cadastrados na primeira vez em que o banco é preparado; depois disso a lista vale a do banco, que pode
 # receber mais e-mails por empresa (inclusive os e-mails em cópia) na tela "Cadastrar e-mails" (botão Encaminhar ATEIE).
+# Cada destinatário a escolher tem sempre duas opções de e-mail, com o final (pré) ou (treal): os e-mails desta carga e os
+# que já existiam antes dessa divisão ficam em (pré); os de (treal) são incluídos na tela "Cadastrar e-mails".
 # (Empresa Solicitante, destinatário a escolher na hora do envio - "" quando não há escolha, e-mail)
 DOC_LIB_DESTINATARIOS_INICIAIS = [
-    ("FOZ DO RIO CLARO ENERGIA SA", "CELEO_REDES", "nivaldo.maganha@gmail.com"),
-    ("IJUÍ ENERGIA SA", "CPFL-RGE", "nivaldo.maganha@gmail.com"),
-    ("US. PAULISTA LAVRINHAS DE ENERGIA SA", "ISA ENERGIA BRASIL SA", "nivaldo.maganha@gmail.com"),
-    ("FERREIRA GOMES ENERGIA SA", "ENERGISA", "nivaldo.maganha@gmail.com"),
-    ("FERREIRA GOMES ENERGIA SA", "ENGIE", "nmaganha@alupar.com.br"),
-    ("VERDE 08 ENERGIA SA", "EQUATORIAL", "nivaldo.maganha@gmail.com"),
-    ("ENERGIA DOS VENTOS SA", "AXIA", "nivaldo.maganha@gmail.com"),
-    ("ENERGIA DOS VENTOS SA", "WEG", "nmaganha@alupar.com.br"),
-    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO", "nivaldo.maganha@gmail.com"),
-    ("EÓLICA DO AGRESTE POTIGUAR SA", "CIMY", "nmaganha@alupar.com.br"),
-    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY", "nivaldo.maganha@gmail.com"),
-    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY", "nmaganha@alupar.com.br"),
+    ("FOZ DO RIO CLARO ENERGIA SA", "CELEO_REDES (pré)", "nivaldo.maganha@gmail.com"),
+    ("IJUÍ ENERGIA SA", "CPFL-RGE (pré)", "nivaldo.maganha@gmail.com"),
+    ("US. PAULISTA LAVRINHAS DE ENERGIA SA", "ISA ENERGIA BRASIL SA (pré)", "nivaldo.maganha@gmail.com"),
+    ("FERREIRA GOMES ENERGIA SA", "ENERGISA (pré)", "nivaldo.maganha@gmail.com"),
+    ("FERREIRA GOMES ENERGIA SA", "ENGIE (pré)", "nmaganha@alupar.com.br"),
+    ("VERDE 08 ENERGIA SA", "EQUATORIAL (pré)", "nivaldo.maganha@gmail.com"),
+    ("ENERGIA DOS VENTOS SA", "AXIA (pré)", "nivaldo.maganha@gmail.com"),
+    ("ENERGIA DOS VENTOS SA", "WEG (pré)", "nmaganha@alupar.com.br"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO (pré)", "nivaldo.maganha@gmail.com"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "CIMY (pré)", "nmaganha@alupar.com.br"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY (pré)", "nivaldo.maganha@gmail.com"),
+    ("EÓLICA DO AGRESTE POTIGUAR SA", "ARGO e CIMY (pré)", "nmaganha@alupar.com.br"),
 ]
+# Finais das duas opções de e-mail de cada destinatário (a primeira é a que já vem selecionada no envio)
+DOC_LIB_SUFIXOS_OPCAO = ("(pré)", "(treal)")
+DOC_LIB_SUFIXO_PADRAO = DOC_LIB_SUFIXOS_OPCAO[0]
 
 # Texto padrão do campo "Observações": obrigatório em todos os documentos (entra já preenchido no formulário)
 DOC_LIB_TEXTO_PADRAO_OBSERVACOES = (
@@ -12347,6 +12395,12 @@ def garantir_banco_doc_lib():
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie_destinatarios", "tipo", "TEXT NOT NULL DEFAULT 'para'")
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie_destinatarios", "alterado_por", "TEXT")
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie_destinatarios", "alterado_em", "TEXT")
+    # cada destinatário a escolher passou a ter as opções (pré) e (treal): os e-mails cadastrados antes disso, sem final,
+    # ficam como (pré). OR IGNORE: se já existir o mesmo e-mail com o final (pré), o cadastro antigo sobra e é removido.
+    _sem_final = "escolha <> '' AND escolha NOT LIKE '%(pré)' AND escolha NOT LIKE '%(treal)'"
+    cursor.execute(f"UPDATE OR IGNORE doclib_ateie_destinatarios SET escolha = escolha || ' {DOC_LIB_SUFIXO_PADRAO}' "
+                   f"WHERE {_sem_final}")
+    cursor.execute(f"DELETE FROM doclib_ateie_destinatarios WHERE {_sem_final}")
     _adicionar_coluna_se_necessario(cursor, "doclib_ateie_emails", "copias", "TEXT")      # e-mails enviados com cópia
     # coluna "Enviado e-mail" do GRID ATEIE: data do envio de cada ATEIE (vazio = "Não"), quem registrou e a origem
     # ("Sistema" = botão Encaminhar ATEIE; "Manual" = marcado no GRID quando o envio automático falhou)
@@ -13093,6 +13147,27 @@ def doc_lib_agrupar_reservados(selecao, usuario):
 # ---------------------------------------------------
 DOC_LIB_TEXTO_SEMPRE = "(todos os envios)"        # opção de destinatário vazia: o e-mail vale em qualquer escolha
 _DOC_LIB_PADRAO_EMAIL = re.compile(r"^[^@\s;,<>]+@[^@\s;,<>]+\.[^@\s;,<>]+$")
+_DOC_LIB_PADRAO_OPCAO = re.compile(r"^(.*?)\s*\(\s*(pr[eé]|treal)\s*\)$", re.IGNORECASE)
+
+
+def doc_lib_dividir_opcao(opcao):
+    """('AXIA', '(pré)') para 'AXIA (pré)' e ('AXIA', '(treal)') para 'AXIA (treal)'. O final aceita (pre), (PRÉ) e (TREAL).
+    Opção sem final: ('AXIA', '')."""
+    texto = " ".join(str(opcao or "").split())
+    achado = _DOC_LIB_PADRAO_OPCAO.match(texto)
+    if not achado:
+        return texto, ""
+    return achado.group(1).strip(), "(treal)" if achado.group(2).lower() == "treal" else "(pré)"
+
+
+def doc_lib_montar_opcao(base, final=DOC_LIB_SUFIXO_PADRAO):
+    return f"{base} {final}" if base else ""
+
+
+def doc_lib_normalizar_opcao(opcao):
+    """Opção de destinatário no formato gravado: 'AXIA (pré)'. Sem final vale (pré); vazia continua vazia."""
+    base, final = doc_lib_dividir_opcao(opcao)
+    return doc_lib_montar_opcao(base, final or DOC_LIB_SUFIXO_PADRAO)
 
 
 def doc_lib_validar_email(email):
@@ -13133,7 +13208,9 @@ def doc_lib_listar_destinatarios():
 
 def doc_lib_destinatarios_da_empresa(empresa):
     """Destinatários cadastrados para a Empresa Solicitante: (opções, para, copia).
-      opções ... opções que o usuário escolhe na hora do envio (vazio quando a empresa não tem escolha)
+      opções ... opções que o usuário escolhe na hora do envio (vazio quando a empresa não tem escolha). Cada destinatário
+                 cadastrado tem sempre as duas opções, 'AXIA (pré)' e 'AXIA (treal)', nessa ordem, mesmo que só uma delas
+                 já tenha e-mail
       para ..... {opção: [e-mails]} dos destinatários; a chave "" guarda os e-mails que valem em qualquer escolha
       copia .... {opção: [e-mails]} dos e-mails que recebem o ATEIE com cópia, no mesmo formato"""
     chave = " ".join(str(empresa or "").split()).upper()
@@ -13141,11 +13218,39 @@ def doc_lib_destinatarios_da_empresa(empresa):
     for item in doc_lib_listar_destinatarios():
         if item["empresa"].upper() != chave:
             continue
-        if item["escolha"] and item["escolha"] not in opcoes:
-            opcoes.append(item["escolha"])
+        escolha = doc_lib_normalizar_opcao(item["escolha"])        # cadastro antigo, sem final, vale como (pré)
+        if escolha:
+            base = doc_lib_dividir_opcao(escolha)[0]
+            for final in DOC_LIB_SUFIXOS_OPCAO:
+                opcao = doc_lib_montar_opcao(base, final)
+                if opcao not in opcoes:
+                    opcoes.append(opcao)
         destino = copia if item["tipo"] == "copia" else para
-        destino.setdefault(item["escolha"], []).append(item["email"])
+        destino.setdefault(escolha, []).append(item["email"])
     return opcoes, para, copia
+
+
+def doc_lib_opcoes_para_cadastro(empresa):
+    """Opções de destinatário oferecidas na tela Cadastrar e-mails: as já cadastradas para a Empresa Solicitante e, depois,
+    as demais empresas destinatárias, cada uma com os finais (pré) e (treal)."""
+    opcoes = doc_lib_destinatarios_da_empresa(empresa)[0]
+    bases = [e for e in DOC_LIB_EMPRESAS_NOTIFICADAS_ATEIE if e != "OUTRA"]
+    bases += [doc_lib_dividir_opcao(item["escolha"])[0] for item in doc_lib_listar_destinatarios() if item["escolha"]]
+    for base in dict.fromkeys(bases):
+        for final in DOC_LIB_SUFIXOS_OPCAO:
+            opcao = doc_lib_montar_opcao(base, final)
+            if opcao not in opcoes:
+                opcoes.append(opcao)
+    return opcoes
+
+
+def doc_lib_opcao_inicial_envio(opcoes, sugerida=""):
+    """Opção que já vem selecionada na janela de envio: a sugerida (sem final vale (pré)) ou, na falta dela, a primeira
+    opção cadastrada, que é sempre a (pré) do primeiro destinatário."""
+    sugerida = doc_lib_normalizar_opcao(sugerida)
+    if sugerida in opcoes:
+        return sugerida
+    return opcoes[0] if opcoes else ""
 
 
 def doc_lib_enderecos_do_envio(para, copia, opcao):
@@ -13166,6 +13271,12 @@ def _doc_lib_dados_destinatario(empresa, escolha, email, tipo):
     escolha = " ".join(str(escolha or "").split())
     if escolha == DOC_LIB_TEXTO_SEMPRE:
         escolha = ""
+    if escolha:
+        base, final = doc_lib_dividir_opcao(escolha)
+        if not base or not final:
+            raise DocLibRegra("Informe o destinatário com o final (pré) ou (treal), por exemplo: "
+                              f"{base or 'AXIA'} (pré). Para valer em qualquer escolha use '{DOC_LIB_TEXTO_SEMPRE}'.")
+        escolha = doc_lib_montar_opcao(base, final)
     email = str(email or "").strip().lower()
     tipo = "copia" if str(tipo or "").strip().lower() == "copia" else "para"
     if not empresa:
@@ -15189,12 +15300,13 @@ def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
     """Janela "Cadastrar e-mails": e-mails de cada Empresa Solicitante usados pelos botões Encaminhar ATEIE e Encaminhar
     AI (o cadastro é o mesmo para os dois documentos). Pode haver
     vários e-mails por empresa e, nas empresas com mais de um destinatário possível, por opção (a opção é escolhida
-    na hora do envio; "(todos os envios)" vale em qualquer escolha). Cada e-mail é "Para" (destinatário) ou "Cópia (Cc)"
+    na hora do envio; "(todos os envios)" vale em qualquer escolha). Cada destinatário tem duas opções de e-mail, com o
+    final (pré) ou (treal), por exemplo "AXIA (pré)" e "AXIA (treal)". Cada e-mail é "Para" (destinatário) ou "Cópia (Cc)"
     (recebe o ATEIE com cópia). O e-mail selecionado pode ser editado, sem precisar removê-lo e incluí-lo de novo."""
     janela = Toplevel(parent)
     janela.title("Cadastrar e-mails - Encaminhar ATEIE e AI")
-    janela.geometry("1240x620")
-    janela.minsize(1140, 520)
+    janela.geometry("1280x620")
+    janela.minsize(1200, 520)
     janela.transient(parent)
     ui_dialogo(janela, "E-mails do Encaminhar ATEIE e AI", "Destinatários e e-mails em cópia por Empresa. Nas "
                                                       "empresas com mais de um destinatário possível, a opção é "
@@ -15203,9 +15315,9 @@ def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
     quadro.place(x=24, y=80, relwidth=1.0, width=-48, relheight=1.0, height=-80 - 190)
     arvore = ttk.Treeview(quadro, columns=("empresa", "escolha", "tipo", "email", "incluido", "alterado"),
                           show="headings", selectmode="browse")
-    for chave, titulo, largura in (("empresa", "Empresa Solicitante", 250), ("escolha", "Destinatário (opção)", 150),
-                                   ("tipo", "Tipo", 80), ("email", "E-mail", 230),
-                                   ("incluido", "Incluído por / em", 230), ("alterado", "Alterado por / em", 235)):
+    for chave, titulo, largura in (("empresa", "Empresa Solicitante", 250), ("escolha", "Destinatário (opção)", 210),
+                                   ("tipo", "Tipo", 75), ("email", "E-mail", 225),
+                                   ("incluido", "Incluído por / em", 230), ("alterado", "Alterado por / em", 225)):
         arvore.heading(chave, text=titulo, anchor="w")
         arvore.column(chave, width=largura, anchor="w")
     rolagem = Scrollbar(quadro, orient=VERTICAL, command=arvore.yview)
@@ -15237,30 +15349,30 @@ def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
     var_empresa, var_opcao, var_email = StringVar(value=empresa_inicial), StringVar(value=DOC_LIB_TEXTO_SEMPRE), \
         StringVar()
     var_tipo = StringVar(value=textos_tipo[0])
-    for texto, x in (("Empresa Solicitante", 16), ("Destinatário (opção)", 300), ("Tipo", 464), ("E-mail", 588)):
+    for texto, x in (("Empresa Solicitante", 16), ("Destinatário (opção)", 300), ("Tipo", 554), ("E-mail", 678)):
         Label(formulario, text=texto, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold")).place(x=x, y=8)
     combo_empresa = ttk.Combobox(formulario, textvariable=var_empresa, values=empresas, font=(SGA_FONTE, 10))
     combo_empresa.place(x=16, y=32, width=270, height=30)
     combo_opcao = ttk.Combobox(formulario, textvariable=var_opcao, values=[DOC_LIB_TEXTO_SEMPRE],
                                font=(SGA_FONTE, 10))
-    combo_opcao.place(x=300, y=32, width=150, height=30)
+    combo_opcao.place(x=300, y=32, width=240, height=30)
     combo_tipo = ttk.Combobox(formulario, textvariable=var_tipo, values=textos_tipo, state="readonly",
                               font=(SGA_FONTE, 10))
-    combo_tipo.place(x=464, y=32, width=110, height=30)
+    combo_tipo.place(x=554, y=32, width=110, height=30)
     entrada_email = criar_entrada_sga(formulario, textvariable=var_email)
-    entrada_email.place(x=588, y=32, relwidth=1.0, width=-588 - 186, height=30)
-    texto_dica = ("Para incluir outro e-mail na mesma empresa e opção, repita os dados e digite o novo e-mail. "
-                  "Use o tipo 'Cópia (Cc)' para os e-mails que só recebem o ATEIE com cópia. Para uma empresa que "
-                  "não está na lista (OUTRA), digite o nome da empresa.")
+    entrada_email.place(x=678, y=32, relwidth=1.0, width=-678 - 186, height=30)
+    texto_dica = ("Cada destinatário tem duas opções de e-mail: (pré) e (treal). Para incluir outro e-mail na mesma "
+                  "empresa e opção, repita os dados e digite o novo e-mail. Use o tipo 'Cópia (Cc)' para os e-mails "
+                  "que só recebem o ATEIE com cópia. Para uma empresa que não está na lista (OUTRA), digite o nome "
+                  "da empresa.")
     texto_dica_edicao = ("Editando o e-mail selecionado: altere os dados acima e clique em 'Salvar alteração' "
                          "(ou em 'Cancelar edição').")
     rotulo_dica = Label(formulario, text=texto_dica, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8),
-                        wraplength=800, justify="left", anchor="w")
+                        wraplength=1000, justify="left", anchor="w")
     rotulo_dica.place(x=16, y=70)
 
     def atualizar_opcoes(*args):
-        opcoes, _, _ = doc_lib_destinatarios_da_empresa(var_empresa.get())
-        combo_opcao.configure(values=[DOC_LIB_TEXTO_SEMPRE] + opcoes)
+        combo_opcao.configure(values=[DOC_LIB_TEXTO_SEMPRE] + doc_lib_opcoes_para_cadastro(var_empresa.get()))
 
     def sair_da_edicao():
         edicao["id"] = None
@@ -15355,13 +15467,32 @@ def doc_lib_dialogo_destinatarios(parent, usuario, empresa_inicial=""):
 _DOC_LIB_ULTIMO_REMETENTE = {"valor": EMAIL_ATEIE_REMETENTE}
 
 
+def doc_lib_criar_opcao_destinatario(pai, base, final, variavel, comando):
+    """Opção de destinatário da janela de envio: o nome da empresa em destaque e o final, (pré) ou (treal), em fonte menor e
+    cor mais suave (como as orientações de preenchimento dos documentos). Clicar no final também seleciona a opção."""
+    opcao = doc_lib_montar_opcao(base, final)
+    quadro = Frame(pai, bg=SGA_CARD)
+    Radiobutton(quadro, text=base, variable=variavel, value=opcao, tristatevalue="-", command=comando,
+                font=(SGA_FONTE, 10, "bold"), bg=SGA_CARD).pack(side=LEFT)
+    rotulo = Label(quadro, text=final, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8), cursor="hand2")
+    rotulo.pack(side=LEFT)
+
+    def escolher(evento=None):
+        variavel.set(opcao)
+        comando()
+
+    rotulo.bind("<Button-1>", escolher)
+    return quadro
+
+
 def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=None, erro_copia=None,
                                rotulo="ATEIE", assunto=None, texto=None, opcao_inicial="",
                                rotulo_empresa="Empresa solicitante:", subtitulo=None, descricao_anexo=None):
     """Janela de confirmação do botão Encaminhar ATEIE. Mostra o remetente (a escolher entre EMAIL_ATEIE_REMETENTES),
     empresa, ATEIE(s), anexo, onde ficou a cópia do PDF na pasta Downloads (ou o motivo de não ter sido salva),
     destinatários, e-mails em cópia e o texto do e-mail. O destinatário já vem selecionado (a opção sugerida ou, na falta
-    dela, a primeira cadastrada); quando a empresa tem mais de um possível o usuário pode trocar a seleção. Empresa sem
+    dela, a primeira cadastrada, que é a (pré)); cada destinatário tem duas opções, (pré) e (treal), e o usuário pode trocar a
+    seleção. Empresa sem
     e-mail cadastrado (por exemplo OUTRA) permite digitar o endereço.
     Devolve {"remetente", "destinatarios", "copias"} ou None se o envio for cancelado.
     rotulo, assunto e texto trocam o nome do documento, o assunto e o texto do e-mail (padrão: os do ATEIE); o Encaminhar
@@ -15412,7 +15543,7 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
     zona = Frame(cartao, bg=SGA_CARD)
     zona.grid(row=6, column=0, columnspan=2, sticky="ew", padx=20, pady=(14, 0))
     zona.grid_columnconfigure(1, weight=1)
-    escolha = StringVar(value=opcao_inicial or "")
+    escolha = StringVar(value=doc_lib_normalizar_opcao(opcao_inicial))       # sem final vale (pré)
     var_manual = StringVar()
 
     def calcular():
@@ -15434,6 +15565,19 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
             return [], em_copia, "O destinatário escolhido não tem e-mail cadastrado como 'Para'. Use 'Cadastrar e-mails'."
         return lista, em_copia, ""
 
+    def ajustar_altura():
+        """Cada destinatário cadastrado ocupa uma linha de opções (pré)/(treal): a janela cresce até onde a tela permitir
+        e, se ainda faltar espaço, a prévia do texto do e-mail perde linhas."""
+        previa.configure(height=6)
+        janela.update_idletasks()
+        necessario = cartao.winfo_reqheight() + 10
+        altura_janela = min(max(700, necessario + 170), max(700, janela.winfo_screenheight() - 70))
+        falta = necessario - (altura_janela - 170)
+        if falta > 0:
+            previa.configure(height=max(2, 6 - (falta + 17) // 18))
+        cartao.place_configure(height=altura_janela - 170)
+        janela.geometry(f"780x{altura_janela}")
+
     def mostrar_para(*args):
         lista, em_copia, erro = calcular()
         rotulo_para.config(text="; ".join(lista) if lista else erro, fg=SGA_TEXTO if lista else SGA_VERMELHO)
@@ -15446,18 +15590,21 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
         opcoes, para, _ = doc_lib_destinatarios_da_empresa(empresa)
         linha = 0
         if escolha.get() not in opcoes:
-            escolha.set(opcoes[0] if opcoes else "")      # sempre vem uma opção selecionada: a sugerida ou a primeira
+            # sempre vem uma opção selecionada: a sugerida ou a primeira, que é a (pré)
+            escolha.set(doc_lib_opcao_inicial_envio(opcoes, escolha.get()))
         if opcoes:
             Label(zona, text="Destinatário:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"),
                   anchor="nw").grid(row=linha, column=0, sticky="nw", padx=(0, 10))
             opcoes_quadro = Frame(zona, bg=SGA_CARD)
             opcoes_quadro.grid(row=linha, column=1, sticky="w")
-            for opcao in opcoes:
-                Radiobutton(opcoes_quadro, text=opcao, variable=escolha, value=opcao, tristatevalue="-",
-                            command=mostrar_para, font=(SGA_FONTE, 10, "bold"), bg=SGA_CARD
-                            ).pack(side=LEFT, padx=(0, 20))
+            # uma linha por destinatário, com as duas opções de e-mail: (pré) e (treal)
+            destinatarios = list(dict.fromkeys(doc_lib_dividir_opcao(opcao)[0] for opcao in opcoes))
+            for indice, base in enumerate(destinatarios):
+                for coluna, final in enumerate(DOC_LIB_SUFIXOS_OPCAO):
+                    doc_lib_criar_opcao_destinatario(opcoes_quadro, base, final, escolha, mostrar_para
+                                                     ).grid(row=indice, column=coluna, sticky="w", padx=(0, 28))
             linha += 1
-            if len(opcoes) > 1:
+            if len(destinatarios) > 1:
                 Label(zona, text="Há mais de um destinatário cadastrado: confira o selecionado acima e o campo Para.",
                       bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8), anchor="w"
                       ).grid(row=linha, column=1, sticky="w")
@@ -15469,6 +15616,7 @@ def doc_lib_dialogo_encaminhar(parent, doc, numeros, usuario, anexo=None, copia=
             entrada = criar_entrada_sga(zona, textvariable=var_manual)
             entrada.grid(row=linha + 1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         mostrar_para()
+        ajustar_altura()
 
     # destinatários resultantes (atualizados a cada escolha ou digitação)
     Label(cartao, text="Para:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
