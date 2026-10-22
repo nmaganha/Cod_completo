@@ -14501,14 +14501,13 @@ class TabelaQuebraDocLib(Frame):
     def __init__(self, pai, colunas, ao_clicar_titulo=None, ao_abrir=None):
         Frame.__init__(self, pai, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
         self.colunas = [(chave, titulo, largura) for chave, titulo, largura in colunas]
+        self.larguras_base = [largura for _, _, largura in self.colunas]   # largura mínima de cada coluna
         self.ao_clicar_titulo = ao_clicar_titulo
         self.ao_abrir = ao_abrir
         self.titulos = {chave: titulo for chave, titulo, _ in self.colunas}
-        self.x0, total = [], 0
-        for _, _, largura in self.colunas:
-            self.x0.append(total)
-            total += largura
-        self.largura_total = total
+        self.x0, self.largura_total = [], 0
+        self._calcular_posicoes()
+        self._agendado = None            # redesenho agendado pelo redimensionamento da janela
         self.registros = []
         self.faixas = []                 # (y_inicial, y_final, retângulo de fundo, cor de fundo) de cada linha
         self.selecionado = None          # linha "corrente" (a última clicada): usada por setas, Enter e Abrir
@@ -14531,6 +14530,7 @@ class TabelaQuebraDocLib(Frame):
         self.cabecalho.configure(scrollregion=(0, 0, self.largura_total, self.ALTURA_CABECALHO))
         self.itens_titulo = {}
         self._desenhar_cabecalho()
+        self.corpo.bind("<Configure>", self._ao_redimensionar)
 
         self.cabecalho.bind("<Button-1>", self._clicar_cabecalho)
         self.corpo.bind("<Button-1>", self._clicar)
@@ -14541,6 +14541,53 @@ class TabelaQuebraDocLib(Frame):
         for widget in (self.corpo, self.cabecalho):
             widget.bind("<MouseWheel>", self._roda)
             widget.bind("<Shift-MouseWheel>", self._roda_horizontal)
+
+    # ---- largura das colunas ---------------------------------------------------------------------------------
+    def _calcular_posicoes(self):
+        """Posição inicial (x0) de cada coluna e largura total, a partir das larguras atuais."""
+        self.x0, total = [], 0
+        for _, _, largura in self.colunas:
+            self.x0.append(total)
+            total += largura
+        self.largura_total = total
+
+    def _ao_redimensionar(self, evento=None):
+        """A janela mudou de tamanho (por exemplo, maximizada): agenda o ajuste da largura das colunas."""
+        if self._agendado is not None:
+            self.after_cancel(self._agendado)
+        self._agendado = self.after(80, self._ajustar_largura)
+
+    def _ajustar_largura(self):
+        """Quando a área da tabela é mais larga que a soma das larguras base, reparte a sobra entre as colunas, na
+        proporção da largura de cada uma (a última recebe o resto da divisão). Com a área menor, volta às larguras base
+        e a barra de rolagem horizontal cuida do excesso. Refaz o cabeçalho e as linhas (o texto quebra conforme a nova
+        largura), mantendo a seleção e a posição da rolagem."""
+        self._agendado = None
+        if not self.winfo_exists():            # a janela foi fechada antes do ajuste agendado
+            return
+        disponivel = self.corpo.winfo_width()
+        soma_base = sum(self.larguras_base)
+        if disponivel <= 1:
+            return
+        if disponivel > soma_base:
+            novas = [int(largura * disponivel / soma_base) for largura in self.larguras_base]
+            novas[-1] += disponivel - sum(novas)
+        else:
+            novas = list(self.larguras_base)
+        if novas == [largura for _, _, largura in self.colunas]:
+            return
+        self.colunas = [(chave, titulo, largura) for (chave, titulo, _), largura in zip(self.colunas, novas)]
+        self._calcular_posicoes()
+        self.cabecalho.configure(scrollregion=(0, 0, self.largura_total, self.ALTURA_CABECALHO))
+        self._desenhar_cabecalho()
+        if self.registros:
+            selecionados, corrente, ancora = list(self.selecionados), self.selecionado, self.ancora
+            posicao = self.corpo.yview()[0]
+            self._desenhar_corpo()
+            self._definir_selecao(selecionados, corrente)
+            self.ancora = ancora
+            self.corpo.yview_moveto(posicao)
+        self._rolar_x("moveto", 0)
 
     # ---- cabeçalho -------------------------------------------------------------------------------------------
     def _desenhar_cabecalho(self):
@@ -14579,6 +14626,11 @@ class TabelaQuebraDocLib(Frame):
         self.selecionado = None
         self.selecionados = []
         self.ancora = None
+        self._desenhar_corpo()
+        self.corpo.yview_moveto(0)
+
+    def _desenhar_corpo(self):
+        """Desenha as linhas com as larguras atuais das colunas (usado ao preencher e ao redimensionar)."""
         corpo = self.corpo
         corpo.delete("all")
         self.faixas = []
@@ -14601,7 +14653,6 @@ class TabelaQuebraDocLib(Frame):
         for x in self.x0[1:]:
             corpo.create_line(x, 0, x, y, fill="#E5EAF1")
         corpo.configure(scrollregion=(0, 0, self.largura_total, max(y, 1)))
-        corpo.yview_moveto(0)
 
     def linhas(self):
         """Textos exibidos em cada linha (na ordem das colunas)."""
@@ -14744,7 +14795,10 @@ class JanelaListaAteie:
         largura = min(1560, max(900, janela.winfo_screenwidth() - 20))     # a nova coluna pede mais largura
         janela.geometry(f"{largura}x700")
         janela.minsize(900, 500)
-        janela.transient(parent)
+        # Sem janela.transient(parent): no Windows ela tiraria os botões Maximizar/Minimizar. A janela continua modal
+        # (doc_lib_escolher_* faz grab_set e espera o fechamento) e redimensionável; a tabela e os botões acompanham o
+        # tamanho e as colunas se alargam proporcionalmente quando há espaço sobrando (TabelaQuebraDocLib).
+        janela.resizable(True, True)
         dica_agrupar = (f" Para agrupar {self.PLURAL} reservados, selecione-os com Ctrl+clique (ou Shift+clique) e "
                         f"clique em Agrupar {self.PLURAL}." if self.PERMITE_AGRUPAR else "")
         ui_dialogo(janela, f"GRID {self.ROTULO}",
