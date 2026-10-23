@@ -1,4 +1,4 @@
-# Código atualizado em 21-10-26 - 1637 - (Alterado nome página principal para SIGO)
+# Código atualizado em 22-10-26 - 2101 - (inserido url fatantes click22 e corrigido questionario )
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -9245,7 +9245,7 @@ def cmd_click22():
         # ===== SE RUSSAS-II =====
         "SE Russas-II": {
             "CADASTRO": {
-                "DADOS EQUIPAMENTOS": "⚠️ INSERIR URL para DADOS EQUIPAMENTOS - PTIM ⚠️",
+                # "DADOS EQUIPAMENTOS": "⚠️ INSERIR URL para DADOS EQUIPAMENTOS - PTIM ⚠️",
                 "LIMITES EQUIPAMENTOS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Limites%20de%20Equipamentos%2F2.2.3.%20Regi%C3%A3o%20Nordeste%2FCD-CT.NE.2NO.02_Rev.{rev}.pdf",
                 # "HIDRÁULICO": "⚠️ INSERIR URL para HIDRÁULICO - PTIM ⚠️",
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.3.%20Regi%C3%A3o%20Nordeste%2FCD-CT.NE.2NO.03_Rev.{rev}.pdf"
@@ -9291,7 +9291,7 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.3.%20Regi%C3%A3o%20Nordeste%2FCD-CT.NE.5NE.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                # "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - JDT ⚠️",
+                "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.2.%20Regi%C3%A3o%20Nordeste%2F5.2.2.%20%C3%81rea%20230%20kV%20Leste%2FAO-CE.NE.2LE_Rev.{rev}.pdf",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.3.%20Nordeste%2FIO-ON.NE.2NO_Rev.{rev}.pdf",
                 "ESQUEMAS ESPECIAIS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.2.%20Esquemas%20Especiais%2F3.1.2.3.%20Nordeste%2FIO-EE.NE.5NE_Rev.{rev}.pdf",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.3.%20Nordeste%2FIO-PM.NE.5NE_Rev.{rev}.pdf",
@@ -9332,7 +9332,7 @@ def cmd_click22():
         "PCH Lavrinhas": {
             "CADASTRO": {},
             "INSTRUÇÕES": {
-                "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - PCH Lavrinhas ⚠️"
+                "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.1.%20Regi%C3%A3o%20Sudeste%2FAO-CH.SE.3SP_Rev.{rev}.pdf"
             }
         },
 
@@ -9340,16 +9340,14 @@ def cmd_click22():
         "PCH Queluz": {
             "CADASTRO": {},
             "INSTRUÇÕES": {
-                "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - PCH Queluz ⚠️"
+                "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.1.%20Regi%C3%A3o%20Sudeste%2FAO-CH.SE.3SP_Rev.{rev}.pdf"
             }
         },
 
         # ===== PCH VERDE 8 =====
         "PCH Verde 8": {
             "CADASTRO": {},
-            "INSTRUÇÕES": {
-                "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - PCH Verde 8 ⚠️"
-            }
+            "INSTRUÇÕES": {}
         },
     }
     # ===== CONFIGURAÇÕES GLOBAIS PARA BUSCA =====

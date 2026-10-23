@@ -8,21 +8,13 @@
   "smtp_servidor": "smtp.gmail.com",
   "smtp_porta": 587,
   "smtp_seguranca": "starttls",
-  "smtp_usuario": "nmaganha@alupar.com.br",
-  "smtp_senha": "SENHA_DE_APP_DE_16_LETRAS",
+  "smtp_usuario": "preoperacao@alupar.com.br",
+  "smtp_senha": "zhntpfxruljutvdt",
   "smtp_timeout": 30,
   "remetentes": {
     "preoperacao@alupar.com.br": {
-      "smtp_usuario": "preoperacao@alupar.com.br",
-      "smtp_senha": "SENHA_DE_APP_DE_16_LETRAS"
-    },
-    "temporeal@alupar.com.br": {
       "smtp_usuario": "temporeal@alupar.com.br",
-      "smtp_senha": "SENHA_DE_APP_DE_16_LETRAS"
-    },
-    "jbarros@alupar.com.br": {
-      "smtp_usuario": "jbarros@alupar.com.br",
-      "smtp_senha": "SENHA_DE_APP_DE_16_LETRAS"
+      "smtp_senha": "casugrmddehsmlqq"
     }
   }
 }
