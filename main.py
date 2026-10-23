@@ -1,4 +1,4 @@
-# Código atualizado em 22-10-26 - 2101 - (inserido url fatantes click22 e corrigido questionario )
+# Código atualizado em 22-10-26 - 2136 - Click_22: (índice com cada página uma só vez e botão Resumo com a largura do botão do documento)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -8970,8 +8970,29 @@ def obter_resumo_objetivo(url_pdf):
     return resumo
 
 
+def agrupar_ocorrencias_por_pagina(ocorrencias):
+    """Junta as ocorrências de uma mesma página em UMA entrada (a lista da janela mostra cada página uma só vez).
+    Cada entrada: pagina (base 0), ocs (todas as ocorrências da página, na ordem em que aparecem), rects (todos os
+    retângulos destacados na página), termos e secoes (sem repetição) e trecho (o da primeira ocorrência da página).
+    As entradas saem na ordem das páginas."""
+    por_pagina = {}
+    for oc in ocorrencias:
+        entrada = por_pagina.setdefault(oc["pagina"], {"pagina": oc["pagina"], "ocs": [], "rects": [], "termos": [],
+                                                       "secoes": [], "trecho": ""})
+        entrada["ocs"].append(oc)
+        entrada["rects"].extend(oc["rects"])
+        if oc["termo"] not in entrada["termos"]:
+            entrada["termos"].append(oc["termo"])
+        if oc["secao"] and oc["secao"] not in entrada["secoes"]:
+            entrada["secoes"].append(oc["secao"])
+        if not entrada["trecho"]:
+            entrada["trecho"] = oc["trecho"]
+    return [por_pagina[numero] for numero in sorted(por_pagina)]
+
+
 def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_pdf, url_original):
-    """Janela com a lista de ocorrências, resumo por seção e a página com os destaques."""
+    """Janela com a lista de páginas com ocorrências (cada página aparece uma só vez), resumo por seção e a página com
+    todos os destaques da busca."""
 
     janela = Toplevel(root)
     janela.title(f"Procedimento ONS - {localidade} - {subtipo}")
@@ -9054,11 +9075,14 @@ def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_p
     lbl_rodape.pack(fill='x', padx=10, pady=(0, 6))
 
     def preencher_lista():
-        estado["lista"] = [oc for oc in ocorrencias if var_repetidas.get() or not oc["repetida"]] or ocorrencias
+        # uma linha por página (sem repetir o número), com a quantidade de destaques que ela tem
+        visiveis = [oc for oc in ocorrencias if var_repetidas.get() or not oc["repetida"]] or ocorrencias
+        estado["lista"] = agrupar_ocorrencias_por_pagina(visiveis)
         lista.delete(0, END)
-        for oc in estado["lista"]:
-            trecho = oc["trecho"] if len(oc["trecho"]) <= 90 else oc["trecho"][:87] + "..."
-            lista.insert(END, f"Pág. {oc['pagina'] + 1:>3} │ {trecho}")
+        for pg in estado["lista"]:
+            quantidade = len(pg["ocs"])
+            trecho = pg["trecho"] if len(pg["trecho"]) <= 70 else pg["trecho"][:67] + "..."
+            lista.insert(END, f"Pág. {pg['pagina'] + 1:>3} │ {quantidade} destaque{'s' if quantidade > 1 else ''} │ {trecho}")
         estado["atual"] = -1
         mostrar(0)
 
@@ -9067,7 +9091,7 @@ def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_p
             return
         indice = max(0, min(indice, len(estado["lista"]) - 1))
         estado["atual"] = indice
-        oc = estado["lista"][indice]
+        oc = estado["lista"][indice]        # entrada da página: todas as ocorrências dela
         pagina = doc[oc["pagina"]]
         zoom = estado["zoom"]
 
@@ -9097,8 +9121,8 @@ def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_p
         lista.selection_set(indice)
         lista.see(indice)
         lbl_contador.configure(text=f"{indice + 1} / {len(estado['lista'])}  (pág. {oc['pagina'] + 1})")
-        lbl_rodape.configure(text=f"Seção: {oc['secao'] or '-'}   │   Termo: {oc['termo']}   │   "
-                                  f"Arquivo destacado: {caminho_pdf}")
+        lbl_rodape.configure(text=f"Seção: {' │ '.join(oc['secoes']) or '-'}   │   Termo: {', '.join(oc['termos'])}   │   "
+                                  f"Destaques na página: {len(oc['ocs'])}   │   Arquivo destacado: {caminho_pdf}")
 
     def navegar(passo):
         if estado["lista"]:
@@ -9735,6 +9759,11 @@ def cmd_click22():
                 Label(btn_frame, text="⚠️ Configurar URL", bg="#a4bad2", font=("Arial", 8),
                       fg="#555").pack(pady=(5, 0))
                 continue
+
+            # O frame do documento não estica com a célula: com um único documento a coluna fica bem mais larga que o
+            # botão e o "Resumo" (que preenche a largura do frame) ficava maior que o botão do documento. Assim os dois
+            # têm sempre a mesma largura, a do botão do documento.
+            btn_frame.grid_configure(sticky="n")
 
             # "Clique para abrir" fica DENTRO do botão (com a cor de fundo da janela), para ninguém
             # clicar no texto achando que é o botão
