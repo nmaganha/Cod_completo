@@ -1,4 +1,4 @@
-# Código atualizado em 22-10-26 - 2136 - Click_22: (índice com cada página uma só vez e botão Resumo com a largura do botão do documento)
+# Código atualizado em 22-10-26 - 2200 - Click_22: (ajustes no índice com cada página uma só vez e botão Resumo com a largura do botão do documento)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
