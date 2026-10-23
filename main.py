@@ -9075,14 +9075,13 @@ def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_p
     lbl_rodape.pack(fill='x', padx=10, pady=(0, 6))
 
     def preencher_lista():
-        # uma linha por página (sem repetir o número), com a quantidade de destaques que ela tem
+        # uma linha por página (sem repetir o número)
         visiveis = [oc for oc in ocorrencias if var_repetidas.get() or not oc["repetida"]] or ocorrencias
         estado["lista"] = agrupar_ocorrencias_por_pagina(visiveis)
         lista.delete(0, END)
         for pg in estado["lista"]:
-            quantidade = len(pg["ocs"])
-            trecho = pg["trecho"] if len(pg["trecho"]) <= 70 else pg["trecho"][:67] + "..."
-            lista.insert(END, f"Pág. {pg['pagina'] + 1:>3} │ {quantidade} destaque{'s' if quantidade > 1 else ''} │ {trecho}")
+            trecho = pg["trecho"] if len(pg["trecho"]) <= 90 else pg["trecho"][:87] + "..."
+            lista.insert(END, f"Pág. {pg['pagina'] + 1:>3} │ {trecho}")
         estado["atual"] = -1
         mostrar(0)
 
@@ -9102,15 +9101,11 @@ def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_p
             canvas.delete("all")
             canvas.create_image(0, 0, anchor="nw", image=estado["imagem"])
             canvas.configure(scrollregion=(0, 0, pix.width, pix.height))
-        canvas.delete("marcador")
 
+        # Só o destaque amarelo do PDF aparece (sem borda): aqui se calcula apenas onde está o primeiro destaque da
+        # página, para a tela rolar até ele
         transformacao = pagina.rotation_matrix * fitz.Matrix(zoom, zoom)
-        topo = None
-        for r in oc["rects"]:
-            rr = fitz.Rect(r) * transformacao
-            canvas.create_rectangle(rr.x0 - 3, rr.y0 - 3, rr.x1 + 3, rr.y1 + 3,
-                                    outline="#E00000", width=3, tags="marcador")
-            topo = rr.y0 if topo is None else min(topo, rr.y0)
+        topo = min((fitz.Rect(r) * transformacao).y0 for r in oc["rects"])
 
         altura = max(1, estado["imagem"].height())
         canvas.update_idletasks()
@@ -9122,7 +9117,7 @@ def abrir_visualizador_destaque(doc, ocorrencias, localidade, subtipo, caminho_p
         lista.see(indice)
         lbl_contador.configure(text=f"{indice + 1} / {len(estado['lista'])}  (pág. {oc['pagina'] + 1})")
         lbl_rodape.configure(text=f"Seção: {' │ '.join(oc['secoes']) or '-'}   │   Termo: {', '.join(oc['termos'])}   │   "
-                                  f"Destaques na página: {len(oc['ocs'])}   │   Arquivo destacado: {caminho_pdf}")
+                                  f"Arquivo destacado: {caminho_pdf}")
 
     def navegar(passo):
         if estado["lista"]:
