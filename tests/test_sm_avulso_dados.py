@@ -863,3 +863,61 @@ class TestListagem:
         assert (reservada["status"], reservada["motivo"], reservada["prog_inicio"]) == (RESERVADO, "SM RESERVADA", "")
         assert (vigente["prog_inicio"], vigente["prog_termino"]) == ("27/10/2026 09:00", "27/10/2026 18:00")   # reprogramação em vigor
         assert (vigente["local"], vigente["equipamento"], vigente["status"]) == ("SE MCP", "DJ 52-1", AGUARDA)
+
+
+# ======================================================================================================================
+# Entradas hostis ou fora do comum: a camada de gravação não confia nos dados recebidos
+# ======================================================================================================================
+class TestEntradasHostis:
+    def test_status_emissao_e_ids_forjados_em_sm_nova_sao_ignorados(self, app, fluxo):
+        sm_id = fluxo.salvar(status="Concluído", emitido=1, emitido_por="x", id=None, numero="9999/26", ano=1999,
+                             sequencia=999, revisao=77, cancelada_por="x", criado_por="outro")
+        doc = fluxo.doc(sm_id)
+        assert (doc["status"], doc["emitido"], doc["numero"], doc["revisao"], doc["criado_por"]) == \
+            (EM_ANALISE, 0, "0001/26", 1, "operador1")
+        assert doc["emitido_por"] is None and doc["cancelada_por"] is None
+
+    def test_sm_nova_com_data_e_hora_das_manobras_ou_executantes_e_recusada(self, app, fluxo):
+        base = fluxo.dados()
+        liberacao = [dict(m, data="25/10/2026", hora="13:00") for m in base["liberacao"]]
+        with pytest.raises(app.DocLibBloqueado):
+            fluxo.salvar(liberacao=liberacao)
+        with pytest.raises(app.DocLibBloqueado):
+            fluxo.salvar(exec_lib_local="Fulano")
+        with pytest.raises(app.DocLibBloqueado):
+            fluxo.salvar(conferencias=[fluxo.conferencia_manual()])
+        assert numeros(app) == []
+
+    def test_sm_gravada_nao_aceita_trocar_de_estado_pelos_dados(self, app, fluxo):
+        sm_id = fluxo.salvar()
+        fluxo.alterar(sm_id, status="Concluído", emitido=1, numero="0042/26")
+        doc = fluxo.doc(sm_id)
+        assert (doc["status"], doc["emitido"], doc["numero"]) == (EM_ANALISE, 0, "0001/26")
+
+    def test_usuario_nao_vira_o_elaborador_de_uma_sm_de_outro(self, app, fluxo):
+        sm_id = fluxo.salvar(usuario="operador1")
+        fluxo.alterar(sm_id, usuario="operador2", motivo="Outra pessoa corrigiu o motivo")
+        doc = fluxo.doc(sm_id)
+        assert (doc["elaborado_ass"], doc["atualizado_por"], doc["criado_por"]) == ("operador1", "operador2", "operador1")
+
+    def test_aspas_e_sql_nos_textos_sao_gravados_literalmente(self, app, fluxo):
+        texto = "'; DROP TABLE doclib_sm; -- \"aspas\" %s ? \\"
+        sm_id = fluxo.salvar(motivo=texto, observacoes=texto, cond_loto_sem=texto)
+        doc = fluxo.doc(sm_id)
+        assert doc["motivo"] == texto and doc["cond_loto_sem"] == texto
+        assert numeros(app) == ["0001/26"]
+
+    def test_texto_enorme_e_validado_sem_travar(self, app, fluxo):
+        import time
+        inicio = time.time()
+        erros = erros_de(app, fluxo, motivo="palavra " * 5000)
+        assert ("motivo",) in erros and time.time() - inicio < 5
+
+    def test_unicode_e_caracteres_especiais(self, app, fluxo):
+        texto = "Manutenção – disjuntor 52‑1 (±5%) “teste” ç ã õ µ Ω 日本"
+        assert fluxo.doc(fluxo.salvar(motivo=texto, observacoes=texto))["motivo"] == texto
+
+    def test_numero_da_sequencia_com_espacos_e_zeros(self, app, fluxo):
+        doc = fluxo.doc(fluxo.salvar(liberacao=[{"numero": " 01 ", "local": "SE", "acao": "Abrir DJ"},
+                                                {"numero": "1", "local": "SE", "acao": "Abrir 89-1"}]))
+        assert [m["numero"] for m in doc["liberacao"]] == ["1", "1"] and [m["identificacao"] for m in doc["liberacao"]] == ["1A", "1B"]

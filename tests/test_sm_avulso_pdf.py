@@ -238,3 +238,25 @@ class TestSituacoesEArquivo:
         conexao.close()
         _, _, texto = pdf(fluxo.salvar())
         assert "Operador de Teste Um" in sem_quebras(texto) and "operador1" in texto
+
+
+class TestTextosSemEspacoOuExtremos:
+    def test_palavra_enorme_sem_espaco_quebra_dentro_da_margem(self, app, fluxo, pdf):
+        sm_id = fluxo.salvar(liberacao=[{"numero": "1", "local": "SE", "acao": "X" * 400}], cond_chaves_abertas="Y" * 400,
+                             observacoes="Z" * 600, motivo="W" * 300)
+        _, documento, texto = pdf(sm_id)
+        for pagina in documento:
+            assert all(p[2] <= MARGEM_DIREITA for p in pagina.get_text("words"))
+        assert texto.count("X") == 400 and texto.count("Y") == 400 and texto.count("Z") == 600
+
+    def test_sm_com_tudo_no_limite_gera_o_documento(self, app, fluxo, pdf):
+        trinta = [{"numero": str(i), "local": "SE MCP", "acao": f"Abrir equipamento {i} " * 8} for i in range(1, 31)]
+        sm_id = fluxo.salvar(liberacao=trinta, normalizacao=trinta, motivo="\n".join(f"linha {i}" for i in range(1, 7)),
+                             cond_chaves_abertas="a\nb\nc", observacoes="o\n" * 30,
+                             equipamentos=[{"local": f"L{i}", "instalacao": "I" * 40, "equipamento": "E" * 60, "caracterizacao": "C" * 30,
+                                            "local_execucao": "X" * 50, "tempo_retorno": "99:59"} for i in (1, 2, 3)])
+        fluxo.gerar(sm_id)
+        fluxo.conferir(sm_id, *[fluxo.conferencia_manual(nome=f"C{i}") for i in range(9)], fluxo.conferencia_sistema())
+        assert fluxo.doc(sm_id)["status"] == APROVADO and len(fluxo.doc(sm_id)["conferencias"]) == 10
+        _, documento, texto = pdf(sm_id)
+        assert len(documento) >= 4 and "99:59" in texto and sem_quebras(texto).count("Nome:") == 10
