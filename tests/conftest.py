@@ -12,12 +12,11 @@ import os
 import shutil
 import subprocess
 import sys
-import types
 
 import pytest
 
-RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CAMINHO_MAIN = os.path.join(RAIZ, "main.py")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from carregar_main import carregar_main  # noqa: E402
 
 
 def _garantir_tela():
@@ -36,15 +35,7 @@ def app(tmp_path_factory):
     xvfb = _garantir_tela()
     pasta = tmp_path_factory.mktemp("cog_sessao")
     anterior = os.getcwd()
-    os.chdir(pasta)
-    shutil.copy(os.path.join(RAIZ, "cog3.png"), pasta / "cog3.png")        # a janela principal lê a imagem na pasta atual
-    codigo = open(CAMINHO_MAIN, encoding="utf-8").read().rstrip()
-    assert codigo.endswith("root.mainloop()"), "main.py deveria terminar com root.mainloop()"
-    codigo = codigo[:-len("root.mainloop()")] + "pass\n"
-    modulo = types.ModuleType("cog_main")
-    modulo.__file__ = CAMINHO_MAIN
-    sys.modules["cog_main"] = modulo
-    exec(compile(codigo, CAMINHO_MAIN, "exec"), modulo.__dict__)
+    modulo = carregar_main(str(pasta))
     yield modulo
     try:
         modulo.root.destroy()

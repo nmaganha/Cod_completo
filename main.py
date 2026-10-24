@@ -22848,12 +22848,6 @@ def doc_lib_calcular_status_sm(doc, emitido):
     return STATUS_SM_AGUARDA_CONFERENCIA
 
 
-def doc_lib_local_equipamento_sm(doc):
-    """(Local, Equipamento) da primeira linha da tabela 3 (usado no GRID)."""
-    primeira = (doc.get("equipamentos") or [{}])[0]
-    return primeira.get("local") or "", primeira.get("equipamento") or ""
-
-
 def doc_lib_periodo_vigente_sm(doc):
     """(início, término) do período em vigor: a última reprogramação preenchida ou, se não houver, a Programação. Cada um no
     formato 'dd/mm/aaaa HH:MM' ('' se não informado)."""
@@ -23461,15 +23455,20 @@ def doc_lib_reservar_sm(quantidade, usuario, nome_completo=""):
 
 def doc_lib_listar_sm():
     """Um registro por SM, da mais recente para a mais antiga, no formato que o GRID espera (a chave "ateie_id" é o id do
-    documento, nome herdado do GRID ATEIE; a SM tem uma só "linha", a de ordem 1)."""
+    documento, nome herdado do GRID ATEIE; a SM tem uma só "linha", a de ordem 1). Uma única consulta: o Local e o Equipamento
+    são os da primeira linha da tabela 3 e a Programação é o período em vigor (reprogramação mais recente, se houver)."""
     conexao = doc_lib_conectar()
+    conexao.row_factory = sqlite3.Row
     try:
-        ids = [linha[0] for linha in conexao.execute("SELECT id FROM doclib_sm ORDER BY ano DESC, sequencia DESC").fetchall()]
-        documentos = [_doc_lib_ler_sm(conexao, sm_id) for sm_id in ids]
+        linhas = conexao.execute(
+            "SELECT s.*, e.local AS grid_local, e.equipamento AS grid_equipamento FROM doclib_sm s "
+            "LEFT JOIN doclib_sm_equipamentos e ON e.sm_id = s.id AND e.ordem = 1 "
+            "ORDER BY s.ano DESC, s.sequencia DESC").fetchall()
     finally:
         conexao.close()
     resultado = []
-    for doc in documentos:
+    for linha in linhas:
+        doc = dict(linha)
         registro = {"ateie_id": doc["id"], "ordem": 1, "numero": doc["numero"], "ano": doc["ano"],
                     "sequencia": doc["sequencia"], "status": doc["status"], "email_enviado": "Não"}
         if doc["status"] == STATUS_ATEIE_RESERVADO:          # só o número e a expressão SM RESERVADA; o resto em branco
@@ -23477,9 +23476,9 @@ def doc_lib_listar_sm():
                             elaborado="")
         else:
             inicio, termino = doc_lib_periodo_vigente_sm(doc)
-            local, equipamento = doc_lib_local_equipamento_sm(doc)
-            registro.update(prog_inicio=inicio, prog_termino=termino, local=local, equipamento=equipamento,
-                            motivo=doc["motivo"] or "", elaborado=doc["elaborado_por"] or "")
+            registro.update(prog_inicio=inicio, prog_termino=termino, local=doc["grid_local"] or "",
+                            equipamento=doc["grid_equipamento"] or "", motivo=doc["motivo"] or "",
+                            elaborado=doc["elaborado_por"] or "")
         resultado.append(registro)
     return resultado
 
@@ -24030,6 +24029,16 @@ def doc_lib_escolher_sm(parent):
     return janela.resultado
 
 
+class DicaBotaoSM(ToolTipSGA):
+    """ToolTipSGA para os botões do Doc_Lib.: acrescenta (add="+") aos eventos Enter e Leave em vez de substituí-los, para o
+    botão não perder o efeito de cor ao passar o mouse (doc_lib_criar_botao)."""
+
+    def __init__(self, widget, texto):
+        self.widget, self.texto, self.tipwindow = widget, texto, None
+        widget.bind("<Enter>", self.mostrar, add="+")
+        widget.bind("<Leave>", self.esconder, add="+")
+
+
 class LinhasManobrasSM:
     """Tabela de manobras (Liberação ou Normalização) da janela da SM, com de 1 a 30 linhas: mostra só as linhas necessárias
     e o botão Adicionar manobra até o limite. Cada linha tem:
@@ -24119,12 +24128,12 @@ class LinhasManobrasSM:
                                                   fonte=(SGA_FONTE, 8, "bold"))
         linha["btn_remover"] = doc_lib_criar_botao(quadro_botoes, "Remover", lambda l=linha: self.remover_linha(l), "neutro",
                                                    fonte=(SGA_FONTE, 8, "bold"))
-        ToolTipSGA(linha["btn_conferir"], "A ação foi mantida sem inverter: confira-a e confirme (ou altere o texto)")
+        DicaBotaoSM(linha["btn_conferir"], "A ação foi mantida sem inverter: confira-a e confirme (ou altere o texto)")
         for botao, largura in ((linha["btn_subir"], 3), (linha["btn_descer"], 3), (linha["btn_remover"], 8)):
             botao.configure(width=largura)
             botao.pack(side=LEFT, padx=2)
-        ToolTipSGA(linha["btn_subir"], "Subir a manobra (a sequência é recalculada)")
-        ToolTipSGA(linha["btn_descer"], "Descer a manobra (a sequência é recalculada)")
+        DicaBotaoSM(linha["btn_subir"], "Subir a manobra (a sequência é recalculada)")
+        DicaBotaoSM(linha["btn_descer"], "Descer a manobra (a sequência é recalculada)")
 
         linha["celulas"] = [quadro_data, quadro_sequencia, linha["local"], linha["acao"], quadro_botoes]
         if valores:
@@ -24331,6 +24340,7 @@ class LinhasConferenciaSM:
             primeira = linha["area"] if modalidade == DOC_LIB_MODALIDADE_SISTEMA_SM else linha["nome"]
             primeira.focus_set()
             self.janela.rolar_ate(primeira)
+            self.janela._atualizar_estado()                 # Salvar habilita e Gerar SM Avulso desabilita na hora
         return linha
 
     def adicionar_linha(self, modalidade, valores, registrada):
@@ -24370,6 +24380,7 @@ class LinhasConferenciaSM:
             celula.destroy()
         self.linhas.remove(linha)
         self._reorganizar()
+        self.janela._atualizar_estado()
 
     def preencher(self, conferencias):
         """Mostra as conferências já registradas (linhas travadas)."""
@@ -24630,8 +24641,8 @@ class JanelaSMAvulso:
         # ---- 6 e 7
         card = self._novo_cartao()
         self._titulo_secao("6. Manobras de Liberação:",
-                           "Até 30 manobras. A data e a hora de cada manobra são controle interno (só nesta tela, não vão "
-                           "para o documento impresso) e são preenchidas depois da conferência da SM.")
+                           "Até 30 manobras. A data e a hora de cada manobra são controle interno (só nesta tela, não vão para o\n"
+                           "documento impresso) e são preenchidas depois da conferência da SM.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.tab_lib = LinhasManobrasSM(self, quadro, "lib", "Manobras de Liberação")
@@ -24650,7 +24661,7 @@ class JanelaSMAvulso:
         self.btn_inverter = doc_lib_criar_botao(topo, "Inverter Manobras", self.inverter_manobras, "agendar",
                                                 fonte=(SGA_FONTE, 9, "bold"))
         self.btn_inverter.pack(side=RIGHT, ipadx=8, ipady=2)
-        ToolTipSGA(self.btn_inverter, "Gera a normalização a partir da liberação: ordem inversa e ação com o antônimo")
+        DicaBotaoSM(self.btn_inverter, "Gera a normalização a partir da liberação: ordem inversa e ação com o antônimo")
         self._linha_larga(topo, pady=(10, 2))
         Label(card, text="Até 30 manobras. O botão Inverter Manobras monta a normalização a partir da liberação (ordem "
                          "inversa e ação com o antônimo operacional); ação sem inversão segura é mantida e marcada para "
@@ -24694,9 +24705,9 @@ class JanelaSMAvulso:
         self._alvos["elaborado_data"] = (self.ent_elaborado_data, rot)
 
         self._titulo_secao("12. Conferência:",
-                           "Feita depois de gerada a SM, com até 10 linhas. A SM só passa a Aprovado para Execução com pelo "
-                           "menos uma Conferência manual (profissional da Manutenção) E uma Conferência pelo sistema "
-                           "(profissional autenticado, Operação); só uma delas não aprova. A conferência salva não muda mais.")
+                           "Feita depois de gerada a SM, com até 10 linhas. A SM só passa a Aprovado para Execução com pelo menos\n"
+                           "uma Conferência manual (profissional da Manutenção) E uma Conferência pelo sistema (profissional "
+                           "autenticado, Operação);\nsó uma delas não aprova. A conferência salva não muda mais.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.conferencias = LinhasConferenciaSM(self, quadro)
@@ -24716,7 +24727,7 @@ class JanelaSMAvulso:
             dados["botao"] = doc_lib_criar_botao(cabecalho, "Habilitar", lambda p=prefixo: self.habilitar_reprogramacao(p),
                                                  "aviso", fonte=(SGA_FONTE, 8, "bold"))
             dados["botao"].pack(side=RIGHT, padx=6, pady=3, ipadx=6)
-            ToolTipSGA(dados["botao"], "Habilita o preenchimento desta reprogramação (as reprogramações seguem a ordem)")
+            DicaBotaoSM(dados["botao"], "Habilita o preenchimento desta reprogramação (as reprogramações seguem a ordem)")
         corpo = Frame(bloco, bg=SGA_CARD)
         corpo.pack(fill=X, padx=8, pady=6)
         for linha, (titulo, campo_data, campo_hora) in enumerate((("Início", "data_inicio", "hora_inicio"),

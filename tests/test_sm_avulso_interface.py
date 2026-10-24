@@ -10,8 +10,9 @@ CAMPOS_EQUIP = ("local", "instalacao", "equipamento", "caracterizacao", "local_e
 
 
 @pytest.fixture()
-def janelas(app):
-    """Abre janelas da SM e as fecha ao final do teste."""
+def janelas(app, mensagens):
+    """Abre janelas da SM e as fecha ao final do teste (as caixas de mensagem são as do fixture 'mensagens': um aviso agendado
+    pela janela, como o do nome completo, nunca fica esperando um clique)."""
     abertas = []
 
     def abrir(**kwargs):
@@ -107,6 +108,18 @@ class TestAberturaEPadroes:
         janela = janelas()
         assert janela.janela.title() == "COG - DOC_LIB. - SM AVULSO"
         assert "Gerar SM Avulso" in janela.btn_gerar.cget("text")
+
+    def test_dica_do_botao_nao_tira_o_efeito_de_hover(self, app, banco, janelas):
+        janela = janelas()
+        for botao in (janela.btn_inverter, janela.periodo["p1"]["botao"]):
+            assert estado(botao) == "normal"
+            fundo, fundo_hover, _ = app.SGA_ESTILOS_BOTAO[botao._doclib_estilo]
+            botao.event_generate("<Enter>")
+            app.root.update()
+            assert str(botao.cget("bg")) == fundo_hover
+            botao.event_generate("<Leave>")
+            app.root.update()
+            assert str(botao.cget("bg")) == fundo
 
 
 class TestReprogramacoes:
@@ -383,6 +396,15 @@ class TestFluxoCompletoPelaInterface:
         assert conferencias.adicionar_nova("sistema") is None
         conferencias.remover_linha(conferencias.linhas[-1])
         assert len(conferencias.linhas) == 9 and estado(conferencias.btn_sistema) == "normal"
+
+    def test_botoes_acompanham_a_inclusao_e_a_remocao_de_conferencias_na_hora(self, app, banco, janelas, mensagens, dialogos, fluxo):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(AGUARDA)))
+        assert "salvar" not in habilitados(janela) and "gerar" in habilitados(janela)
+        linha = janela.conferencias.adicionar_nova("manual")
+        assert "salvar" in habilitados(janela) and "gerar" not in habilitados(janela)       # sem esperar a vigilância de 300 ms
+        janela.conferencias.remover_linha(linha)
+        assert "salvar" not in habilitados(janela) and "gerar" in habilitados(janela)
 
     def test_cancelar_em_qualquer_status_menos_concluido(self, app, banco, janelas, mensagens, dialogos, fluxo):
         for status in (EM_ANALISE, AGUARDA, APROVADO, EM_EXECUCAO):
