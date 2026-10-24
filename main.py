@@ -1,4 +1,4 @@
-# Código atualizado em 22-10-26 - 2200 - Click_22: (ajustes no índice com cada página uma só vez e botão Resumo com a largura do botão do documento)
+# Código atualizado em 24-10-26 - 1000 - Click_22: (terceiro botão AJUSTAMENTO OPERATIVO por instalação e mensagem única para categoria sem documentos)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -9170,7 +9170,6 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.6.%20Regi%C3%A3o%20Centro-Oeste%2FCD-CT.CO.5GB.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                # "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - MGP ⚠️",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.6.%20Centro-Oeste%2FIO-ON.CO.5GB_Rev.{rev}.pdf",
                 # "ESQUEMAS ESPECIAIS": "⚠️ INSERIR URL para ESQUEMAS ESPECIAIS - MGP ⚠️",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.6.%20Centro-Oeste%2FIO-PM.CO.5GB_Rev.{rev}.pdf",
@@ -9178,6 +9177,8 @@ def cmd_click22():
                 # "RECOMPOSIÇÃO DA REDE": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - MGP ⚠️",
                 "OPERAÇÃO DE RESERVATÓRIOS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.6.%20Opera%C3%A7%C3%A3o%20de%20Reservat%C3%B3rios%2FIO-OR.PR.PAR_Rev.{rev}.pdf",
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.6.%20Centro-Oeste%2F3.7.6.1.%20%C3%81rea%20500345%20kV%20de%20Goi%C3%A1sBras%C3%ADlia%2FIO-OI.CO.UFRC_Rev.{rev}.pdf"
+            },
+            "AJUSTAMENTO OPERATIVO": {
             }
         },
 
@@ -9190,7 +9191,6 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.5.%20Regi%C3%A3o%20Sul%2FCD-CT.S.2RS.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                # "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - SJO ⚠️",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.5.%20Sul%2FIO-ON.S.2RS_Rev.{rev}.pdf",
                 # "ESQUEMAS ESPECIAIS": "⚠️ INSERIR URL para ESQUEMAS ESPECIAIS - SJO ⚠️",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.5.%20Sul%2FIO-PM.S.2RS_Rev.{rev}.pdf",
@@ -9198,6 +9198,8 @@ def cmd_click22():
                 # "RECOMPOSIÇÃO DA REDE": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - SJO ⚠️",
                 "OPERAÇÃO DE RESERVATÓRIOS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.6.%20Opera%C3%A7%C3%A3o%20de%20Reservat%C3%B3rios%2FIO-OR.UR.URU_Rev.{rev}.pdf",
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.5.%20Sul%2F3.7.5.2.%20%C3%81rea%20230%20kV%20do%20Rio%20Grande%20do%20Sul%2FIO-OI.S.USJO_Rev.{rev}.pdf"
+            },
+            "AJUSTAMENTO OPERATIVO": {
             }
         },
 
@@ -9210,7 +9212,6 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.4.%20Regi%C3%A3o%20Norte%2FCD-CT.N.5MM.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                # "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - FGO ⚠️",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.4.%20Norte%2FIO-ON.N.5MM_Rev.{rev}.pdf",
                 "ESQUEMAS ESPECIAIS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.2.%20Esquemas%20Especiais%2F3.1.2.4.%20Norte%2FIO-EE.N.5MM_Rev.{rev}.pdf",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.4.%20Norte%2FIO-PM.N.5MM_Rev.{rev}.pdf",
@@ -9218,6 +9219,8 @@ def cmd_click22():
                 # "RECOMPOSIÇÃO DA REDE": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - FGO ⚠️",
                 "OPERAÇÃO DE RESERVATÓRIOS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.6.%20Opera%C3%A7%C3%A3o%20de%20Reservat%C3%B3rios%2FIO-OR.AM.ARA_Rev.{rev}.pdf",
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.4.%20Norte%2F3.7.4.5.%20%C3%81rea%20500230%20kV%20Manaus%20-%20Macap%C3%A1%2FIO-OI.N.FGO_Rev.{rev}.pdf"
+            },
+            "AJUSTAMENTO OPERATIVO": {
             }
         },
 
@@ -9230,7 +9233,6 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.4.%20Regi%C3%A3o%20Norte%2FCD-CT.N.5MM.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                # "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - FGO ⚠️",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.4.%20Norte%2FIO-ON.N.5MM_Rev.{rev}.pdf",
                 "ESQUEMAS ESPECIAIS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.2.%20Esquemas%20Especiais%2F3.1.2.4.%20Norte%2FIO-EE.N.5MM_Rev.{rev}.pdf",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.4.%20Norte%2FIO-PM.N.5MM_Rev.{rev}.pdf",
@@ -9238,6 +9240,8 @@ def cmd_click22():
                 # "RECOMPOSIÇÃO DA REDE": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - FGO ⚠️",
                 # "OPERAÇÃO DE RESERVATÓRIOS": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - FGO ⚠️",
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.4.%20Norte%2F3.7.4.5.%20%C3%81rea%20500230%20kV%20Manaus%20-%20Macap%C3%A1%2FIO-OI.N.MCP_Rev.{rev}.pdf"
+            },
+            "AJUSTAMENTO OPERATIVO": {
             }
         },
 
@@ -9250,7 +9254,6 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.6.%20Regi%C3%A3o%20Centro-Oeste%2FCD-CT.CO.5GB.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                # "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - MGP ⚠️",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.6.%20Centro-Oeste%2FIO-ON.CO.5GB_Rev.{rev}.pdf",
                 # "ESQUEMAS ESPECIAIS": "⚠️ INSERIR URL para ESQUEMAS ESPECIAIS - MGP ⚠️",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.6.%20Centro-Oeste%2FIO-PM.CO.5GB_Rev.{rev}.pdf",
@@ -9258,6 +9261,8 @@ def cmd_click22():
                 # "RECOMPOSIÇÃO DA REDE": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - MGP ⚠️",
                 # "OPERAÇÃO DE RESERVATÓRIOS": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - MGP ⚠️",
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.6.%20Centro-Oeste%2F3.7.6.1.%20%C3%81rea%20500345%20kV%20de%20Goi%C3%A1sBras%C3%ADlia%2FIO-OI.CO.IGU_Rev.{rev}.pdf"
+            },
+            "AJUSTAMENTO OPERATIVO": {
             }
         },
 
@@ -9270,7 +9275,6 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.3.%20Regi%C3%A3o%20Nordeste%2FCD-CT.NE.2NO.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                # "AJUSTAMENTO OPERATIVO": "⚠️ INSERIR URL para AJUSTAMENTO OPERATIVO - PTIM ⚠️",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.3.%20Nordeste%2FIO-ON.NE.2NO_Rev.{rev}.pdf",
                 "ESQUEMAS ESPECIAIS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.2.%20Esquemas%20Especiais%2F3.1.2.3.%20Nordeste%2FIO-EE.NE.2NO_Rev.{rev}.pdf",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.3.%20Nordeste%2FIO-PM.NE.2NO_Rev.{rev}.pdf",
@@ -9278,6 +9282,8 @@ def cmd_click22():
                 # "RECOMPOSIÇÃO DA REDE": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - PTIM ⚠️",
                 # "OPERAÇÃO DE RESERVATÓRIOS": "⚠️ INSERIR URL para OPERAÇÃO DE RESERVATÓRIOS - PTIM ⚠️",
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.3.%20Nordeste%2F3.7.3.4.%20%C3%81rea%20230%20kV%20Norte%2FIO-OI.NE.RSD_Rev.{rev}.pdf"
+            },
+            "AJUSTAMENTO OPERATIVO": {
             }
         },
 
@@ -9290,7 +9296,6 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.3.%20Regi%C3%A3o%20Nordeste%2FCD-CT.NE.2NO.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.2.%20Regi%C3%A3o%20Nordeste%2F5.2.4.%20%C3%81rea%20230%20kV%20Norte%2FAO-CE.NE.2NO_Rev.{rev}.pdf",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.3.%20Nordeste%2FIO-ON.NE.2NO_Rev.{rev}.pdf",
                 "ESQUEMAS ESPECIAIS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.2.%20Esquemas%20Especiais%2F3.1.2.3.%20Nordeste%2FIO-EE.NE.2NO_Rev.{rev}.pdf",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.3.%20Nordeste%2FIO-PM.NE.2NO_Rev.{rev}.pdf",
@@ -9298,6 +9303,9 @@ def cmd_click22():
                 # "RECOMPOSIÇÃO DA REDE": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - PTIM ⚠️",
                 # "OPERAÇÃO DE RESERVATÓRIOS": "⚠️ INSERIR URL para OPERAÇÃO DE RESERVATÓRIOS - PTIM ⚠️",
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.3.%20Nordeste%2F3.7.3.4.%20%C3%81rea%20230%20kV%20Norte%2FIO-OI.NE.PTM_Rev.{rev}.pdf"
+            },
+            "AJUSTAMENTO OPERATIVO": {
+                "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.2.%20Regi%C3%A3o%20Nordeste%2F5.2.4.%20%C3%81rea%20230%20kV%20Norte%2FAO-CE.NE.2NO_Rev.{rev}.pdf"
             }
         },
 
@@ -9310,7 +9318,6 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.3.%20Regi%C3%A3o%20Nordeste%2FCD-CT.NE.5NE.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.2.%20Regi%C3%A3o%20Nordeste%2F5.2.2.%20%C3%81rea%20230%20kV%20Leste%2FAO-CE.NE.2LE_Rev.{rev}.pdf",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.3.%20Nordeste%2FIO-ON.NE.2NO_Rev.{rev}.pdf",
                 "ESQUEMAS ESPECIAIS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.2.%20Esquemas%20Especiais%2F3.1.2.3.%20Nordeste%2FIO-EE.NE.5NE_Rev.{rev}.pdf",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.3.%20Nordeste%2FIO-PM.NE.5NE_Rev.{rev}.pdf",
@@ -9318,6 +9325,9 @@ def cmd_click22():
                 # "RECOMPOSIÇÃO DA REDE": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - JDT ⚠️",
                 # "OPERAÇÃO DE RESERVATÓRIOS": "⚠️ INSERIR URL para OPERAÇÃO DE RESERVATÓRIOS - JDT ⚠️",
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.3.%20Nordeste%2F3.7.3.8.%20%C3%81rea%20500%20kV%20da%20Regi%C3%A3o%20Nordeste%2FIO-OI.NE.JDD_Rev.{rev}.pdf"
+            },
+            "AJUSTAMENTO OPERATIVO": {
+                "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.2.%20Regi%C3%A3o%20Nordeste%2F5.2.2.%20%C3%81rea%20230%20kV%20Leste%2FAO-CE.NE.2LE_Rev.{rev}.pdf"
             }
         },
 
@@ -9330,7 +9340,6 @@ def cmd_click22():
                 "FAIXA DE CONTROLE DE TENSÃO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F2.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20-%20SM%205.11%2F2.6.%20Cadastros%20de%20Informa%C3%A7%C3%B5es%20Operacionais%20de%20Faixas%20para%20Controle%20de%20Tens%C3%A3o%2F2.6.3.%20Regi%C3%A3o%20Nordeste%2FCD-CT.NE.2NO.03_Rev.{rev}.pdf"
             },
             "INSTRUÇÕES": {
-                "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.2.%20Regi%C3%A3o%20Nordeste%2F5.2.4.%20%C3%81rea%20230%20kV%20Norte%2FAO-AJ.NE.UPTM_Rev.{rev}.pdf",
                 "OPERAÇÃO NORMAL": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.1.%20Opera%C3%A7%C3%A3o%20Normal%2F3.1.1.3.%20Nordeste%2FIO-ON.NE.2NO_Rev.{rev}.pdf",
                 "ESQUEMAS ESPECIAIS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.2.%20Esquemas%20Especiais%2F3.1.2.3.%20Nordeste%2FIO-EE.NE.2NO_Rev.{rev}.pdf",
                 "PREPARAÇÃO DE MANOBRAS": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.1.%20Controle%20da%20Transmiss%C3%A3o%2F3.1.3.%20Prepara%C3%A7%C3%A3o%20para%20Manobras%2F3.1.3.3.%20Nordeste%2FIO-PM.NE.2NO_Rev.{rev}.pdf",
@@ -9338,19 +9347,23 @@ def cmd_click22():
                 # "RECOMPOSIÇÃO DA REDE": "⚠️ INSERIR URL para RECOMPOSIÇÃO DA REDE - PTIM ⚠️",
                 # "OPERAÇÃO DE RESERVATÓRIOS": "⚠️ INSERIR URL para OPERAÇÃO DE RESERVATÓRIOS - PTIM ⚠️",
                 "OPERAÇÃO DE INSTALAÇÕES": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F3.%20Instru%C3%A7%C3%B5es%20de%20Opera%C3%A7%C3%A3o%20-%20SM%205.12%2F3.7.%20Opera%C3%A7%C3%A3o%20de%20Instala%C3%A7%C3%B5es%2F3.7.3.%20Nordeste%2F3.7.3.4.%20%C3%81rea%20230%20kV%20Norte%2FIO-OI.NE.PTM_Rev.{rev}.pdf"
+            },
+            "AJUSTAMENTO OPERATIVO": {
+                "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.2.%20Regi%C3%A3o%20Nordeste%2F5.2.4.%20%C3%81rea%20230%20kV%20Norte%2FAO-AJ.NE.UPTM_Rev.{rev}.pdf"
             }
         },
 
         # ===== PCHs =====
-        # As PCHs não têm cadastro no Procedimento de Rede do ONS: "CADASTRO" vazio faz o botão
-        # exibir a mensagem de "sem dados cadastrados". Em "INSTRUÇÕES" só existe o AJUSTAMENTO
-        # OPERATIVO; ao trocar o texto "INSERIR URL..." pelo link ({rev} no lugar da revisão), o botão
-        # e o "Resumo" associado passam a funcionar como nas demais localidades.
+        # As PCHs não têm cadastro nem instruções no Procedimento de Rede do ONS: categoria vazia faz
+        # o botão exibir "Não existem documentos, desta instalação, nos Procedimentos de Rede do ONS".
+        # Só existe o AJUSTAMENTO OPERATIVO (categoria própria, terceiro botão da instalação).
 
         # ===== PCH LAVRINHAS =====
         "PCH Lavrinhas": {
             "CADASTRO": {},
             "INSTRUÇÕES": {
+            },
+            "AJUSTAMENTO OPERATIVO": {
                 "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.1.%20Regi%C3%A3o%20Sudeste%2FAO-CH.SE.3SP_Rev.{rev}.pdf"
             }
         },
@@ -9359,6 +9372,8 @@ def cmd_click22():
         "PCH Queluz": {
             "CADASTRO": {},
             "INSTRUÇÕES": {
+            },
+            "AJUSTAMENTO OPERATIVO": {
                 "AJUSTAMENTO OPERATIVO": "https://www.ons.org.br/%2FMPO%2FDocumento%20Normativo%2F5.%20Ajustamentos%20Operativos%20-%20SM%205.14%2F5.1.%20Regi%C3%A3o%20Sudeste%2FAO-CH.SE.3SP_Rev.{rev}.pdf"
             }
         },
@@ -9366,7 +9381,8 @@ def cmd_click22():
         # ===== PCH VERDE 8 =====
         "PCH Verde 8": {
             "CADASTRO": {},
-            "INSTRUÇÕES": {}
+            "INSTRUÇÕES": {},
+            "AJUSTAMENTO OPERATIVO": {}
         },
     }
     # ===== CONFIGURAÇÕES GLOBAIS PARA BUSCA =====
@@ -9675,11 +9691,10 @@ def cmd_click22():
         subtipos = list(dados.keys())
 
         if not subtipos:
-            # Categoria sem nenhum documento (ex.: PCHs não têm cadastro no Procedimento de Rede do ONS)
-            tipo_instalacao = "PCH" if localidade.startswith("PCH") else "instalação"
+            # Categoria sem nenhum documento: mensagem única para qualquer instalação
             messagebox.showinfo(f"{categoria} - {localidade}",
-                                f"Não existem dados cadastrados, desta {tipo_instalacao}, "
-                                f"no Procedimento de Rede do ONS.",
+                                "Não existem documentos, desta instalação, "
+                                "nos Procedimentos de Rede do ONS.",
                                 parent=janela_pai or frame_principal)
             return
 
@@ -9779,12 +9794,12 @@ def cmd_click22():
         Button(janela_subtipos, text="Fechar", command=janela_subtipos.destroy,
                bg="#FF0000", fg="white", font=("Arial", 10, "bold"), width=15).pack(pady=15)
 
-    # ===== JANELA DE OPÇÕES (CADASTRO ou INSTRUÇÕES) =====
+    # ===== JANELA DE OPÇÕES (CADASTRO, INSTRUÇÕES ou AJUSTAMENTO OPERATIVO) =====
     def abrir_opcoes_localidade(localidade):
 
         janela_opcoes = Toplevel(frame_principal)
         janela_opcoes.title(f"Opções - {localidade}")
-        janela_opcoes.geometry("500x510")
+        janela_opcoes.geometry(f"500x{min(690, janela_opcoes.winfo_screenheight() - 80)}")
         janela_opcoes.resizable(False, False)
         janela_opcoes['bg'] = "#a4bad2"
 
@@ -9814,6 +9829,15 @@ def cmd_click22():
         Label(janela_opcoes, text="Instruções operacionais da instalação",
               bg="#a4bad2", font=("Arial", 9), fg="#555").pack(pady=(0, 20))
 
+        btn_ajustamento = Button(janela_opcoes, text="🛠 AJUSTAMENTO OPERATIVO",
+                                 command=lambda: abrir_subtipos(localidade, "AJUSTAMENTO OPERATIVO", janela_opcoes),
+                                 bg="#E67E22", fg="white",
+                                 font=("Arial", 12, "bold"), height=2)
+        btn_ajustamento.pack(fill='x', padx=50, pady=10)
+
+        Label(janela_opcoes, text="Ajustamentos operativos da instalação",
+              bg="#a4bad2", font=("Arial", 9), fg="#555").pack(pady=(0, 20))
+
         Button(janela_opcoes, text="Fechar", command=janela_opcoes.destroy,
                bg="#FF0000", fg="white", font=("Arial", 10, "bold"), width=15).pack(pady=10)
 
@@ -9838,7 +9862,7 @@ def cmd_click22():
     frame_dica = Frame(frame_principal, bg="#a4bad2")
     frame_dica.pack(fill='x', padx=20, pady=5)
 
-    Label(frame_dica, text="💡 Clique na localidade → Escolha CADASTRO ou INSTRUÇÕES → Selecione o documento",
+    Label(frame_dica, text="💡 Clique na localidade → Escolha CADASTRO, INSTRUÇÕES ou AJUSTAMENTO OPERATIVO → Selecione o documento",
           bg="#a4bad2", font=("Arial", 9), fg="#024593").pack()
     """
     frame_aviso = Frame(frame_principal, bg="#FFF3CD", highlightbackground="#FFEAA7", highlightthickness=1)
