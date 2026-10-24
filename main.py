@@ -1,4 +1,4 @@
-# Código atualizado em 24-10-26 - 1000 - Click_22: (terceiro botão AJUSTAMENTO OPERATIVO por instalação e mensagem única para categoria sem documentos)
+# Código atualizado em 24-10-26 - 1133 - Click_25: (Corrigido envio de email) + login para SIGO
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -9843,13 +9843,13 @@ def cmd_click22():
 
     # ===== CRIAÇÃO DA JANELA PRINCIPAL =====
     frame_principal = Toplevel(root)
-    frame_principal.title('Acesso a Procedimentos ONS - Localidades')
+    frame_principal.title('Acesso aos Procedimentos de Rede do ONS - Localidades')
     # 12 localidades em 4 linhas de 3 botões (altura limitada à da tela)
     frame_principal.geometry(f'960x{min(720, frame_principal.winfo_screenheight() - 80)}')
     frame_principal.resizable(True, True)
     frame_principal['bg'] = "#a4bad2"
 
-    titulo = Label(frame_principal, text='ACESSO A PROCEDIMENTOS ONS',
+    titulo = Label(frame_principal, text='ACESSO AOS PROCEDIMENTOS DE REDE DO ONS',
                    font=('Arial', '18', 'bold'),
                    bg="#024593", fg="white", height=2)
     titulo.pack(fill='x')
@@ -22529,16 +22529,16 @@ def criar_tela_login():
     global login_window, entry_usuario, entry_senha
 
     login_window = Toplevel(root)
-    login_window.title("Login - Troca de Turno")
+    login_window.title("Login - SIGO")
     login_window.geometry("380x420")
     login_window.resizable(False, False)
     login_window['bg'] = UI_FUNDO
 
-    ui_dialogo(login_window, "Troca de Turno", "COG - Centro de Operação da Geração", altura_faixa=96)
+    ui_dialogo(login_window, "SIGO", "COG - Centro de Operação da Geração", altura_faixa=96)
     cartao_login = ui_cartao(login_window, 120, 264)
     entry_usuario = ui_campo(cartao_login, "Usuário", 20)
     entry_senha = ui_campo(cartao_login, "Senha", 92, show="*")
-    Button(cartao_login, text="Entrar", bg=UI_AZUL, fg="white", font=(UI_FONTE, 11, "bold"),
+    Button(cartao_login, text="Entrar", bg=UI_AZUL, fg="white", font=(UI_FONTE, 12, "bold"),
            command=realizar_login).place(x=20, y=186, relwidth=1.0, width=-40, height=42)
     entry_usuario.focus_set()
     login_window.bind('<Return>', lambda event: realizar_login())  # login pela tecla enter.
