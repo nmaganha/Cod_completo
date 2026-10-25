@@ -460,12 +460,78 @@ class TestManobras:
         with pytest.raises(app.DocLibValidacaoSM):
             fluxo.alterar(sm_id, liberacao=[dict(base[0], data="32/13/2026", hora="08:00")] + base[1:])
 
-    def test_horarios_das_manobras_seguem_a_ordem(self, app, fluxo):
+    # ---- ordem dos horários: o número arábico manda, a letra não conta ----------------------------------------------------
+    @staticmethod
+    def _linhas(*itens):
+        """[(número, 'hh:mm' ou '')] -> linhas de manobra do dia 25/10/2026."""
+        return [{"numero": numero, "data": "25/10/2026" if hora else "", "hora": hora} for numero, hora in itens]
+
+    @pytest.mark.parametrize("itens, esperado", [
+        ([("1", "08:00"), ("1", "08:10"), ("2", "08:20")], []),                                    # crescente
+        ([("1", "08:10"), ("1", "08:00"), ("2", "08:20")], []),                                    # 1B antes de 1A: mesma sequência
+        ([("2", "09:30"), ("2", "09:00"), ("2", "09:15")], []),                                    # 2C antes de 2A: livre
+        ([("1", "08:00"), ("2", "08:00")], []),                                                    # mesmo instante é aceito
+        ([("1", "08:00"), ("2", "07:59")], [(2, 1)]),                                              # 2A antes de 1A
+        ([("1", "08:00"), ("1", "09:00"), ("2", "08:30")], [(3, 2)]),                              # 2A depois de 1A mas antes de 1B
+        ([("1", "08:00"), ("2", "09:00"), ("3", "08:30")], [(3, 2)]),                              # 3A antes de 2A
+        ([("1", "09:00"), ("3", "08:00")], [(2, 1)]),                                              # sem o número 2 no meio
+        ([("1", "10:00"), ("2", "09:00"), ("3", "08:00")], [(2, 1), (3, 1)]),                      # vários conflitos
+        ([("1", "08:00"), ("2", "07:00"), ("2", "08:00")], [(2, 1)]),                              # só a linha adiantada é apontada
+        ([("1", "08:00"), ("2", ""), ("2", "07:00")], [(3, 1)]),                                   # linha sem horário não entra
+        ([("2", "08:00"), ("1", "09:00")], [(1, 2)]),                                              # ordem das linhas na tabela não conta
+        ([("", "08:00"), ("1", "09:00"), ("2", "08:00")], [(3, 2)]),                               # sem número válido não entra
+    ])
+    def test_regra_de_ordem_dos_horarios_por_numero_arabico(self, app, itens, esperado):
+        assert app.doc_lib_conflitos_horarios_sm(self._linhas(*itens)) == esperado
+
+    def test_regra_vale_entre_dias_diferentes(self, app):
+        linhas = [{"numero": "1", "data": "26/10/2026", "hora": "01:00"}, {"numero": "2", "data": "25/10/2026", "hora": "23:30"}]
+        assert app.doc_lib_conflitos_horarios_sm(linhas) == [(2, 1)]
+        linhas[1]["data"] = "27/10/2026"
+        assert app.doc_lib_conflitos_horarios_sm(linhas) == []
+
+    def test_mesma_sequencia_em_qualquer_ordem_e_aceita_ao_salvar(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)                                                      # liberação: 1A, 1B, 2A
+        base = fluxo.doc(sm_id)["liberacao"]
+        trocada = [dict(base[0], data="25/10/2026", hora="08:20"), dict(base[1], data="25/10/2026", hora="08:00"),
+                   dict(base[2], data="25/10/2026", hora="08:30")]                       # 1B (08:00) antes de 1A (08:20)
+        fluxo.alterar(sm_id, liberacao=trocada)
+        assert [m["hora"] for m in fluxo.doc(sm_id)["liberacao"]] == ["08:20", "08:00", "08:30"]
+
+    def test_numero_maior_antes_de_numero_menor_e_recusado_ao_salvar(self, app, fluxo):
         sm_id = fluxo.ate(APROVADO)
         base = fluxo.doc(sm_id)["liberacao"]
-        invertida = [dict(base[0], data="25/10/2026", hora="09:00"), dict(base[1], data="25/10/2026", hora="08:00")] + base[2:]
-        with pytest.raises(app.DocLibValidacaoSM, match="não podem ser anteriores"):
-            fluxo.alterar(sm_id, liberacao=invertida)
+        for horas, referencia in ((("08:30", "08:00", "08:10"), "1A"), (("08:00", "08:30", "08:10"), "1B")):
+            antecipada = [dict(m, data="25/10/2026", hora=hora) for m, hora in zip(base, horas)]
+            with pytest.raises(app.DocLibValidacaoSM, match=rf"linha 3 \(sequência 2A\).*anteriores às da sequência {referencia}"):
+                fluxo.alterar(sm_id, liberacao=antecipada)
+        assert fluxo.doc(sm_id)["liberacao"][0]["hora"] is None or fluxo.doc(sm_id)["liberacao"][0]["hora"] == ""
+
+    def test_regra_vale_tambem_para_a_normalizacao(self, app, fluxo):
+        sm_id = fluxo.ate(EM_EXECUCAO)                                                   # normalização: 1A, 2A, 2B
+        base = fluxo.doc(sm_id)["normalizacao"]
+        livre = [dict(base[0], data="26/10/2026", hora="09:00"), dict(base[1], data="26/10/2026", hora="09:30"),
+                 dict(base[2], data="26/10/2026", hora="09:10")]                         # 2B antes de 2A: aceito
+        fluxo.alterar(sm_id, normalizacao=livre)
+        assert fluxo.doc(sm_id)["normalizacao"][2]["hora"] == "09:10"
+        antecipada = [dict(base[0], data="26/10/2026", hora="09:00"), dict(base[1], data="26/10/2026", hora="08:50"),
+                      dict(base[2], data="26/10/2026", hora="09:10")]
+        with pytest.raises(app.DocLibValidacaoSM, match=r"Manobras de Normalização, linha 2 \(sequência 2A\).*sequência 1A"):
+            fluxo.alterar(sm_id, normalizacao=antecipada)
+
+    def test_sequencia_com_varias_letras_e_varios_numeros(self, app, fluxo):
+        liberacao = [{"numero": n, "local": "SE MCP", "acao": f"Abrir {i}"} for i, n in enumerate("1123334", start=1)]
+        sm_id = fluxo.salvar(liberacao=liberacao)
+        fluxo.gerar(sm_id)
+        fluxo.aprovar(sm_id)
+        base = fluxo.doc(sm_id)["liberacao"]
+        assert [m["identificacao"] for m in base] == ["1A", "1B", "2A", "3A", "3B", "3C", "4A"]
+        horas = ("08:10", "08:00", "08:20", "08:40", "08:30", "08:50", "09:00")          # só as letras fora de ordem
+        fluxo.alterar(sm_id, liberacao=[dict(m, data="25/10/2026", hora=h) for m, h in zip(base, horas)])
+        assert [m["hora"] for m in fluxo.doc(sm_id)["liberacao"]] == list(horas)
+        trocada = ("08:10", "08:00", "08:20", "08:40", "08:30", "08:50", "08:45")        # 4A antes de 3C (08:50)
+        with pytest.raises(app.DocLibValidacaoSM, match=r"linha 7 \(sequência 4A\).*sequência 3C \(linha 6\)"):
+            fluxo.alterar(sm_id, liberacao=[dict(m, data="25/10/2026", hora=h) for m, h in zip(base, trocada)])
 
     def test_correcao_de_horario_antes_dos_executantes_e_apagar_nao(self, app, fluxo):
         sm_id = fluxo.ate(APROVADO)

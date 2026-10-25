@@ -287,6 +287,57 @@ class TestBloqueioDosItens6e7:
         assert app.doc_lib_carregar_sm(sm_id)["liberacao"][0]["hora"] == "08:00"
 
 
+class TestOrdemDosHorariosPelaJanela:
+    """Item 6 e item 8: número arábico maior nunca antes de número menor; com o mesmo número a letra não conta."""
+
+    @staticmethod
+    def datar(app, tabela, horas):
+        for linha, hora in zip(tabela.linhas, horas):
+            definir(app, linha["data"], "25/10/2026")
+            definir(app, linha["hora"], hora)
+
+    def test_liberacao_2a_antes_de_1a_e_recusada_e_marcada_na_linha(self, app, banco, janelas, fluxo, mensagens):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))                         # liberação: 1A, 1B, 2A
+        self.datar(app, janela.tab_lib, ("08:30", "08:40", "08:10"))                      # 2A (08:10) antes de 1B (08:40)
+        janela.salvar()
+        texto = mensagens.avisos[-1][1]
+        assert "linha 3 (sequência 2A)" in texto and "sequência 1B (linha 2)" in texto and "número arábico menor" in texto
+        assert str(janela.tab_lib.linhas[2]["data"].cget("highlightbackground")) == app.SGA_VERMELHO
+        assert str(janela.tab_lib.linhas[2]["hora"].cget("highlightbackground")) == app.SGA_VERMELHO
+        assert str(janela.tab_lib.linhas[0]["hora"].cget("highlightbackground")) != app.SGA_VERMELHO
+        assert fluxo.doc(janela.sm_id)["liberacao"][0]["hora"] in (None, "")                # nada foi gravado
+
+    def test_mesma_sequencia_em_qualquer_ordem_e_aceita(self, app, banco, janelas, fluxo, mensagens):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
+        self.datar(app, janela.tab_lib, ("08:30", "08:10", "08:30"))                      # 1B (08:10) antes de 1A (08:30); 2A igual
+        janela.salvar()
+        assert not mensagens.avisos
+        assert [m["hora"] for m in fluxo.doc(janela.sm_id)["liberacao"]] == ["08:30", "08:10", "08:30"]
+
+    def test_normalizacao_segue_a_mesma_regra(self, app, banco, janelas, fluxo, mensagens):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(EM_EXECUCAO)))                      # normalização: 1A, 2A, 2B
+        self.datar(app, janela.tab_nor, ("10:00", "10:30", "10:05"))                      # 2B antes de 2A: livre
+        janela.salvar()
+        assert not mensagens.avisos
+        self.datar(app, janela.tab_nor, ("10:00", "09:59", "10:05"))                      # 2A antes de 1A: recusado
+        janela.salvar()
+        assert "Manobras de Normalização, linha 2 (sequência 2A)" in mensagens.avisos[-1][1]
+
+    def test_dicas_dos_itens_6_e_8_explicam_a_regra(self, app, banco, janelas):
+        janela = janelas()
+        fontes = [w.cget("text") for w in _todos_os_widgets(janela.janela) if w.winfo_class() == "Label"]
+        assert sum("a letra não conta" in texto for texto in fontes) == 2
+
+
+def _todos_os_widgets(raiz):
+    for filho in raiz.winfo_children():
+        yield filho
+        yield from _todos_os_widgets(filho)
+
+
 class TestRotulosDaConferencia:
     def test_botoes_e_modalidades_manutencao_e_operacao(self, app, banco, janelas, fluxo):
         janela = janelas()
@@ -781,7 +832,7 @@ class TestReferenciaReservaGridEMenu:
         janela.gerar()
         assert janela.status == RESERVADO and dialogos["gerado"] and "formulário em branco" in dialogos["gerado"][-1][2]
 
-    def test_grid_lista_as_sms_sem_o_botao_de_email(self, app, banco, janelas, fluxo):
+    def test_grid_lista_as_sms_com_o_botao_e_a_coluna_de_email(self, app, banco, janelas, fluxo):
         fluxo.ate(AGUARDA)
         fluxo.salvar()
         app.doc_lib_reservar_sm(1, "operador1")
@@ -791,7 +842,9 @@ class TestReferenciaReservaGridEMenu:
         try:
             textos = {widget.cget("text") for widget in grid.janela.winfo_children() if widget.winfo_class() == "Button"}
             assert "Abrir" in textos and "NOVA SM" in textos and "Voltar" in textos
-            assert not any("e-mail" in texto for texto in textos) and not any("Agrupar" in texto for texto in textos)
+            assert "Marcar e-mail enviado" in textos and not any("Agrupar" in texto for texto in textos)
+            assert "Enviado e-mail" in [coluna[1] for coluna in grid.COLUNAS]
+            assert {registro["email_enviado"] for registro in grid.registros} == {"Não"}
             assert [registro["numero"] for registro in grid.registros] == ["0003/26", "0002/26", "0001/26"]
             assert grid.valores_distintos("status") == [EM_ANALISE, AGUARDA, RESERVADO]
             assert grid.janela.title() == "GRID SM" and grid.contador.cget("text").startswith("3 de 3 SM(s)")
