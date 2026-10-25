@@ -1,4 +1,4 @@
-# Código atualizado em 24-10-26 - 1133 - Click_25: (Corrigido envio de email) + login para SIGO
+# Código atualizado em 24-10-26 - 2330 - Click_25: (SM_Avulso - Sequência de Manobras no Doc_Lib.)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -12063,7 +12063,7 @@ def cmd_click24():
 # ---------------------------------------------------
 # Doc_Lib. - BIBLIOTECA DE DOCUMENTOS (CLICK_25)
 # ATEIE - Autorização para Trabalhos em Equipamentos de Interligação Energizados
-# (AI, MO e SM_Avulso: "Página em Construção" - estrutura preparada para o futuro)
+# AI - Autorização para Impedimento, MO - Mensagem Operativa e SM_Avulso - Sequência de Manobras
 # ---------------------------------------------------
 
 # Mesmo banco de dados já usado no restante do aplicativo (login, SGA, demais módulos).
@@ -12466,6 +12466,7 @@ def garantir_banco_doc_lib():
 
     _garantir_tabelas_doc_lib_ai(cursor)         # tabelas do AI (Click_25)
     _garantir_tabelas_doc_lib_mo(cursor)         # tabelas da MO (Click_25)
+    _garantir_tabelas_doc_lib_sm(cursor)         # tabelas da SM Avulso (Click_25)
 
     conexao.commit()
     conexao.close()
@@ -12652,6 +12653,9 @@ def _doc_lib_ultimo_numero(cursor, tipo, ano):
         ultimo = max(ultimo, cursor.fetchone()[0] or 0)
     elif tipo == "MO":                  # a MO também tem a sua numeração (um número por documento)
         cursor.execute("SELECT MAX(sequencia) FROM doclib_mo WHERE ano = ?", (ano,))
+        ultimo = max(ultimo, cursor.fetchone()[0] or 0)
+    elif tipo == "SM":                  # a SM Avulso tem a sua numeração (um número por documento)
+        cursor.execute("SELECT MAX(sequencia) FROM doclib_sm WHERE ano = ?", (ano,))
         ultimo = max(ultimo, cursor.fetchone()[0] or 0)
     return ultimo
 
@@ -14815,6 +14819,7 @@ class JanelaListaAteie:
     COLUNAS_COM_QUEBRA = ()              # colunas que mantêm na tela as quebras de linha digitadas (o texto continua
                                          # quebrando sozinho quando não cabe na largura da coluna)
     PERMITE_AGRUPAR = True               # a MO tem um número por documento: não há o que agrupar
+    PERMITE_EMAIL = True                 # a SM Avulso não é encaminhada por e-mail: sem o botão Marcar e-mail enviado
     COLUNAS = DOC_LIB_COLUNAS_LISTA
 
     @staticmethod
@@ -14874,8 +14879,9 @@ class JanelaListaAteie:
                   (f"NOVA {self.ROTULO}", self.nova, "sucesso", 150)]
         if self.PERMITE_AGRUPAR:
             botoes.append((f"Agrupar {self.PLURAL}", self.agrupar, "aviso", 170))
-        botoes += [("Marcar e-mail enviado", self.marcar_email_enviado, "agendar", 230),
-                   ("Voltar", janela.destroy, "voltar", 120)]
+        if self.PERMITE_EMAIL:
+            botoes.append(("Marcar e-mail enviado", self.marcar_email_enviado, "agendar", 230))
+        botoes.append(("Voltar", janela.destroy, "voltar", 120))
         x_botao = -(sum(b[3] for b in botoes) + 10 * (len(botoes) - 1)) // 2 - 5      # botões centralizados
         for texto_botao, comando, estilo_botao, largura_botao in botoes:
             doc_lib_criar_botao(janela, texto_botao, comando, estilo_botao
@@ -22340,6 +22346,2939 @@ class JanelaMO:
         self.janela.destroy()
 
 
+# =====================================================================================================================
+# SM AVULSO - SEQUÊNCIA DE MANOBRAS (Doc_Lib. - Click_25)
+# =====================================================================================================================
+# A SM Avulso segue os mesmos conceitos e critérios da MO (salvar, editar, gerar o documento, que passa a ser protegido,
+# cancelamento com justificativa, SM-Reservado, SM-Referência, GRID), com as diferenças do documento:
+#   - cada documento tem UM número (0001/26, crescente e reiniciado a cada ano), mostrado no alto e à direita da janela;
+#   - campos: 1 SM Nº, 2 Período programado (2.1 Programação e 2.2 a 2.4 Reprogramações 1 a 3), 3 Equipamento(s) a impedir
+#     (3 linhas x 6 colunas), 4 Motivo (até 6 linhas), 5 Condições de Segurança (5 campos obrigatórios), 6 Manobras de
+#     Liberação, 7 Executantes, 8 Manobras de Normalização, 9 Executantes, 10 Observações, 11 Elaborado por e 12 Conferência;
+#   - Manobras de Liberação e de Normalização: até 30 linhas cada; a Sequência é um número arábico digitado mais uma letra
+#     calculada (1A, 1B, 2A...); a data e a hora de cada manobra são de controle interno (só na tela, NÃO vão para o PDF);
+#   - botão "Inverter Manobras": gera a Normalização a partir da Liberação (ordem inversa e ação com o antônimo operacional;
+#     ação sem antônimo inequívoco é mantida e marcada para conferência manual);
+#   - 12 Conferência (até 10 linhas): conferência MANUAL (profissional da Manutenção, via fonia) e conferência PELO SISTEMA
+#     (profissional autenticado, Operação). A SM só é aprovada com pelo menos UMA de cada modalidade; uma só não aprova.
+# Status da SM, na ordem do fluxo: Em análise (salva, documento ainda não gerado; único status com edição geral), Aguarda
+# Conferência (botão Gerar SM Avulso), Aprovado para Execução (conferência manual + conferência pelo sistema), Em Execução
+# (Executantes da Liberação salvos, com todas as manobras de liberação datadas), Concluído (Executantes da Normalização
+# salvos, com todas as manobras de normalização datadas), Cancelado e Reservado.
+# Regras de segurança aplicadas também na camada de persistência (doc_lib_salvar_sm e triggers do SQLite):
+#   - transições de status só pelas vias permitidas (DOC_LIB_TRANSICOES_SM); Concluído e Cancelado são definitivos;
+#   - o número da SM nunca muda nem é reaproveitado (a SM não pode ser excluída); conferência registrada não muda mais;
+#   - os executantes da liberação só são aceitos com a SM Aprovada para Execução e os da normalização com a SM Em Execução;
+#   - cada mudança de status e cada correção de data/hora de manobra ficam registradas (usuário e momento).
+STATUS_SM_AGUARDA_CONFERENCIA = "Aguarda Conferência"
+DOC_LIB_STATUS_SM = [STATUS_ATEIE_EM_ANALISE, STATUS_SM_AGUARDA_CONFERENCIA, STATUS_ATEIE_APROVADO_EXECUCAO,
+                     STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO, STATUS_ATEIE_RESERVADO]
+DOC_LIB_COR_STATUS[STATUS_SM_AGUARDA_CONFERENCIA] = DOC_LIB_COR_STATUS[STATUS_ATEIE_AGUARDA_DE_ACORDO]
+# Origem -> destinos permitidos. Fonte única das regras de transição: o banco recebe a mesma tabela (doclib_sm_transicoes)
+# e um trigger recusa qualquer UPDATE de status fora dela. Concluído e Cancelado não têm saída.
+DOC_LIB_TRANSICOES_SM = {
+    STATUS_ATEIE_RESERVADO: (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_CANCELADO),
+    STATUS_ATEIE_EM_ANALISE: (STATUS_SM_AGUARDA_CONFERENCIA, STATUS_ATEIE_CANCELADO),
+    STATUS_SM_AGUARDA_CONFERENCIA: (STATUS_ATEIE_APROVADO_EXECUCAO, STATUS_ATEIE_CANCELADO),
+    STATUS_ATEIE_APROVADO_EXECUCAO: (STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CANCELADO),
+    STATUS_ATEIE_EM_EXECUCAO: (STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO),
+    STATUS_ATEIE_CONCLUIDO: (),
+    STATUS_ATEIE_CANCELADO: (),
+}
+# Diferente da MO (que só cancela antes da execução), a SM pode ser cancelada em qualquer status, menos Concluído
+DOC_LIB_STATUS_CANCELAVEIS_SM = tuple(origem for origem, destinos in DOC_LIB_TRANSICOES_SM.items()
+                                      if STATUS_ATEIE_CANCELADO in destinos)
+DOC_LIB_STATUS_DEFINITIVOS_SM = (STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO)
+# o botão SM-Referência vale para qualquer SM, menos a que ainda está Reservada (só tem o número)
+DOC_LIB_STATUS_SEM_REFERENCIA_SM = (STATUS_ATEIE_RESERVADO,)
+DOC_LIB_TEXTO_SM_RESERVADA = "SM RESERVADA"        # exibido no GRID SM, em Motivo, enquanto a SM está reservada
+DOC_LIB_LIMITE_MANOBRAS_SM = 30                    # linhas de cada tabela de manobras (Liberação e Normalização)
+DOC_LIB_LIMITE_CONFERENCIAS_SM = 10                # linhas da Conferência
+DOC_LIB_LINHAS_EQUIPAMENTOS_SM = 3                 # linhas da tabela 3 Equipamento(s) a impedir
+DOC_LIB_LIMITE_LOCAL_MANOBRA_SM = 6                # caracteres do campo Local das manobras
+DOC_LIB_LIMITE_SEQUENCIA_SM = 99                   # maior número arábico aceito na Sequência
+DOC_LIB_LINHAS_MOTIVO_SM = 6                       # o Motivo comporta no máximo 6 linhas (medidas como no PDF)
+DOC_LIB_LINHAS_CONDICAO_SM = 3                     # capacidade visual de cada Condição de Segurança
+DOC_LIB_LINHAS_OBSERVACOES_SM = 6                  # capacidade visual das Observações
+DOC_LIB_AREA_ELABORADOR_SM = "COG"                 # 11 Elaborado por, Área (valor inicial)
+DOC_LIB_AREA_CONFERENCIA_MANUAL_SM = "Manutenção"  # 12.1 Conferência manual, Área (valor inicial)
+DOC_LIB_ASS_CONFERENCIA_MANUAL_SM = "via fonia"    # 12.1 Conferência manual, Ass. (valor inicial)
+DOC_LIB_AREA_CONFERENCIA_SISTEMA_SM = "COG"        # 12.2 Conferência pelo sistema, Área (valor inicial)
+DOC_LIB_MODALIDADE_MANUAL_SM = "manual"
+DOC_LIB_MODALIDADE_SISTEMA_SM = "sistema"
+DOC_LIB_MODALIDADES_SM = {DOC_LIB_MODALIDADE_MANUAL_SM: "Manual", DOC_LIB_MODALIDADE_SISTEMA_SM: "Pelo sistema"}
+
+# 2 Período programado: 2.1 Programação e 2.2 a 2.4 Reprogramações 1 a 3 (cada uma com Início e Término: data e hora)
+DOC_LIB_PERIODOS_SM = [("p0", "2.1", "Programação"), ("p1", "2.2", "Reprogramação-1"),
+                       ("p2", "2.3", "Reprogramação-2"), ("p3", "2.4", "Reprogramação-3")]
+DOC_LIB_CAMPOS_PERIODO_SM = ("data_inicio", "hora_inicio", "data_termino", "hora_termino")
+
+
+def doc_lib_campos_periodo_sm(prefixo):
+    """Os quatro campos (data e hora de início e de término) do período 'p0' (Programação) a 'p3' (Reprogramação-3)."""
+    return tuple(f"{prefixo}_{campo}" for campo in DOC_LIB_CAMPOS_PERIODO_SM)
+
+
+DOC_LIB_CAMPOS_PROGRAMACAO_SM = doc_lib_campos_periodo_sm("p0")
+DOC_LIB_CAMPOS_REPROGRAMACAO_SM = tuple(campo for prefixo in ("p1", "p2", "p3")
+                                        for campo in doc_lib_campos_periodo_sm(prefixo))
+# 3 Equipamento(s) a impedir: (campo, número do item, cabeçalho)
+DOC_LIB_COLUNAS_EQUIPAMENTO_SM = [("local", "3.1", "Local"), ("instalacao", "3.2", "Instalação"),
+                                  ("equipamento", "3.3", "Equipamento"), ("caracterizacao", "3.4", "Caracterização"),
+                                  ("local_execucao", "3.5", "Local da Execução do(s) Serviço(s)"),
+                                  ("tempo_retorno", "3.6", "Tempo Retorno à Operação")]
+# 5 Condições de Segurança: (campo, número do item, descrição). Os cinco são obrigatórios (escrever "Nenhuma" se não houver)
+DOC_LIB_CONDICOES_SM = [("cond_chaves_abertas", "5.1", "Chaves abertas e bloqueadas"),
+                        ("cond_chaves_fechadas", "5.2", "Chaves fechadas e bloqueadas"),
+                        ("cond_disjuntores", "5.3", "Disjuntores extraídos"),
+                        ("cond_loto_com", "5.4.1", "Com bloqueio por LOTO"),
+                        ("cond_loto_sem", "5.4.2", "Sem bloqueio por LOTO")]
+DOC_LIB_CAMPOS_CONDICOES_SM = tuple(campo for campo, _, _ in DOC_LIB_CONDICOES_SM)
+DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM = ("exec_lib_local", "exec_lib_remoto")          # 7.1 No local e 7.2 Remotamente
+DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM = ("exec_nor_local", "exec_nor_remoto")      # 9.1 No local e 9.2 Remotamente
+# campos de texto do cabeçalho da SM que só mudam na edição geral (status Em análise); o Elaborado por (nome e Ass.) é
+# sempre o do usuário autenticado e, por isso, não está na lista
+DOC_LIB_CAMPOS_GERAIS_SM = (DOC_LIB_CAMPOS_PROGRAMACAO_SM + ("motivo",) + DOC_LIB_CAMPOS_CONDICOES_SM
+                            + ("observacoes", "elaborado_area", "elaborado_data"))
+_DOC_LIB_COLUNAS_MANOBRA_SM = ("data", "hora", "numero", "local", "acao")
+_DOC_LIB_TABELAS_MANOBRAS_SM = (("L", "liberacao", "Manobras de Liberação", "lib"),
+                                ("N", "normalizacao", "Manobras de Normalização", "nor"))
+_DOC_LIB_NOMES_PERIODO_SM = {prefixo: nome for prefixo, _, nome in DOC_LIB_PERIODOS_SM}
+_DOC_LIB_NOMES_CAMPO_PERIODO_SM = {"data_inicio": "Início, Data", "hora_inicio": "Início, Hora",
+                                   "data_termino": "Término, Data", "hora_termino": "Término, Hora"}
+
+
+class DocLibValidacaoSM(DocLibRegra):
+    """A SM não passou na validação. 'erros' é a lista de (chaves dos campos, mensagem) que a janela usa para marcar em
+    vermelho os campos com problema (a mesma lista de doc_lib_validar_sm)."""
+
+    def __init__(self, erros):
+        self.erros = erros
+        linhas = [f"• {mensagem}" for _, mensagem in erros[:14]]
+        if len(erros) > 14:
+            linhas.append(f"... e mais {len(erros) - 14} pendência(s).")
+        super().__init__("A SM tem campos obrigatórios não preenchidos ou incorretos:\n\n" + "\n".join(linhas))
+
+
+def _doc_lib_txt(valor):
+    return str(valor if valor is not None else "").strip()
+
+
+def _doc_lib_sem_acento(texto):
+    return "".join(c for c in unicodedata.normalize("NFD", str(texto or "")) if unicodedata.category(c) != "Mn")
+
+
+# ---------------------------------------------------
+# SEQUÊNCIA DAS MANOBRAS (1A, 1B, 2A...), DURAÇÃO E INVERSÃO DAS MANOBRAS
+# ---------------------------------------------------
+def doc_lib_letra_sequencia_sm(indice):
+    """Letra da ocorrência (0 = A, 1 = B ... 25 = Z, 26 = AA, 27 = AB...): chega a 30 ocorrências de um mesmo número."""
+    indice += 1
+    letras = ""
+    while indice > 0:
+        indice, resto = divmod(indice - 1, 26)
+        letras = chr(65 + resto) + letras
+    return letras
+
+
+def doc_lib_numero_sequencia_sm(texto):
+    """Número arábico da Sequência (1 a DOC_LIB_LIMITE_SEQUENCIA_SM) ou None se o texto não for um número válido."""
+    texto = _doc_lib_txt(texto)
+    if not texto.isascii() or not texto.isdigit():
+        return None
+    numero = int(texto)
+    return numero if 1 <= numero <= DOC_LIB_LIMITE_SEQUENCIA_SM else None
+
+
+def doc_lib_identificar_sequencias_sm(numeros):
+    """Identificação exibida de cada manobra, calculada só pela ordem das linhas: a primeira ocorrência de um número recebe
+    a letra A, as seguintes B, C, D... ([1, 1, 1, 2, 3, 3, 4] -> 1A 1B 1C 2A 3A 3B 4A). Linha sem número válido fica ''.
+    Não depende de nada cadastrado: inclusão, exclusão ou troca de ordem das linhas recalculam tudo."""
+    ocorrencias, resultado = {}, []
+    for texto in numeros:
+        numero = doc_lib_numero_sequencia_sm(texto)
+        if numero is None:
+            resultado.append("")
+            continue
+        resultado.append(f"{numero}{doc_lib_letra_sequencia_sm(ocorrencias.get(numero, 0))}")
+        ocorrencias[numero] = ocorrencias.get(numero, 0) + 1
+    return resultado
+
+
+def doc_lib_normalizar_duracao_sm(texto):
+    """Tempo de Retorno à Operação (duração hh:mm): aceita 1:30, 01:30, 0130 e 1h30, devolve HH:MM. As horas vão de 0 a 99 e
+    os minutos de 00 a 59. Retorna None se o texto não for uma duração válida."""
+    texto = _doc_lib_txt(texto).lower()
+    achado = re.fullmatch(r"(\d{1,2})\s*[:h.]\s*(\d{2})", texto, re.ASCII) or re.fullmatch(r"(\d{2})(\d{2})", texto, re.ASCII)
+    if not achado or int(achado.group(2)) > 59:
+        return None
+    return f"{int(achado.group(1)):02d}:{achado.group(2)}"
+
+
+# Pares de verbos de manobra com antônimo inequívoco. Cada verbo tem três formas (infinitivo, 3ª pessoa e subjuntivo/imperativo)
+# e a inversão troca cada forma pela forma correspondente do antônimo. Verbos de sentido duplo (colocar, retirar, isolar,
+# religar, normalizar...) ficam de fora de propósito: a ação é mantida e marcada para conferência manual.
+_DOC_LIB_PARES_VERBOS_SM = [
+    (("abrir", "abre", "abra"), ("fechar", "fecha", "feche")),
+    (("bloquear", "bloqueia", "bloqueie"), ("desbloquear", "desbloqueia", "desbloqueie")),
+    (("ligar", "liga", "ligue"), ("desligar", "desliga", "desligue")),
+    (("energizar", "energiza", "energize"), ("desenergizar", "desenergiza", "desenergize")),
+    (("extrair", "extrai", "extraia"), ("inserir", "insere", "insira")),
+    (("conectar", "conecta", "conecte"), ("desconectar", "desconecta", "desconecte")),
+    (("habilitar", "habilita", "habilite"), ("desabilitar", "desabilita", "desabilite")),
+    (("ativar", "ativa", "ative"), ("desativar", "desativa", "desative")),
+    (("aterrar", "aterra", "aterre"), ("desaterrar", "desaterra", "desaterre")),
+    (("travar", "trava", "trave"), ("destravar", "destrava", "destrave")),
+]
+_DOC_LIB_ANTONIMOS_SM = {}
+for _formas_a, _formas_b in _DOC_LIB_PARES_VERBOS_SM:
+    for _a, _b in zip(_formas_a, _formas_b):
+        _DOC_LIB_ANTONIMOS_SM[_a], _DOC_LIB_ANTONIMOS_SM[_b] = _b, _a
+# Palavras que tornam a ação ambígua: negação, condição, verificação (o verbo não é a manobra em si) e o estado já descrito
+# ("aberto", "bloqueada"...): trocar só o verbo deixaria o texto contraditório.
+_DOC_LIB_MARCADORES_AMBIGUOS_SM = {
+    "nao", "sem", "se", "caso", "quando", "ate", "exceto", "verificar", "verifique", "verifica", "confirmar", "confirme",
+    "confirma", "conferir", "confira", "confere", "testar", "teste", "aguardar", "aguarde", "solicitar", "solicite",
+    "autorizar", "autorize", "manter", "mantenha", "mantem", "permanecer", "permanece"}
+for _estado in ("aberto", "fechado", "bloqueado", "desbloqueado", "ligado", "desligado", "energizado", "desenergizado",
+                "extraido", "inserido", "conectado", "desconectado", "habilitado", "desabilitado", "ativado", "desativado",
+                "aterrado", "desaterrado", "travado", "destravado"):
+    _DOC_LIB_MARCADORES_AMBIGUOS_SM.update({_estado, _estado[:-1] + "a", _estado + "s", _estado[:-1] + "as"})
+
+
+def _doc_lib_acompanhar_caixa_sm(original, novo):
+    """Escreve 'novo' com a mesma caixa de 'original' (ABRIR -> FECHAR, Abrir -> Fechar, abrir -> fechar)."""
+    if len(original) > 1 and original.isupper():
+        return novo.upper()
+    return novo.capitalize() if original[:1].isupper() else novo
+
+
+def doc_lib_inverter_acao_sm(acao):
+    """Inverte o sentido de uma ação de manobra (Abrir -> Fechar, Bloquear -> Desbloquear...). Devolve (texto, conferir):
+    conferir=True quando a inversão automática não é segura e o texto original foi mantido. Só se inverte a ação em que:
+      - o ÚNICO verbo de manobra conhecido é a primeira palavra ("Abrir DJ 52-1"; com dois verbos a ordem das operações também
+        se inverteria, e um verbo conhecido no meio da frase pode vir depois de outro que não conhecemos);
+      - não há nenhum outro verbo no infinitivo ("Isolar a linha e abrir 89-1" tem um verbo desconhecido: não se inverte);
+      - não há palavras ambíguas: negação, condição, verificação ou estado já descrito ("aberto", "bloqueada"...), pois
+        trocar só o verbo deixaria o texto contraditório.
+    Em qualquer dúvida o original é preservado e a linha vai para conferência manual: errar para esse lado não altera o
+    significado de uma manobra de segurança."""
+    texto = str(acao or "")
+    termos = list(re.finditer(r"[^\W\d_]+", texto))
+    palavras = [_doc_lib_sem_acento(termo.group()).lower() for termo in termos]
+    verbos = [indice for indice, palavra in enumerate(palavras) if palavra in _DOC_LIB_ANTONIMOS_SM]
+    outro_infinitivo = any(len(palavra) >= 5 and re.fullmatch(r"[a-z]+(?:ar|er|ir)", palavra) and indice not in verbos
+                           for indice, palavra in enumerate(palavras))
+    if verbos != [0] or outro_infinitivo or any(palavra in _DOC_LIB_MARCADORES_AMBIGUOS_SM for palavra in palavras):
+        return texto, True
+    termo = termos[0]
+    novo = _DOC_LIB_ANTONIMOS_SM[palavras[0]]
+    return texto[:termo.start()] + _doc_lib_acompanhar_caixa_sm(termo.group(), novo) + texto[termo.end():], False
+
+
+def doc_lib_inverter_manobras_sm(liberacao):
+    """Manobras de Normalização geradas a partir das de Liberação (as de Liberação não são alteradas): ordem invertida, mesmo
+    Local, ação com o antônimo operacional e Sequência recalculada (os números arábicos, na ordem em que aparecem já
+    invertidos, passam a 1, 2, 3...; manobras que tinham o mesmo número continuam juntas e ganham novas letras). Data e hora
+    ficam em branco. Linhas vazias da Liberação são ignoradas. 'conferir' = 1 nas linhas cuja ação não pôde ser invertida com
+    segurança (ou que ficaram sem ação ou sem número) e que exigem conferência manual."""
+    origem = [linha for linha in liberacao
+              if any(_doc_lib_txt(linha.get(campo)) for campo in ("numero", "local", "acao"))]
+    novos_numeros, resultado = {}, []
+    for linha in reversed(origem):
+        numero = doc_lib_numero_sequencia_sm(linha.get("numero"))
+        if numero is not None:
+            novos_numeros.setdefault(numero, len(novos_numeros) + 1)
+        acao, conferir = doc_lib_inverter_acao_sm(linha.get("acao"))
+        if not _doc_lib_txt(acao) or numero is None:
+            conferir = True
+        resultado.append({"data": "", "hora": "", "numero": str(novos_numeros[numero]) if numero is not None else "",
+                          "local": _doc_lib_txt(linha.get("local")), "acao": acao, "conferir": 1 if conferir else 0})
+    return resultado
+
+
+# ---------------------------------------------------
+# BANCO DE DADOS DA SM
+# ---------------------------------------------------
+def _garantir_tabelas_doc_lib_sm(cursor):
+    """Cria as tabelas da SM Avulso (se não existirem). Um documento = uma linha de doclib_sm, com o seu número:
+      doclib_sm              - a SM inteira (período, motivo, condições, executantes, observações, elaborador, status)
+      doclib_sm_equipamentos - as 3 linhas da tabela 3 (Equipamento(s) a impedir)
+      doclib_sm_manobras     - as manobras de Liberação (tipo L) e de Normalização (tipo N), até 30 de cada
+      doclib_sm_conferencias - as conferências (até 10), com a modalidade (manual ou sistema) gravada de forma explícita
+      doclib_sm_historico    - cada mudança de status e cada correção de data/hora de manobra (usuário e momento)
+      doclib_sm_transicoes   - as transições de status permitidas (o trigger do banco confere cada UPDATE de status)
+      doclib_sm_pdfs         - cada PDF gerado e arquivado
+    A numeração usa doclib_numeracao (tipo "SM"), como a MO."""
+    status_validos = ", ".join(f"'{status}'" for status in DOC_LIB_STATUS_SM)
+    campos_periodos = ",\n                        ".join(f"{campo} TEXT" for campo in
+                                                         DOC_LIB_CAMPOS_PROGRAMACAO_SM + DOC_LIB_CAMPOS_REPROGRAMACAO_SM)
+    condicoes_preenchidas = " AND ".join(f"length(trim(coalesce({campo}, ''))) > 0" for campo in DOC_LIB_CAMPOS_CONDICOES_SM)
+    cursor.execute(f'''CREATE TABLE IF NOT EXISTS doclib_sm (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        numero TEXT NOT NULL UNIQUE,
+                        ano INTEGER NOT NULL,
+                        sequencia INTEGER NOT NULL,
+                        {campos_periodos},
+                        reprogramacoes INTEGER NOT NULL DEFAULT 0 CHECK (reprogramacoes BETWEEN 0 AND 3),
+                        motivo TEXT,
+                        cond_chaves_abertas TEXT,
+                        cond_chaves_fechadas TEXT,
+                        cond_disjuntores TEXT,
+                        cond_loto_com TEXT,
+                        cond_loto_sem TEXT,
+                        exec_lib_local TEXT,
+                        exec_lib_remoto TEXT,
+                        exec_nor_local TEXT,
+                        exec_nor_remoto TEXT,
+                        observacoes TEXT,
+                        elaborado_por TEXT,
+                        elaborado_area TEXT,
+                        elaborado_data TEXT,
+                        elaborado_ass TEXT,
+                        referencia_id INTEGER REFERENCES doclib_sm(id),
+                        status TEXT NOT NULL DEFAULT 'Em análise' CHECK (status IN ({status_validos})),
+                        cancelada_por TEXT,
+                        data_cancelamento TEXT,
+                        justificativa_cancelamento TEXT,
+                        revisao INTEGER NOT NULL DEFAULT 1,
+                        emitido INTEGER NOT NULL DEFAULT 0 CHECK (emitido IN (0, 1)),
+                        emitido_em TEXT,
+                        emitido_por TEXT,
+                        criado_por TEXT,
+                        criado_em TEXT,
+                        atualizado_por TEXT,
+                        atualizado_em TEXT,
+                        reservado_por TEXT,
+                        reservado_em TEXT,
+                        UNIQUE (ano, sequencia),
+                        CHECK (status IN ('{STATUS_ATEIE_RESERVADO}', '{STATUS_ATEIE_CANCELADO}') OR ({condicoes_preenchidas})))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_sm_equipamentos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
+                        ordem INTEGER NOT NULL CHECK (ordem BETWEEN 1 AND 3),
+                        local TEXT,
+                        instalacao TEXT,
+                        equipamento TEXT,
+                        caracterizacao TEXT,
+                        local_execucao TEXT,
+                        tempo_retorno TEXT,
+                        UNIQUE (sm_id, ordem))''')
+    cursor.execute(f'''CREATE TABLE IF NOT EXISTS doclib_sm_manobras (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
+                        tipo TEXT NOT NULL CHECK (tipo IN ('L', 'N')),
+                        ordem INTEGER NOT NULL CHECK (ordem BETWEEN 1 AND {DOC_LIB_LIMITE_MANOBRAS_SM}),
+                        data TEXT,
+                        hora TEXT,
+                        numero INTEGER CHECK (numero IS NULL OR numero BETWEEN 1 AND {DOC_LIB_LIMITE_SEQUENCIA_SM}),
+                        local TEXT CHECK (length(coalesce(local, '')) <= {DOC_LIB_LIMITE_LOCAL_MANOBRA_SM}),
+                        acao TEXT,
+                        conferir INTEGER NOT NULL DEFAULT 0 CHECK (conferir IN (0, 1)),
+                        UNIQUE (sm_id, tipo, ordem))''')
+    cursor.execute(f'''CREATE TABLE IF NOT EXISTS doclib_sm_conferencias (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
+                        ordem INTEGER NOT NULL CHECK (ordem BETWEEN 1 AND {DOC_LIB_LIMITE_CONFERENCIAS_SM}),
+                        modalidade TEXT NOT NULL CHECK (modalidade IN ('{DOC_LIB_MODALIDADE_MANUAL_SM}', '{DOC_LIB_MODALIDADE_SISTEMA_SM}')),
+                        nome TEXT NOT NULL,
+                        area TEXT NOT NULL,
+                        data TEXT NOT NULL,
+                        ass TEXT NOT NULL,
+                        registrado_por TEXT,
+                        registrado_em TEXT,
+                        UNIQUE (sm_id, ordem))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_sm_historico (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
+                        evento TEXT NOT NULL,
+                        status_anterior TEXT,
+                        status_novo TEXT,
+                        descricao TEXT,
+                        usuario TEXT,
+                        momento TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_sm_transicoes (
+                        origem TEXT NOT NULL,
+                        destino TEXT NOT NULL,
+                        PRIMARY KEY (origem, destino))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_sm_pdfs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
+                        revisao INTEGER,
+                        caminho TEXT NOT NULL,
+                        gerado_por TEXT,
+                        gerado_em TEXT,
+                        revisao_final INTEGER)''')
+    transicoes = {(origem, destino) for origem, destinos in DOC_LIB_TRANSICOES_SM.items() for destino in destinos}
+    if set(cursor.execute("SELECT origem, destino FROM doclib_sm_transicoes").fetchall()) != transicoes:
+        cursor.execute("DELETE FROM doclib_sm_transicoes")
+        cursor.executemany("INSERT INTO doclib_sm_transicoes (origem, destino) VALUES (?, ?)", sorted(transicoes))
+    definitivos = ", ".join(f"'{status}'" for status in DOC_LIB_STATUS_DEFINITIVOS_SM)
+    # Triggers: última barreira contra operação direta no banco (as regras completas ficam em doc_lib_salvar_sm)
+    triggers = {
+        # só as transições da tabela doclib_sm_transicoes
+        "trg_doclib_sm_status": f'''BEFORE UPDATE OF status ON doclib_sm
+            WHEN OLD.status <> NEW.status AND NOT EXISTS (
+                SELECT 1 FROM doclib_sm_transicoes WHERE origem = OLD.status AND destino = NEW.status)
+            BEGIN SELECT RAISE(ABORT, 'SM: transição de status não permitida'); END''',
+        # SM concluída ou cancelada não muda mais
+        "trg_doclib_sm_definitivo": f'''BEFORE UPDATE ON doclib_sm WHEN OLD.status IN ({definitivos})
+            BEGIN SELECT RAISE(ABORT, 'SM concluída ou cancelada não pode mais ser alterada'); END''',
+        # o número nunca muda nem é reaproveitado
+        "trg_doclib_sm_numero": '''BEFORE UPDATE OF numero, ano, sequencia ON doclib_sm
+            WHEN OLD.numero <> NEW.numero OR OLD.ano <> NEW.ano OR OLD.sequencia <> NEW.sequencia
+            BEGIN SELECT RAISE(ABORT, 'SM: o número do documento não pode ser alterado'); END''',
+        "trg_doclib_sm_sem_exclusao": '''BEFORE DELETE ON doclib_sm
+            BEGIN SELECT RAISE(ABORT, 'SM não pode ser excluída (o número nunca é reaproveitado)'); END''',
+        # conferência registrada não muda nem é apagada
+        "trg_doclib_sm_conferencia_altera": '''BEFORE UPDATE ON doclib_sm_conferencias
+            BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser alterada'); END''',
+        "trg_doclib_sm_conferencia_exclui": '''BEFORE DELETE ON doclib_sm_conferencias
+            BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser excluída'); END''',
+        # histórico das mudanças de status, por qualquer caminho
+        "trg_doclib_sm_historico_novo": '''AFTER INSERT ON doclib_sm
+            BEGIN INSERT INTO doclib_sm_historico (sm_id, evento, status_anterior, status_novo, descricao, usuario, momento)
+                VALUES (NEW.id, 'status', NULL, NEW.status, 'SM numerada', NEW.criado_por, NEW.criado_em); END''',
+        "trg_doclib_sm_historico_status": '''AFTER UPDATE OF status ON doclib_sm WHEN OLD.status <> NEW.status
+            BEGIN INSERT INTO doclib_sm_historico (sm_id, evento, status_anterior, status_novo, descricao, usuario, momento)
+                VALUES (NEW.id, 'status', OLD.status, NEW.status, NULL, NEW.atualizado_por, NEW.atualizado_em); END''',
+    }
+    for nome, definicao in triggers.items():
+        cursor.execute(f"CREATE TRIGGER IF NOT EXISTS {nome} {definicao}")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_doclib_sm_manobras ON doclib_sm_manobras (sm_id, tipo, ordem)")
+
+
+# ---------------------------------------------------
+# LEITURA, STATUS E REGRAS DA SM
+# ---------------------------------------------------
+def _doc_lib_ler_sm(conexao, sm_id):
+    """Lê a SM completa (um dicionário com as colunas de doclib_sm e as listas equipamentos, liberacao, normalizacao e
+    conferencias) usando a conexão informada, ou None. Cada manobra traz também a 'identificacao' (1A, 1B, 2A...)."""
+    cursor = conexao.cursor()
+    cursor.row_factory = sqlite3.Row
+    cursor.execute("SELECT * FROM doclib_sm WHERE id = ?", (sm_id,))
+    linha = cursor.fetchone()
+    if linha is None:
+        return None
+    doc = dict(linha)
+    origem = cursor.execute("SELECT numero FROM doclib_sm WHERE id = ?", (doc["referencia_id"],)).fetchone() \
+        if doc["referencia_id"] else None
+    doc["referencia_numero"] = origem[0] if origem else ""
+    cursor.execute("SELECT * FROM doclib_sm_equipamentos WHERE sm_id = ? ORDER BY ordem", (sm_id,))
+    doc["equipamentos"] = [dict(item) for item in cursor.fetchall()]
+    for tipo, chave, _, _ in _DOC_LIB_TABELAS_MANOBRAS_SM:
+        cursor.execute("SELECT * FROM doclib_sm_manobras WHERE sm_id = ? AND tipo = ? ORDER BY ordem", (sm_id, tipo))
+        manobras = [dict(item) for item in cursor.fetchall()]
+        for manobra in manobras:
+            manobra["numero"] = "" if manobra["numero"] is None else str(manobra["numero"])
+            manobra["local"], manobra["acao"] = manobra["local"] or "", manobra["acao"] or ""
+            manobra["data"], manobra["hora"] = manobra["data"] or "", manobra["hora"] or ""
+        for manobra, identificacao in zip(manobras, doc_lib_identificar_sequencias_sm([m["numero"] for m in manobras])):
+            manobra["identificacao"] = identificacao
+        doc[chave] = manobras
+    cursor.execute("SELECT * FROM doclib_sm_conferencias WHERE sm_id = ? ORDER BY ordem", (sm_id,))
+    doc["conferencias"] = [dict(item) for item in cursor.fetchall()]
+    return doc
+
+
+def doc_lib_carregar_sm(sm_id):
+    """Devolve a SM completa ou None."""
+    conexao = doc_lib_conectar()
+    try:
+        return _doc_lib_ler_sm(conexao, sm_id)
+    finally:
+        conexao.close()
+
+
+def doc_lib_documento_reservado_sm(doc):
+    """True se a SM ainda está reservada (só tem o número): o PDF dela é um formulário em branco, não emite o documento e
+    ela continua editável até ser preenchida e salva."""
+    return (doc or {}).get("status") == STATUS_ATEIE_RESERVADO
+
+
+def doc_lib_sm_tem_conteudo(doc):
+    """True se algum campo da SM foi preenchido (uma SM reservada ainda não tem nada além do número)."""
+    return any(_doc_lib_txt((doc or {}).get(campo)) for campo in
+               DOC_LIB_CAMPOS_PROGRAMACAO_SM + ("motivo",) + DOC_LIB_CAMPOS_CONDICOES_SM)
+
+
+def doc_lib_conferencia_valida_sm(conferencia):
+    """Conferência com nome, área, data (válida) e Ass. preenchidos e a modalidade registrada."""
+    conferencia = conferencia or {}
+    return conferencia.get("modalidade") in DOC_LIB_MODALIDADES_SM \
+        and all(_doc_lib_txt(conferencia.get(campo)) for campo in ("nome", "area", "data", "ass")) \
+        and bool(doc_lib_normalizar_data(conferencia.get("data")))
+
+
+def doc_lib_conferencia_aprovada_sm(conferencias):
+    """True se a SM tem pelo menos UMA conferência manual e UMA conferência pelo sistema válidas. Só a manual ou só a do
+    sistema não aprova. A modalidade vem do campo gravado em cada conferência (nunca da aparência dos campos)."""
+    validas = {conferencia.get("modalidade") for conferencia in conferencias or [] if doc_lib_conferencia_valida_sm(conferencia)}
+    return {DOC_LIB_MODALIDADE_MANUAL_SM, DOC_LIB_MODALIDADE_SISTEMA_SM} <= validas
+
+
+def doc_lib_executantes_informados_sm(doc, etapa):
+    """Executantes da Liberação (etapa 'lib') ou da Normalização (etapa 'nor') informados: pelo menos um entre 'No local' e
+    'Remotamente'."""
+    campos = DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM if etapa == "lib" else DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM
+    return any(_doc_lib_txt((doc or {}).get(campo)) for campo in campos)
+
+
+def doc_lib_calcular_status_sm(doc, emitido):
+    """Status automático da SM, em função do que já aconteceu com ela:
+      Cancelado ................ foi cancelada (nunca volta atrás)
+      Reservado ................ número reservado e ainda sem o preenchimento
+      Em análise ............... salva, mas o documento ainda não foi gerado
+      Concluído ................ documento gerado e Executantes da Normalização informados
+      Em Execução .............. documento gerado e Executantes da Liberação informados
+      Aprovado para Execução ... documento gerado com conferência manual E conferência pelo sistema válidas
+      Aguarda Conferência ...... documento gerado, ainda sem as duas conferências"""
+    if doc.get("status") == STATUS_ATEIE_CANCELADO:
+        return STATUS_ATEIE_CANCELADO
+    if doc.get("status") == STATUS_ATEIE_RESERVADO and not doc_lib_sm_tem_conteudo(doc):
+        return STATUS_ATEIE_RESERVADO
+    if not emitido:
+        return STATUS_ATEIE_EM_ANALISE
+    if doc_lib_executantes_informados_sm(doc, "nor"):
+        return STATUS_ATEIE_CONCLUIDO
+    if doc_lib_executantes_informados_sm(doc, "lib"):
+        return STATUS_ATEIE_EM_EXECUCAO
+    if doc_lib_conferencia_aprovada_sm(doc.get("conferencias")):
+        return STATUS_ATEIE_APROVADO_EXECUCAO
+    return STATUS_SM_AGUARDA_CONFERENCIA
+
+
+def doc_lib_periodo_vigente_sm(doc):
+    """(início, término) do período em vigor: a última reprogramação preenchida ou, se não houver, a Programação. Cada um no
+    formato 'dd/mm/aaaa HH:MM' ('' se não informado)."""
+    for prefixo in ("p3", "p2", "p1", "p0"):
+        campos = doc_lib_campos_periodo_sm(prefixo)
+        if all(_doc_lib_txt(doc.get(campo)) for campo in campos):
+            return (_doc_lib_data_hora_texto(doc[campos[0]], doc[campos[1]]),
+                    _doc_lib_data_hora_texto(doc[campos[2]], doc[campos[3]]))
+    return "", ""
+
+
+def doc_lib_linhas_texto_sm(texto, largura=None, tamanho=9.5, estilo=""):
+    """Quantidade de linhas que o texto ocupa no PDF da SM (mesma largura e fonte do documento): é a medida do Motivo, que
+    comporta no máximo DOC_LIB_LINHAS_MOTIVO_SM linhas."""
+    texto = _doc_lib_txt(texto)
+    if not texto:
+        return 0
+    with _doc_lib_trava_medidor_sm:         # o medidor é um só: uma medição por vez (o aplicativo também usa threads)
+        if not _doc_lib_medidor_sm:
+            medidor = PDFSM("")
+            medidor.add_page()              # a quebra de linhas (multi_cell) precisa de uma página aberta
+            _doc_lib_medidor_sm.append(medidor)
+        medidor = _doc_lib_medidor_sm[0]
+        medidor.set_font("DejaVuC", estilo, tamanho)
+        return len(doc_lib_quebrar_linhas(medidor, largura or PDFSM.LARGURA_TEXTO, 4.3, texto))
+
+
+_doc_lib_medidor_sm = []            # PDFSM usado só para medir textos (as fontes são carregadas uma única vez)
+_doc_lib_trava_medidor_sm = threading.Lock()
+
+
+# ---------------------------------------------------
+# NORMALIZAÇÃO E VALIDAÇÃO DA SM
+# ---------------------------------------------------
+def _doc_lib_texto_multilinha_sm(valor):
+    """Texto de várias linhas sem espaços no começo e no fim (quebras no padrão \\n)."""
+    return str(valor or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def doc_lib_normalizar_sm(dados):
+    """Devolve uma cópia dos dados no padrão que é validado e gravado: datas dd/mm/aaaa, horas HH:MM, Tempo de Retorno HH:MM,
+    textos sem espaços nas pontas, tabelas de manobras sem as linhas totalmente vazias, listas completas de equipamentos
+    (3 linhas) e as reprogramações habilitadas (as que têm dados e a anterior a elas). Valores inválidos ficam como foram
+    digitados (a validação os aponta)."""
+    novo = {chave: valor for chave, valor in dados.items()}
+    for chave in DOC_LIB_CAMPOS_GERAIS_SM + DOC_LIB_CAMPOS_REPROGRAMACAO_SM + DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM \
+            + DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM + ("elaborado_por", "elaborado_ass"):
+        novo[chave] = _doc_lib_texto_multilinha_sm(dados.get(chave))
+    for prefixo, _, _ in DOC_LIB_PERIODOS_SM:
+        for campo in DOC_LIB_CAMPOS_PERIODO_SM:
+            chave = f"{prefixo}_{campo}"
+            normalizador = doc_lib_normalizar_data if campo.startswith("data") else doc_lib_normalizar_hora
+            novo[chave] = normalizador(novo[chave]) or novo[chave]
+    novo["elaborado_data"] = doc_lib_normalizar_data(novo["elaborado_data"]) or novo["elaborado_data"]
+    equipamentos = []
+    for item in list(dados.get("equipamentos") or [])[:DOC_LIB_LINHAS_EQUIPAMENTOS_SM]:
+        item = {campo: _doc_lib_txt(item.get(campo)) for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM}
+        item["tempo_retorno"] = doc_lib_normalizar_duracao_sm(item["tempo_retorno"]) or item["tempo_retorno"]
+        equipamentos.append(item)
+    while len(equipamentos) < DOC_LIB_LINHAS_EQUIPAMENTOS_SM:
+        equipamentos.append({campo: "" for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM})
+    novo["equipamentos"] = equipamentos
+    for _, chave, _, _ in _DOC_LIB_TABELAS_MANOBRAS_SM:
+        linhas = []
+        for item in dados.get(chave) or []:
+            linha = {campo: _doc_lib_txt(item.get(campo)) for campo in _DOC_LIB_COLUNAS_MANOBRA_SM}
+            linha["data"] = doc_lib_normalizar_data(linha["data"]) or linha["data"]
+            linha["hora"] = doc_lib_normalizar_hora(linha["hora"]) or linha["hora"]
+            linha["acao"] = _doc_lib_texto_multilinha_sm(item.get("acao"))
+            linha["conferir"] = 1 if item.get("conferir") else 0
+            if any(linha[campo] for campo in _DOC_LIB_COLUNAS_MANOBRA_SM):
+                linhas.append(linha)
+        novo[chave] = linhas
+    conferencias = []
+    for item in dados.get("conferencias") or []:
+        conferencia = {campo: _doc_lib_txt(item.get(campo)) for campo in ("modalidade", "nome", "area", "data", "ass")}
+        conferencia["modalidade"] = conferencia["modalidade"].lower()
+        conferencia["data"] = doc_lib_normalizar_data(conferencia["data"]) or conferencia["data"]
+        if any(conferencia[campo] for campo in ("nome", "area", "data", "ass")):
+            conferencias.append(conferencia)
+    novo["conferencias"] = conferencias
+    try:
+        habilitadas = max(0, min(3, int(dados.get("reprogramacoes") or 0)))
+    except (TypeError, ValueError):
+        habilitadas = 0
+    for numero, prefixo in ((1, "p1"), (2, "p2"), (3, "p3")):
+        if any(novo[campo] for campo in doc_lib_campos_periodo_sm(prefixo)):
+            habilitadas = max(habilitadas, numero)
+    novo["reprogramacoes"] = habilitadas
+    return novo
+
+
+def _doc_lib_data_hora_manobra_sm(linha):
+    return _doc_lib_data_hora(linha.get("data"), linha.get("hora"))
+
+
+def doc_lib_validar_sm(dados, atual=None):
+    """Valida a SM (antes de salvar, antes de gerar o documento e dentro de doc_lib_salvar_sm). 'dados' já normalizados por
+    doc_lib_normalizar_sm; 'atual' é o documento como está gravado (None na SM nova). O que se valida depende do status:
+    na edição geral (SM nova, Reservada ou Em análise) todos os campos obrigatórios; nos demais status, só o que ainda pode
+    mudar (reprogramações, data e hora das manobras, executantes e conferências).
+
+    Retorna uma lista de (chaves_dos_campos, mensagem); lista vazia = válido. Chaves das tabelas: 'equip:1:local',
+    'lib:3:acao' (liberação), 'nor:2:numero' (normalização), 'conf:1:nome' (conferência)."""
+    erros = []
+    status = (atual or {}).get("status")
+    geral = status in (None, STATUS_ATEIE_RESERVADO, STATUS_ATEIE_EM_ANALISE)
+
+    def vazio(valor):
+        return not _doc_lib_txt(valor)
+
+    def erro(chaves, mensagem):
+        erros.append((tuple([chaves] if isinstance(chaves, str) else chaves), mensagem))
+
+    def formato(chave, descricao, tipo):
+        """True se o campo preenchido tem o formato válido (data, hora ou duração); aponta o erro se não tiver."""
+        valor = dados.get(chave)
+        validador = {"data": doc_lib_normalizar_data, "hora": doc_lib_normalizar_hora,
+                     "duracao": doc_lib_normalizar_duracao_sm}[tipo]
+        if validador(valor):
+            return True
+        padrao = {"data": "DD/MM/AAAA", "hora": "HH:MM", "duracao": "HH:MM, com minutos de 00 a 59"}[tipo]
+        invalido = {"data": "data inválida", "hora": "hora inválida", "duracao": "tempo inválido"}[tipo]
+        erro(chave, f"{descricao}: {invalido} (use {padrao}).")
+        return False
+
+    # ---- 2 Período programado: a Programação é obrigatória; cada Reprogramação, se tiver dados, precisa estar completa
+    anterior_completo = True
+    for indice, (prefixo, numero, nome) in enumerate(DOC_LIB_PERIODOS_SM):
+        campos = doc_lib_campos_periodo_sm(prefixo)
+        preenchidos = [campo for campo in campos if not vazio(dados.get(campo))]
+        if prefixo == "p0" and not geral:
+            continue                                            # a Programação original fica protegida
+        completo = False
+        if prefixo == "p0" or preenchidos:
+            validos = True
+            for campo, nome_campo in zip(campos, DOC_LIB_CAMPOS_PERIODO_SM):
+                descricao = f"{nome}, {_DOC_LIB_NOMES_CAMPO_PERIODO_SM[nome_campo]}"
+                if vazio(dados.get(campo)):
+                    erro(campo, f"{descricao}: preencha o campo.")
+                    validos = False
+                elif not formato(campo, descricao, "data" if nome_campo.startswith("data") else "hora"):
+                    validos = False
+            if validos:
+                inicio = _doc_lib_data_hora(dados.get(campos[0]), dados.get(campos[1]))
+                termino = _doc_lib_data_hora(dados.get(campos[2]), dados.get(campos[3]))
+                if termino < inicio:
+                    erro((campos[2], campos[3]), f"{nome}: o término não pode ser anterior ao início.")
+                    validos = False
+            completo = validos
+            if preenchidos and not anterior_completo:
+                erro(campos, f"{nome}: preencha antes o período anterior (as reprogramações seguem a ordem).")
+        anterior_completo = completo
+
+    # ---- 3 a 5: campos da edição geral
+    if geral:
+        for linha in range(1, DOC_LIB_LINHAS_EQUIPAMENTOS_SM + 1):
+            item = dados["equipamentos"][linha - 1]
+            if linha > 1 and all(vazio(item.get(campo)) for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM):
+                continue                                        # as linhas 2 e 3 são opcionais, mas só por inteiro
+            for campo, numero, titulo in DOC_LIB_COLUNAS_EQUIPAMENTO_SM:
+                chave = f"equip:{linha}:{campo}"
+                descricao = f"Equipamento(s) a impedir, linha {linha}, {numero} {titulo}"
+                if vazio(item.get(campo)):
+                    erro(chave, f"{descricao}: preencha o campo.")
+                elif campo == "tempo_retorno" and not doc_lib_normalizar_duracao_sm(item[campo]):
+                    erro(chave, f"{descricao}: tempo inválido (use HH:MM, com minutos de 00 a 59).")
+        if vazio(dados.get("motivo")):
+            erro("motivo", "Motivo: preencha o campo.")
+        elif doc_lib_linhas_texto_sm(dados["motivo"]) > DOC_LIB_LINHAS_MOTIVO_SM:
+            erro("motivo", f"Motivo: o texto ocupa {doc_lib_linhas_texto_sm(dados['motivo'])} linhas; o máximo é "
+                           f"{DOC_LIB_LINHAS_MOTIVO_SM}. Reduza o texto.")
+        for campo, numero, titulo in DOC_LIB_CONDICOES_SM:
+            if vazio(dados.get(campo)):
+                erro(campo, f"Condições de Segurança, {numero} {titulo}: preencha o campo (escreva Nenhuma se não houver).")
+        if vazio(dados.get("elaborado_area")):
+            erro("elaborado_area", "Elaborado por, Área: preencha o campo.")
+        if vazio(dados.get("elaborado_data")):
+            erro("elaborado_data", "Elaborado por, Data: preencha o campo.")
+        elif not doc_lib_normalizar_data(dados["elaborado_data"]):
+            erro("elaborado_data", "Elaborado por, Data: data inválida (use DD/MM/AAAA).")
+        if vazio(dados.get("elaborado_por")):
+            erro("elaborado_por", "Elaborado por: usuário não identificado (faça login novamente).")
+        if vazio(dados.get("elaborado_ass")):
+            erro("elaborado_ass", "Elaborado por, Ass.: usuário não identificado (faça login novamente).")
+
+    # ---- 6 e 8: manobras de liberação e de normalização
+    for _, chave, titulo, prefixo in _DOC_LIB_TABELAS_MANOBRAS_SM:
+        linhas = dados.get(chave) or []
+        if len(linhas) > DOC_LIB_LIMITE_MANOBRAS_SM:
+            erro(f"{prefixo}:{DOC_LIB_LIMITE_MANOBRAS_SM + 1}:acao",
+                 f"{titulo}: no máximo {DOC_LIB_LIMITE_MANOBRAS_SM} manobras (a tabela tem {len(linhas)}).")
+        if geral and not linhas:
+            erro(f"{prefixo}:1:acao", f"{titulo}: informe ao menos uma manobra.")
+        for posicao, linha in enumerate(linhas, start=1):
+            rotulo = f"{titulo}, linha {posicao}"
+            if geral:
+                if doc_lib_numero_sequencia_sm(linha["numero"]) is None:
+                    erro(f"{prefixo}:{posicao}:numero", f"{rotulo}: informe o número da Sequência "
+                                                        f"(1 a {DOC_LIB_LIMITE_SEQUENCIA_SM}).")
+                if vazio(linha["local"]):
+                    erro(f"{prefixo}:{posicao}:local", f"{rotulo}: informe o Local.")
+                elif len(linha["local"]) > DOC_LIB_LIMITE_LOCAL_MANOBRA_SM:
+                    erro(f"{prefixo}:{posicao}:local", f"{rotulo}: o Local aceita no máximo "
+                                                       f"{DOC_LIB_LIMITE_LOCAL_MANOBRA_SM} caracteres.")
+                if vazio(linha["acao"]):
+                    erro(f"{prefixo}:{posicao}:acao", f"{rotulo}: informe a Ação.")
+            if not vazio(linha["data"]) or not vazio(linha["hora"]):
+                if vazio(linha["data"]) or vazio(linha["hora"]):
+                    erro((f"{prefixo}:{posicao}:data", f"{prefixo}:{posicao}:hora"),
+                         f"{rotulo}: informe a data e a hora da manobra (as duas, ou nenhuma).")
+                else:
+                    if not doc_lib_normalizar_data(linha["data"]):
+                        erro(f"{prefixo}:{posicao}:data", f"{rotulo}: data inválida (use DD/MM/AAAA).")
+                    if not doc_lib_normalizar_hora(linha["hora"]):
+                        erro(f"{prefixo}:{posicao}:hora", f"{rotulo}: hora inválida (use HH:MM).")
+        # a ordem dos horários acompanha a ordem das manobras (o mesmo instante é aceito)
+        anterior = None
+        for posicao, linha in enumerate(linhas, start=1):
+            momento = _doc_lib_data_hora_manobra_sm(linha)
+            if momento is None:
+                continue
+            if anterior is not None and momento < anterior[1]:
+                erro((f"{prefixo}:{posicao}:data", f"{prefixo}:{posicao}:hora"),
+                     f"{titulo}, linha {posicao}: a data e a hora não podem ser anteriores às da linha {anterior[0]}.")
+            anterior = (posicao, momento)
+    ultima_liberacao = max((m for m in map(_doc_lib_data_hora_manobra_sm, dados.get("liberacao") or []) if m), default=None)
+    for posicao, linha in enumerate(dados.get("normalizacao") or [], start=1):
+        momento = _doc_lib_data_hora_manobra_sm(linha)
+        if momento and ultima_liberacao and momento < ultima_liberacao:
+            erro((f"nor:{posicao}:data", f"nor:{posicao}:hora"),
+                 f"Manobras de Normalização, linha {posicao}: a data e a hora não podem ser anteriores às da última "
+                 f"manobra de liberação.")
+
+    # ---- 12 Conferência
+    conferencias = dados.get("conferencias") or []
+    if len(conferencias) > DOC_LIB_LIMITE_CONFERENCIAS_SM:
+        erro(f"conf:{DOC_LIB_LIMITE_CONFERENCIAS_SM + 1}:nome",
+             f"Conferência: no máximo {DOC_LIB_LIMITE_CONFERENCIAS_SM} conferências.")
+    for posicao, conferencia in enumerate(conferencias, start=1):
+        rotulo = f"Conferência {posicao} ({DOC_LIB_MODALIDADES_SM.get(conferencia['modalidade'], 'modalidade inválida')})"
+        if conferencia["modalidade"] not in DOC_LIB_MODALIDADES_SM:
+            erro(f"conf:{posicao}:nome", f"{rotulo}: a modalidade (manual ou pelo sistema) precisa ser registrada.")
+        for campo, titulo in (("nome", "Conferido por"), ("area", "Área"), ("data", "Data"), ("ass", "Ass.")):
+            if vazio(conferencia[campo]):
+                erro(f"conf:{posicao}:{campo}", f"{rotulo}, {titulo}: preencha o campo.")
+        if not vazio(conferencia["data"]) and not doc_lib_normalizar_data(conferencia["data"]):
+            erro(f"conf:{posicao}:data", f"{rotulo}, Data: data inválida (use DD/MM/AAAA).")
+    return erros
+
+
+# ---------------------------------------------------
+# O QUE CADA STATUS PERMITE ALTERAR
+# ---------------------------------------------------
+# Em análise é o ÚNICO status com edição geral ("geral"). Depois que o documento é gerado, só mudam os grupos abaixo, cada um
+# no seu momento (as reprogramações valem até a SM ser concluída ou cancelada, porque o prazo pode mudar até o fim).
+_DOC_LIB_GRUPOS_EDITAVEIS_SM = {
+    None: ("geral", "reprogramacao"),
+    STATUS_ATEIE_RESERVADO: ("geral", "reprogramacao"),
+    STATUS_ATEIE_EM_ANALISE: ("geral", "reprogramacao"),
+    STATUS_SM_AGUARDA_CONFERENCIA: ("reprogramacao", "conferencias"),
+    STATUS_ATEIE_APROVADO_EXECUCAO: ("reprogramacao", "datas_lib", "exec_lib"),
+    STATUS_ATEIE_EM_EXECUCAO: ("reprogramacao", "datas_lib", "datas_nor", "exec_lib", "exec_nor"),
+}
+_DOC_LIB_NOMES_GRUPOS_SM = {
+    "geral": "dados gerais do documento (só podem ser alterados com a SM Em análise)",
+    "reprogramacao": "Reprogramações",
+    "datas_lib": "Data e hora das manobras de liberação (só depois que a SM for Aprovada para Execução)",
+    "datas_nor": "Data e hora das manobras de normalização (só com a SM Em Execução)",
+    "exec_lib": "Executantes da Liberação (só com a SM Aprovada para Execução)",
+    "exec_nor": "Executantes da Normalização (só com a SM Em Execução)",
+    "conferencias": "Conferência (só com a SM Aguardando Conferência)"}
+
+
+def _doc_lib_grupos_sm(doc):
+    """Resumo comparável de cada grupo de campos da SM (a SM gravada e os dados recebidos viram a mesma estrutura)."""
+    def txt(campo):
+        return _doc_lib_txt(doc.get(campo))
+
+    def estrutura(chave):
+        return tuple((_doc_lib_txt(m.get("numero")), _doc_lib_txt(m.get("local")), _doc_lib_texto_multilinha_sm(m.get("acao")),
+                      1 if m.get("conferir") else 0) for m in doc.get(chave) or [])
+
+    def datas(chave):
+        pares = tuple((_doc_lib_txt(m.get("data")), _doc_lib_txt(m.get("hora"))) for m in doc.get(chave) or [])
+        return pares if any(pares_ != ("", "") for pares_ in pares) else ()        # nada informado = vazio, qualquer que seja o nº de linhas
+
+    equipamentos = [tuple(_doc_lib_txt(item.get(campo)) for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM)
+                    for item in doc.get("equipamentos") or []]
+    equipamentos += [("",) * len(DOC_LIB_COLUNAS_EQUIPAMENTO_SM)] * (DOC_LIB_LINHAS_EQUIPAMENTOS_SM - len(equipamentos))
+    return {"geral": (tuple(txt(campo) for campo in DOC_LIB_CAMPOS_GERAIS_SM), tuple(equipamentos),
+                      estrutura("liberacao"), estrutura("normalizacao")),
+            "reprogramacao": (tuple(txt(campo) for campo in DOC_LIB_CAMPOS_REPROGRAMACAO_SM),
+                              int(doc.get("reprogramacoes") or 0)),
+            "datas_lib": datas("liberacao"), "datas_nor": datas("normalizacao"),
+            "exec_lib": tuple(txt(campo) for campo in DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM),
+            "exec_nor": tuple(txt(campo) for campo in DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM),
+            "conferencias": tuple(tuple(_doc_lib_txt(c.get(campo)) for campo in ("modalidade", "nome", "area", "data", "ass"))
+                                  for c in doc.get("conferencias") or [])}
+
+
+def doc_lib_diferencas_bloqueadas_sm(atual, dados):
+    """Lista o que, nos dados recebidos, difere do gravado e NÃO pode ser alterado no status atual da SM (lista vazia = nada
+    protegido foi alterado). 'atual' é a SM gravada (None ou {} na SM nova). Além de cada status só liberar os seus grupos
+    (_DOC_LIB_GRUPOS_EDITAVEIS_SM): a conferência registrada não muda nem sai; Executantes e data e hora já registrados podem ser
+    corrigidos, mas não apagados (apagá-los desfaria o que levou a SM ao status atual)."""
+    atual = atual or {}
+    status = atual.get("status")
+    editaveis = _DOC_LIB_GRUPOS_EDITAVEIS_SM.get(status, ())
+    antes, depois = _doc_lib_grupos_sm(atual), _doc_lib_grupos_sm(dados)
+    bloqueadas = [nome for grupo, nome in _DOC_LIB_NOMES_GRUPOS_SM.items()
+                  if grupo not in editaveis and antes[grupo] != depois[grupo]]
+    if "conferencias" in editaveis and depois["conferencias"][:len(antes["conferencias"])] != antes["conferencias"]:
+        bloqueadas.append("Conferência já registrada (não pode ser alterada nem removida)")
+    for grupo, nome in (("exec_lib", "Executantes da Liberação"), ("exec_nor", "Executantes da Normalização")):
+        if grupo in editaveis and any(antes[grupo]) and not any(depois[grupo]):
+            bloqueadas.append(f"{nome} já registrados (podem ser corrigidos, não apagados)")
+    for grupo, nome in (("datas_lib", "manobras de liberação"), ("datas_nor", "manobras de normalização")):
+        if grupo in editaveis and any(registrada != ("", "") and nova == ("", "")
+                                      for registrada, nova in zip(antes[grupo], depois[grupo])):
+            bloqueadas.append(f"Data e hora já registradas nas {nome} (podem ser corrigidas, não apagadas)")
+    return bloqueadas
+
+
+def doc_lib_pendencias_transicao_sm(doc, destino):
+    """Pendências obrigatórias de execução que impedem a SM de passar ao status 'destino' (Em Execução ou Concluído):
+      Em Execução ... Executantes da Liberação e data e hora de TODAS as manobras de liberação;
+      Concluído ..... tudo isso e, ainda, os Executantes da Normalização e data e hora de TODAS as manobras de normalização.
+    Assim o campo dos executantes não conclui uma SM com a execução pela metade. Retorna a lista de mensagens."""
+    pendencias = []
+    if destino in (STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CONCLUIDO):
+        if not doc_lib_executantes_informados_sm(doc, "lib"):
+            pendencias.append("Executantes da Liberação: informe quem executou no local ou remotamente.")
+        for manobra in doc.get("liberacao") or []:
+            if not (manobra.get("data") and manobra.get("hora")):
+                pendencias.append(f"Manobra de liberação {manobra.get('identificacao') or manobra.get('numero')}: "
+                                  f"informe a data e a hora da execução.")
+    if destino == STATUS_ATEIE_CONCLUIDO:
+        if not doc_lib_executantes_informados_sm(doc, "nor"):
+            pendencias.append("Executantes da Normalização: informe quem executou no local ou remotamente.")
+        for manobra in doc.get("normalizacao") or []:
+            if not (manobra.get("data") and manobra.get("hora")):
+                pendencias.append(f"Manobra de normalização {manobra.get('identificacao') or manobra.get('numero')}: "
+                                  f"informe a data e a hora da execução.")
+    return pendencias
+
+
+def doc_lib_erros_geracao_sm(doc):
+    """Erros que impedem gerar o documento (Gerar SM Avulso) de uma SM salva: validação completa e nenhuma manobra de
+    normalização ainda marcada para conferência manual pelo botão Inverter Manobras (a ação foi mantida porque a inversão
+    não era segura e, depois da geração, o texto não pode mais ser corrigido)."""
+    erros = doc_lib_validar_sm(doc, doc)
+    for posicao, manobra in enumerate(doc.get("normalizacao") or [], start=1):
+        if manobra.get("conferir"):
+            erros.append(((f"nor:{posicao}:acao",), f"Manobras de Normalização, linha {posicao}: confira a ação (foi mantida "
+                                                    f"sem inverter pelo botão Inverter Manobras) e confirme-a no alerta da linha."))
+    return erros
+
+
+def _doc_lib_historico_sm(cursor, sm_id, evento, descricao, usuario, momento):
+    cursor.execute("INSERT INTO doclib_sm_historico (sm_id, evento, descricao, usuario, momento) VALUES (?, ?, ?, ?, ?)",
+                   (sm_id, evento, descricao, usuario, momento))
+
+
+def _doc_lib_mudar_status_sm(cursor, sm_id, status, usuario, momento):
+    """Muda o status (o histórico é gravado pelo trigger do banco, com este usuário e este momento)."""
+    cursor.execute("UPDATE doclib_sm SET status = ?, atualizado_por = ?, atualizado_em = ? WHERE id = ?",
+                   (status, usuario, momento, sm_id))
+
+
+_DOC_LIB_MSG_CONFLITO_SM = ("Esta SM foi alterada por outro usuário depois de aberta nesta janela.\n\n"
+                            "Feche-a e abra-a novamente (GRID SM) para ver a versão atual.")
+
+
+def _doc_lib_gravar_filhos_sm(cursor, sm_id, dados):
+    """Grava as 3 linhas de equipamentos e as manobras (edição geral: as tabelas são refeitas por inteiro)."""
+    cursor.execute("DELETE FROM doclib_sm_equipamentos WHERE sm_id = ?", (sm_id,))
+    for ordem, item in enumerate(dados["equipamentos"], start=1):
+        cursor.execute("INSERT INTO doclib_sm_equipamentos (sm_id, ordem, local, instalacao, equipamento, caracterizacao, "
+                       "local_execucao, tempo_retorno) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                       [sm_id, ordem] + [item[campo] for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM])
+    cursor.execute("DELETE FROM doclib_sm_manobras WHERE sm_id = ?", (sm_id,))
+    for tipo, chave, _, _ in _DOC_LIB_TABELAS_MANOBRAS_SM:
+        for ordem, manobra in enumerate(dados[chave], start=1):
+            cursor.execute("INSERT INTO doclib_sm_manobras (sm_id, tipo, ordem, data, hora, numero, local, acao, conferir) "
+                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (sm_id, tipo, ordem, manobra["data"] or None, manobra["hora"] or None,
+                            doc_lib_numero_sequencia_sm(manobra["numero"]), manobra["local"], manobra["acao"],
+                            manobra["conferir"]))
+
+
+def doc_lib_salvar_sm(dados, usuario):
+    """Grava a SM (nova ou já existente) em uma única transação e devolve o id: ou tudo é gravado, ou nada.
+
+    - SM nova: recebe aqui o próximo número do ano (um número por documento, como a MO) e entra com o status Em análise.
+    - SM RESERVADA sendo preenchida: mantém o número; o Elaborado por passa a ser o de quem a registra.
+    - Em análise: edição geral (todos os campos obrigatórios são validados aqui, não só na janela).
+    - Depois de gerado o documento, só os grupos permitidos a cada status (doc_lib_diferencas_bloqueadas_sm): DocLibBloqueado
+      em qualquer outra tentativa. Concluída e Cancelada não são alteradas.
+    - Elaborado por e Ass. são sempre os do usuário autenticado; a conferência pelo sistema grava o nome e o login dele,
+      mesmo que os dados recebidos tragam outros.
+    - O status é recalculado a cada gravação (doc_lib_calcular_status_sm) e só muda por uma transição permitida e sem pendências
+      de execução (doc_lib_pendencias_transicao_sm).
+    - Lança DocLibConflito se outra pessoa salvou o documento depois que ele foi aberto e DocLibValidacaoSM (com a lista de
+      campos com problema) se algum campo for inválido."""
+    dados = doc_lib_normalizar_sm(dados)
+    agora = datetime.now()
+    agora_texto = agora.strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        sm_id = dados.get("id")
+        atual = None
+        if sm_id is not None:
+            atual = _doc_lib_ler_sm(conexao, sm_id)
+            if atual is None or atual["revisao"] != dados.get("revisao"):
+                raise DocLibConflito(_DOC_LIB_MSG_CONFLITO_SM)
+            if atual["status"] in DOC_LIB_STATUS_DEFINITIVOS_SM:
+                raise DocLibBloqueado(f"Esta SM está {atual['status']} e não pode mais ser alterada.")
+        status = atual["status"] if atual else None
+        geral = status in (None, STATUS_ATEIE_RESERVADO, STATUS_ATEIE_EM_ANALISE)
+        if status in (None, STATUS_ATEIE_RESERVADO):          # quem registra o documento é o elaborador
+            dados["elaborado_por"], dados["elaborado_ass"] = obter_nome_completo_usuario(usuario), usuario
+        else:
+            dados["elaborado_por"], dados["elaborado_ass"] = atual["elaborado_por"], atual["elaborado_ass"]
+        registradas = len((atual or {}).get("conferencias") or [])
+        for conferencia in dados["conferencias"][registradas:]:
+            if conferencia["modalidade"] == DOC_LIB_MODALIDADE_SISTEMA_SM:    # conferência pelo sistema: dados do usuário logado
+                conferencia["nome"], conferencia["ass"] = obter_nome_completo_usuario(usuario), usuario
+
+        bloqueadas = doc_lib_diferencas_bloqueadas_sm(atual, dados)
+        if bloqueadas:
+            raise DocLibBloqueado(f"Com a SM no status '{status or 'nova'}' não é permitido alterar: " + "; ".join(bloqueadas)
+                                  + ".\n\nEm análise é o único status que permite a edição geral do documento.")
+        erros = doc_lib_validar_sm(dados, atual)
+        if erros:
+            raise DocLibValidacaoSM(erros)
+
+        if sm_id is None:
+            referencia_id = dados.get("referencia_id")
+            if referencia_id is not None:
+                origem = cursor.execute("SELECT status FROM doclib_sm WHERE id = ?", (referencia_id,)).fetchone()
+                if origem is None or origem[0] in DOC_LIB_STATUS_SEM_REFERENCIA_SM:
+                    raise DocLibRegra("A SM de referência não existe ou ainda está reservada (só tem o número).")
+            sequencia = _doc_lib_consumir_numero(cursor, "SM", agora.year)
+            numero = doc_lib_formatar_numero(sequencia, agora.year)
+            colunas = list(DOC_LIB_CAMPOS_GERAIS_SM + DOC_LIB_CAMPOS_REPROGRAMACAO_SM) \
+                + ["reprogramacoes", "elaborado_por", "elaborado_ass"]
+            cursor.execute(
+                f"INSERT INTO doclib_sm (numero, ano, sequencia, {', '.join(colunas)}, referencia_id, status, revisao, "
+                f"emitido, criado_por, criado_em, atualizado_por, atualizado_em) VALUES (?, ?, ?, "
+                f"{', '.join('?' * len(colunas))}, ?, ?, 1, 0, ?, ?, ?, ?)",
+                [numero, agora.year, sequencia] + [dados[campo] for campo in colunas]
+                + [referencia_id, STATUS_ATEIE_EM_ANALISE, usuario, agora_texto, usuario, agora_texto])
+            sm_id = cursor.lastrowid
+            _doc_lib_gravar_filhos_sm(cursor, sm_id, dados)
+        else:
+            colunas = []
+            if geral:
+                colunas += list(DOC_LIB_CAMPOS_GERAIS_SM)
+                if status == STATUS_ATEIE_RESERVADO:
+                    colunas += ["elaborado_por", "elaborado_ass"]
+            colunas += list(DOC_LIB_CAMPOS_REPROGRAMACAO_SM) + ["reprogramacoes"]
+            if "exec_lib" in _DOC_LIB_GRUPOS_EDITAVEIS_SM[status]:
+                colunas += list(DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM)
+            if "exec_nor" in _DOC_LIB_GRUPOS_EDITAVEIS_SM[status]:
+                colunas += list(DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM)
+            cursor.execute(
+                f"UPDATE doclib_sm SET {', '.join(f'{campo} = ?' for campo in colunas)}, revisao = revisao + 1, "
+                f"atualizado_por = ?, atualizado_em = ? WHERE id = ?",
+                [dados[campo] for campo in colunas] + [usuario, agora_texto, sm_id])
+            if geral:
+                _doc_lib_gravar_filhos_sm(cursor, sm_id, dados)
+            else:
+                _doc_lib_gravar_acompanhamento_sm(cursor, atual, dados, usuario, agora_texto)
+
+        novo = _doc_lib_ler_sm(conexao, sm_id)
+        novo_status = doc_lib_calcular_status_sm(novo, bool(novo["emitido"]))
+        if novo_status != novo["status"]:
+            if novo_status not in DOC_LIB_TRANSICOES_SM.get(novo["status"], ()):
+                raise DocLibRegra(f"Transição de status não permitida: {novo['status']} para {novo_status}.")
+            pendencias = doc_lib_pendencias_transicao_sm(novo, novo_status)
+            if pendencias:
+                raise DocLibRegra(f"A SM não pode passar para '{novo_status}' enquanto houver pendências de execução:\n\n"
+                                  + "\n".join(f"• {pendencia}" for pendencia in pendencias[:14]))
+            _doc_lib_mudar_status_sm(cursor, sm_id, novo_status, usuario, agora_texto)
+        cursor.execute("COMMIT")
+        return sm_id
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def _doc_lib_gravar_acompanhamento_sm(cursor, atual, dados, usuario, agora_texto):
+    """Depois de gerado o documento: grava data e hora das manobras, novas conferências e registra no histórico cada mudança
+    (quem, quando e o quê). Os executantes e as reprogramações já foram gravados no UPDATE da SM; aqui só vão para o histórico."""
+    sm_id = atual["id"]
+    for tipo, chave, titulo, _ in _DOC_LIB_TABELAS_MANOBRAS_SM:
+        for ordem, (antiga, nova) in enumerate(zip(atual[chave], dados[chave]), start=1):
+            if (antiga["data"], antiga["hora"]) == (nova["data"], nova["hora"]):
+                continue
+            cursor.execute("UPDATE doclib_sm_manobras SET data = ?, hora = ? WHERE sm_id = ? AND tipo = ? AND ordem = ?",
+                           (nova["data"] or None, nova["hora"] or None, sm_id, tipo, ordem))
+            anterior = f"{antiga['data']} {antiga['hora']}".strip()
+            _doc_lib_historico_sm(cursor, sm_id, "data_manobra",
+                                  f"{titulo}, {antiga['identificacao'] or ordem}: "
+                                  + (f"data e hora corrigidas de {anterior} para " if anterior else "data e hora informadas: ")
+                                  + f"{nova['data']} {nova['hora']}", usuario, agora_texto)
+    for ordem, conferencia in enumerate(dados["conferencias"], start=1):
+        if ordem > len(atual["conferencias"]):
+            cursor.execute("INSERT INTO doclib_sm_conferencias (sm_id, ordem, modalidade, nome, area, data, ass, registrado_por, "
+                           "registrado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (sm_id, ordem, conferencia["modalidade"], conferencia["nome"], conferencia["area"],
+                            conferencia["data"], conferencia["ass"], usuario, agora_texto))
+            _doc_lib_historico_sm(cursor, sm_id, "conferencia",
+                                  f"Conferência {DOC_LIB_MODALIDADES_SM[conferencia['modalidade']].lower()} registrada: "
+                                  f"{conferencia['nome']} ({conferencia['area']})", usuario, agora_texto)
+    antes, depois = _doc_lib_grupos_sm(atual), _doc_lib_grupos_sm(dados)
+    for grupo, descricao in (("exec_lib", "Executantes da Liberação"), ("exec_nor", "Executantes da Normalização"),
+                             ("reprogramacao", "Reprogramações do período programado")):
+        if antes[grupo] != depois[grupo]:
+            ja_tinha = any(antes[grupo][0]) if grupo == "reprogramacao" else any(antes[grupo])
+            _doc_lib_historico_sm(cursor, sm_id, grupo, f"{descricao}: {'alterados' if ja_tinha else 'informados'}",
+                                  usuario, agora_texto)
+
+
+# ---------------------------------------------------
+# CANCELAMENTO, RESERVA, LISTAGEM E REFERÊNCIA DA SM
+# ---------------------------------------------------
+def doc_lib_cancelar_sm(sm_id, usuario, justificativa, revisao_esperada):
+    """Cancela a SM: o número cancelado fica registrado e nunca é reaproveitado. A SM pode ser cancelada em qualquer status,
+    menos Concluído (e Cancelado): ValueError nesses casos. A justificativa é obrigatória (DocLibRegra). Devolve a nova revisão
+    do documento. DocLibConflito se a SM mudou desde que foi aberta."""
+    if not _doc_lib_txt(justificativa):
+        raise DocLibRegra("Informe a justificativa do cancelamento.")
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT revisao, status FROM doclib_sm WHERE id = ?", (sm_id,))
+        linha = cursor.fetchone()
+        if linha is None or linha[0] != revisao_esperada:
+            raise DocLibConflito(_DOC_LIB_MSG_CONFLITO_SM)
+        if linha[1] == STATUS_ATEIE_CANCELADO:
+            raise ValueError("Esta SM já está cancelada.")
+        if linha[1] not in DOC_LIB_STATUS_CANCELAVEIS_SM:
+            raise ValueError(f"Uma SM com status '{linha[1]}' não pode ser cancelada.")
+        cursor.execute("UPDATE doclib_sm SET status = ?, cancelada_por = ?, data_cancelamento = ?, "
+                       "justificativa_cancelamento = ?, revisao = revisao + 1, atualizado_por = ?, atualizado_em = ? "
+                       "WHERE id = ?", (STATUS_ATEIE_CANCELADO, usuario, agora_texto, _doc_lib_txt(justificativa), usuario,
+                                        agora_texto, sm_id))
+        cursor.execute("SELECT revisao FROM doclib_sm WHERE id = ?", (sm_id,))
+        nova_revisao = cursor.fetchone()[0]
+        cursor.execute("COMMIT")
+        return nova_revisao
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_reservar_sm(quantidade, usuario, nome_completo=""):
+    """Reserva 'quantidade' (1 a DOC_LIB_LIMITE_RESERVA) números de SM, na sequência do último número emitido ou reservado do
+    ano. Cada número vira uma SM com status Reservado, só com o número; todos os demais campos ficam em branco para o
+    preenchimento posterior. Tudo em uma única transação: ou são reservados todos os números pedidos, ou nenhum.
+    Devolve [{"ateie_id": ..., "numero": ...}] na ordem da numeração. Lança DocLibRegra se a quantidade for inválida."""
+    try:
+        quantidade = int(str(quantidade).strip())
+    except (TypeError, ValueError):
+        raise DocLibRegra("Informe a quantidade de números a reservar (número inteiro).")
+    if not 1 <= quantidade <= DOC_LIB_LIMITE_RESERVA:
+        raise DocLibRegra(f"A quantidade de números a reservar deve estar entre 1 e {DOC_LIB_LIMITE_RESERVA}.")
+    agora = datetime.now()
+    agora_texto = agora.strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        reservados = []
+        for _ in range(quantidade):
+            sequencia = _doc_lib_consumir_numero(cursor, "SM", agora.year)
+            numero = doc_lib_formatar_numero(sequencia, agora.year)
+            cursor.execute(
+                "INSERT INTO doclib_sm (numero, ano, sequencia, elaborado_por, status, revisao, emitido, criado_por, criado_em, "
+                "atualizado_por, atualizado_em, reservado_por, reservado_em) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?)",
+                (numero, agora.year, sequencia, nome_completo or usuario, STATUS_ATEIE_RESERVADO, usuario, agora_texto,
+                 usuario, agora_texto, usuario, agora_texto))
+            reservados.append({"ateie_id": cursor.lastrowid, "numero": numero})
+        cursor.execute("COMMIT")
+        return reservados
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_listar_sm():
+    """Um registro por SM, da mais recente para a mais antiga, no formato que o GRID espera (a chave "ateie_id" é o id do
+    documento, nome herdado do GRID ATEIE; a SM tem uma só "linha", a de ordem 1). Uma única consulta: o Local e o Equipamento
+    são os da primeira linha da tabela 3 e a Programação é o período em vigor (reprogramação mais recente, se houver)."""
+    conexao = doc_lib_conectar()
+    conexao.row_factory = sqlite3.Row
+    try:
+        linhas = conexao.execute(
+            "SELECT s.*, e.local AS grid_local, e.equipamento AS grid_equipamento FROM doclib_sm s "
+            "LEFT JOIN doclib_sm_equipamentos e ON e.sm_id = s.id AND e.ordem = 1 "
+            "ORDER BY s.ano DESC, s.sequencia DESC").fetchall()
+    finally:
+        conexao.close()
+    resultado = []
+    for linha in linhas:
+        doc = dict(linha)
+        registro = {"ateie_id": doc["id"], "ordem": 1, "numero": doc["numero"], "ano": doc["ano"],
+                    "sequencia": doc["sequencia"], "status": doc["status"], "email_enviado": "Não"}
+        if doc["status"] == STATUS_ATEIE_RESERVADO:          # só o número e a expressão SM RESERVADA; o resto em branco
+            registro.update(prog_inicio="", prog_termino="", local="", equipamento="", motivo=DOC_LIB_TEXTO_SM_RESERVADA,
+                            elaborado="")
+        else:
+            inicio, termino = doc_lib_periodo_vigente_sm(doc)
+            registro.update(prog_inicio=inicio, prog_termino=termino, local=doc["grid_local"] or "",
+                            equipamento=doc["grid_equipamento"] or "", motivo=doc["motivo"] or "",
+                            elaborado=doc["elaborado_por"] or "")
+        resultado.append(registro)
+    return resultado
+
+
+def doc_lib_dados_referencia_sm(doc):
+    """Dados que a SM aberta pelo botão SM-Referência herda da SM de origem: Equipamento(s) a impedir, Motivo, Condições de
+    Segurança, Manobras de Liberação e de Normalização (número, local e ação), Observações e o vínculo com a SM de origem.
+    NÃO herda: número, status, período programado e reprogramações, data e hora das manobras, executantes da liberação e da
+    normalização, conferências (manual e pelo sistema), elaborador e qualquer identificador interno."""
+    def manobras(chave):
+        return [{"data": "", "hora": "", "numero": m["numero"], "local": m["local"], "acao": m["acao"],
+                 "conferir": 1 if m.get("conferir") else 0} for m in doc.get(chave) or []]
+
+    dados = {"referencia_id": doc["id"], "referencia_numero": doc["numero"],
+             "equipamentos": [{campo: item.get(campo) or "" for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM}
+                              for item in doc.get("equipamentos") or []],
+             "motivo": doc.get("motivo") or "", "observacoes": doc.get("observacoes") or "",
+             "liberacao": manobras("liberacao"), "normalizacao": manobras("normalizacao")}
+    dados.update({campo: doc.get(campo) or "" for campo in DOC_LIB_CAMPOS_CONDICOES_SM})
+    return dados
+
+
+# ---------------------------------------------------
+# GERAÇÃO DO DOCUMENTO: REGISTRO DO PDF E EMISSÃO
+# ---------------------------------------------------
+def doc_lib_registrar_geracao_sm(doc, caminho, usuario):
+    """Registra o PDF gerado e, na PRIMEIRA geração, EMITE a SM: o documento passa a ser protegido (só os grupos de
+    acompanhamento podem mudar) e o status vai de Em análise para Aguarda Conferência. Uma SM RESERVADA ou CANCELADA não é
+    emitida: o PDF só fica registrado. Gerar de novo uma SM já emitida só registra o PDF (o status não muda). Na primeira
+    geração a SM é validada por inteiro (doc_lib_erros_geracao_sm; DocLibValidacaoSM se houver pendência). Lança DocLibConflito
+    se o documento mudou desde que foi lido. Devolve a revisão atual do documento."""
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        atual = _doc_lib_ler_sm(conexao, doc["id"])
+        if atual is None or atual["revisao"] != doc["revisao"]:
+            raise DocLibConflito("Esta SM foi alterada por outro usuário enquanto o documento era gerado.\n\n"
+                                 "Feche-a e abra-a novamente (GRID SM) antes de gerar o documento.")
+        emitir = not atual["emitido"] and atual["status"] == STATUS_ATEIE_EM_ANALISE
+        if emitir:
+            erros = doc_lib_erros_geracao_sm(atual)
+            if erros:
+                raise DocLibValidacaoSM(erros)
+        cursor.execute("INSERT INTO doclib_sm_pdfs (sm_id, revisao, caminho, gerado_por, gerado_em) VALUES (?, ?, ?, ?, ?)",
+                       (doc["id"], doc["revisao"], caminho, usuario, agora_texto))
+        id_pdf = cursor.lastrowid
+        if emitir:
+            cursor.execute("UPDATE doclib_sm SET emitido = 1, emitido_em = ?, emitido_por = ?, revisao = revisao + 1, "
+                           "atualizado_por = ?, atualizado_em = ? WHERE id = ?",
+                           (agora_texto, usuario, usuario, agora_texto, doc["id"]))
+            novo = _doc_lib_ler_sm(conexao, doc["id"])
+            _doc_lib_mudar_status_sm(cursor, doc["id"], doc_lib_calcular_status_sm(novo, True), usuario, agora_texto)
+        cursor.execute("SELECT revisao FROM doclib_sm WHERE id = ?", (doc["id"],))
+        revisao = cursor.fetchone()[0]
+        cursor.execute("UPDATE doclib_sm_pdfs SET revisao_final = ? WHERE id = ?", (revisao, id_pdf))
+        cursor.execute("COMMIT")
+        return revisao
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+# ---------------------------------------------------
+# GERAÇÃO DO DOCUMENTO SM EM PDF
+# ---------------------------------------------------
+class PDFSM(PDFAteie):
+    """Folha A4 da SM: mesmo logotipo, réguas e fontes do ATEIE, do AI e da MO, com o título "SEQUÊNCIA DE MANOBRAS - SM", o
+    campo 1 (SM Nº COG-0001/26) no alto e à direita e, no rodapé, a data e a hora da geração, a página e o número da SM.
+    Geometria do formulário de referência da SM."""
+    X0 = 14.0
+    X1 = 196.0
+    LARGURA_TEXTO = X1 - X0 - 2.0          # largura útil de um texto corrido (margem de 1 mm dos dois lados da régua)
+    Y_REGUA_TOPO = 12.7
+    Y_REGUA_TITULO = 29.6
+    Y_CONTEUDO = 30.4
+    Y_REGUA_BASE = 285.0
+    Y_MAXIMO = 282.6
+
+    def __init__(self, rodape_texto="", numero="", cancelada=False, aviso=""):
+        super().__init__(rodape_texto)
+        self.numero = numero
+        self.cancelada = cancelada
+        self.aviso = aviso                  # aviso em vermelho no cabeçalho de todas as páginas (SM aguardando a conferência)
+
+    def _texto_numero(self):
+        return f"SM Nº COG-{self.numero}" if self.numero else "SM Nº: ____ ____/____"
+
+    def header(self):
+        self.set_draw_color(0, 0, 0)
+        self.set_line_width(0.8)
+        self.line(self.X0, self.Y_REGUA_TOPO, self.X1, self.Y_REGUA_TOPO)
+        if os.path.exists(LOGO_ATEIE):
+            self.image(LOGO_ATEIE, x=self.X0 + 1.5, y=13.9, w=32.5)         # o mesmo logotipo do ATEIE, do AI e da MO
+        self.set_text_color(0, 0, 0)
+        self.set_font("DejaVuC", "B", 11)
+        self.set_xy(self.X0 + 40, 17.0)
+        self.cell(self.X1 - self.X0 - 80, 5.2, "SEQUÊNCIA DE MANOBRAS - SM", align="C")
+        # 1. SM Nº COG-0001/26: no alto e à direita (número pequeno e rebaixado + texto em negrito e itálico)
+        self.set_font("DejaVuC", "BI", 10)
+        texto = self._texto_numero()
+        self.set_font("DejaVuC", "I", 9.0 * 0.62)
+        largura_numero = self.get_string_width("1.") + 0.3
+        self.set_font("DejaVuC", "BI", 10)
+        x = self.X1 - 2.0 - self.get_string_width(texto) - largura_numero
+        self.set_font("DejaVuC", "I", 9.0 * 0.62)
+        self.text(x, 26.0, "1.")
+        x += largura_numero
+        self.set_font("DejaVuC", "BI", 10)
+        if self.cancelada:
+            self.set_text_color(176, 0, 0)
+        self.text(x, 25.2, texto)
+        if self.cancelada:                                             # SM cancelada: número riscado em vermelho
+            self.set_draw_color(176, 0, 0)
+            self.set_line_width(0.35)
+            self.line(x - 1.0, 23.9, x + self.get_string_width(texto) + 1.0, 23.9)
+            self.set_draw_color(0, 0, 0)
+        self.set_text_color(0, 0, 0)
+        if self.aviso:
+            self.set_font("DejaVuC", "B", 8.5)
+            self.set_text_color(176, 0, 0)
+            self.text(self.X0 + 36 + (self.X1 - self.X0 - 86 - self.get_string_width(self.aviso)) / 2.0, 26.6, self.aviso)
+            self.set_text_color(0, 0, 0)
+        self.line(self.X0, self.Y_REGUA_TITULO, self.X1, self.Y_REGUA_TITULO)
+        self.set_line_width(0.2)
+
+    def footer(self):
+        self.set_draw_color(0, 0, 0)
+        self.set_line_width(0.8)
+        self.line(self.X0, self.Y_REGUA_BASE, self.X1, self.Y_REGUA_BASE)
+        self.set_line_width(0.2)
+        self.set_font("DejaVuC", "", 6.5)
+        self.set_text_color(110, 110, 110)
+        self.set_xy(self.X0, self.Y_REGUA_BASE + 1.2)
+        self.cell(80, 3.5, self.rodape_texto, align="L")
+        self.set_xy(self.X0 + 80, self.Y_REGUA_BASE + 1.2)
+        self.cell(self.X1 - self.X0 - 160, 3.5, f"Página {self.page_no()} de {{nb}}", align="C")
+        self.set_xy(self.X1 - 80, self.Y_REGUA_BASE + 1.2)
+        self.cell(80, 3.5, self._texto_numero(), align="R")
+        self.set_text_color(0, 0, 0)
+
+
+def doc_lib_gerar_pdf_sm(doc, caminho, gerado_por=""):
+    """Gera o PDF da SM (layout do documento de referência) em 'caminho'.
+
+    SM RESERVADA: sai o formulário em branco, para uso físico em emissão manual ou de emergência (só o número no item 1).
+    A data e a hora de cada manobra (controle interno do COG) NÃO vão para o PDF. As tabelas e os textos quebram linha e
+    continuam nas páginas seguintes (as tabelas de manobras repetem o cabeçalho). SM cancelada: número riscado em vermelho e
+    as informações do cancelamento no final. SM aguardando conferência: aviso em vermelho no cabeçalho de todas as páginas."""
+    agora = datetime.now()
+    reservada = doc_lib_documento_reservado_sm(doc)
+    cancelada = doc.get("status") == STATUS_ATEIE_CANCELADO
+    if reservada:
+        doc = dict(doc, **{campo: "" for campo in DOC_LIB_CAMPOS_GERAIS_SM + DOC_LIB_CAMPOS_REPROGRAMACAO_SM
+                           + DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM + DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM
+                           + ("elaborado_por", "elaborado_ass")},
+                   equipamentos=[], liberacao=[], normalizacao=[], conferencias=[])
+    aguardando = not reservada and not cancelada and bool(doc.get("emitido")) \
+        and doc.get("status") == STATUS_SM_AGUARDA_CONFERENCIA
+    pdf = PDFSM(f"Gerado pelo sistema COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}",
+                numero=doc.get("numero") or "", cancelada=cancelada,
+                aviso="Aguardando a Conferência do documento" if aguardando else "")
+    pdf.add_page()
+    X0, X1 = PDFSM.X0, PDFSM.X1
+    LARGURA = X1 - X0
+    LARGURA_TEXTO = PDFSM.LARGURA_TEXTO
+    ALTURA_LINHA = 4.3
+    estado = {"y": PDFSM.Y_CONTEUDO}
+
+    def nova_pagina():
+        pdf.add_page()
+        estado["y"] = PDFSM.Y_CONTEUDO
+
+    def garantir(altura):
+        """Abre nova página se não houver 'altura' mm livres na atual."""
+        if estado["y"] + altura > PDFSM.Y_MAXIMO:
+            nova_pagina()
+
+    def regua(y, x_ini=X0, x_fim=X1, espessura=0.2):
+        pdf.set_line_width(espessura)
+        pdf.line(x_ini, y, x_fim, y)
+
+    def regua_grossa():
+        """Régua que abre uma seção principal (no topo de uma página nova ela já foi desenhada pelo cabeçalho)."""
+        if estado["y"] > PDFSM.Y_CONTEUDO + 0.5:
+            regua(estado["y"], espessura=0.8)
+
+    def fonte(estilo="", tamanho=9.5):
+        pdf.set_font("DejaVuC", estilo, tamanho)
+        pdf.set_text_color(0, 0, 0)
+
+    def largura_texto(texto, estilo="", tamanho=9.5):
+        pdf.set_font("DejaVuC", estilo, tamanho)
+        return pdf.get_string_width(texto)
+
+    def linhas_de(texto, largura, tamanho=9.5, estilo=""):
+        """Linhas em que o texto quebra na largura dada (parágrafos digitados são mantidos)."""
+        pdf.set_font("DejaVuC", estilo, tamanho)
+        texto = _doc_lib_texto_multilinha_sm(texto)
+        return [linha.rstrip() for linha in doc_lib_quebrar_linhas(pdf, largura, ALTURA_LINHA, texto)] if texto else []
+
+    def rotulo(x, y_base, numero, texto, tamanho=9.0):
+        """Rótulo do campo: número pequeno e rebaixado (subescrito) + texto em itálico. Devolve o x final."""
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("DejaVuC", "I", tamanho * 0.62)
+        pdf.text(x, y_base + 0.8, f"{numero}.")
+        x += pdf.get_string_width(f"{numero}.") + 0.1
+        pdf.set_font("DejaVuC", "I", tamanho)
+        pdf.text(x, y_base, texto)
+        return x + pdf.get_string_width(texto)
+
+    def escrever(x, y_base, linhas, passo=ALTURA_LINHA, tamanho=9.5):
+        fonte("", tamanho)
+        for indice, linha in enumerate(linhas):
+            pdf.text(x, y_base + indice * passo, linha)
+
+    def bloco_texto(numero, nome, linhas, y_titulo=4.4, y_primeira=9.4, minimo=0.0, tamanho_rotulo=9.0):
+        """Título do campo e texto corrido embaixo dele; o texto que não cabe continua na página seguinte (com o título
+        "(continuação)"). O bloco ocupa no mínimo 'minimo' mm (espaço para o preenchimento à mão)."""
+        garantir(min(y_primeira + max(len(linhas), 1) * ALTURA_LINHA, 40.0))
+        y_topo = estado["y"]
+        rotulo(X0 + 1.0, y_topo + y_titulo, numero, nome, tamanho_rotulo)
+        y_base = y_topo + y_primeira
+        for linha in linhas:
+            if y_base + 1.0 > PDFSM.Y_MAXIMO:
+                nova_pagina()
+                y_topo = estado["y"]
+                rotulo(X0 + 1.0, y_topo + y_titulo, numero, nome.rstrip(":") + " (continuação):", tamanho_rotulo)
+                y_base = y_topo + y_primeira
+            escrever(X0 + 1.0, y_base, [linha])
+            y_base += ALTURA_LINHA
+        estado["y"] = max(y_topo + minimo, y_base - ALTURA_LINHA + 2.2)
+
+    def secao(numero, titulo, altura_minima):
+        """Régua grossa e título de uma seção principal; garante espaço para o título e para 'altura_minima' mm."""
+        garantir(altura_minima + 7.0)
+        regua_grossa()
+        rotulo(X0 + 1.0, estado["y"] + 4.2, numero, titulo, 10.0)
+        estado["y"] += 5.6
+
+    # ---- 2. Período programado (2.1 a 2.4): Início e Término de cada um, em quadros de duas colunas ---------------------
+    garantir(40.0)
+    rotulo(X0 + 1.0, estado["y"] + 4.0, "2", "Período programado para execução do(s) serviço(s):", 10.0)
+    estado["y"] += 5.4
+    ALTURA_PERIODO = 4.5
+    X_MEIO = X0 + LARGURA / 2.0
+    LARGURA_ROTULO = 17.0
+
+    def periodo(x, largura, y, prefixo, numero, nome):
+        pdf.set_line_width(0.2)
+        pdf.rect(x, y, largura, ALTURA_PERIODO)
+        rotulo(x + 0.8, y + 3.4, numero, f"{nome}:", 8.0)
+        for linha, (titulo, campo_data, campo_hora) in enumerate((("Início:", "data_inicio", "hora_inicio"),
+                                                                    ("Término:", "data_termino", "hora_termino")), start=1):
+            y_linha = y + ALTURA_PERIODO * linha
+            pdf.rect(x, y_linha, LARGURA_ROTULO, ALTURA_PERIODO)
+            pdf.rect(x + LARGURA_ROTULO, y_linha, largura - LARGURA_ROTULO, ALTURA_PERIODO)
+            fonte("", 8.0)
+            pdf.text(x + 0.8, y_linha + 3.4, titulo)
+            data, hora = _doc_lib_txt(doc.get(f"{prefixo}_{campo_data}")), _doc_lib_txt(doc.get(f"{prefixo}_{campo_hora}"))
+            fonte("", 9.0)
+            pdf.text(x + LARGURA_ROTULO + 8.0, y_linha + 3.5, data or "_____/_____/________")
+            pdf.text(x + largura - 26.0, y_linha + 3.5, f"{hora} hs" if hora else "____:____ hs")
+
+    for esquerda, direita in ((DOC_LIB_PERIODOS_SM[0], DOC_LIB_PERIODOS_SM[1]), (DOC_LIB_PERIODOS_SM[2], DOC_LIB_PERIODOS_SM[3])):
+        periodo(X0, X_MEIO - X0, estado["y"], *esquerda)
+        periodo(X_MEIO, X1 - X_MEIO, estado["y"], *direita)
+        estado["y"] += ALTURA_PERIODO * 3
+
+    # ---- 3. Equipamento(s) a impedir: 3 linhas x 6 colunas ---------------------------------------------------------------
+    garantir(40.0)
+    estado["y"] += 0.6
+    rotulo(X0 + 1.0, estado["y"] + 4.0, "3", "Equipamento(s) a impedir:", 10.0)
+    estado["y"] += 5.4
+    proporcoes = (14.0, 16.2, 25.6, 14.3, 19.5, 10.4)
+    larguras = [LARGURA * p / sum(proporcoes) for p in proporcoes]
+    xs = [X0 + sum(larguras[:indice]) for indice in range(len(larguras))]
+    ALTURA_CABECALHO = 10.2
+    pdf.set_line_width(0.2)
+    for x, largura, (_, numero, titulo) in zip(xs, larguras, DOC_LIB_COLUNAS_EQUIPAMENTO_SM):
+        pdf.rect(x, estado["y"], largura, ALTURA_CABECALHO)
+        linhas = linhas_de(f"{numero}. {titulo}", largura - 2.0, 7.5)
+        topo = estado["y"] + (ALTURA_CABECALHO - 3.6 * len(linhas)) / 2.0 + 2.8
+        fonte("I", 7.5)
+        for indice, linha in enumerate(linhas):
+            pdf.text(x + (largura - pdf.get_string_width(linha)) / 2.0, topo + indice * 3.6, linha)
+    estado["y"] += ALTURA_CABECALHO
+    equipamentos = list(doc.get("equipamentos") or [])
+    equipamentos += [{}] * (DOC_LIB_LINHAS_EQUIPAMENTOS_SM - len(equipamentos))
+    for item in equipamentos:
+        celulas = [linhas_de(item.get(campo), largura - 2.0, 8.5) for (campo, _, _), largura in
+                   zip(DOC_LIB_COLUNAS_EQUIPAMENTO_SM, larguras)]
+        altura = max(6.0, max(len(linhas) for linhas in celulas) * 3.9 + 2.4)
+        garantir(altura)
+        for x, largura, linhas in zip(xs, larguras, celulas):
+            pdf.rect(x, estado["y"], largura, altura)
+            if linhas:
+                escrever(x + 1.0, estado["y"] + (altura - 3.9 * len(linhas)) / 2.0 + 3.0, linhas, 3.9, 8.5)
+        estado["y"] += altura
+
+    # ---- 4. Motivo (no máximo 6 linhas; o espaço mínimo do formulário é mantido) ---------------------------------------
+    bloco_texto("4", "Motivo:", linhas_de(doc.get("motivo"), LARGURA_TEXTO), y_titulo=4.2, y_primeira=8.8, minimo=10.5)
+
+    # ---- 5. Condições de Segurança -------------------------------------------------------------------------------------
+    secao("5", "Condições de Segurança:", 12.0)
+
+    def condicao(numero, nome, valor, regua_final=True):
+        bloco_texto(numero, f"{nome}:", linhas_de(valor, LARGURA_TEXTO), y_titulo=3.5, y_primeira=7.6, minimo=7.8,
+                    tamanho_rotulo=8.5)
+        if regua_final:
+            regua(estado["y"])
+
+    condicao("5.1", "Chaves abertas e bloqueadas", doc.get("cond_chaves_abertas"))
+    condicao("5.2", "Chaves fechadas e bloqueadas", doc.get("cond_chaves_fechadas"))
+    condicao("5.3", "Disjuntores Extraídos", doc.get("cond_disjuntores"))
+    garantir(6.0)
+    rotulo(X0 + 1.0, estado["y"] + 4.0, "5.4", "Outras condições:", 8.5)
+    estado["y"] += 4.6
+    condicao("5.4.1", "Com bloqueio por LOTO", doc.get("cond_loto_com"), regua_final=False)
+    condicao("5.4.2", "Sem bloqueio por LOTO", doc.get("cond_loto_sem"), regua_final=False)
+
+    # ---- 6 e 8. Manobras de Liberação e de Normalização (a data e a hora das manobras não vão para o documento) ---------
+    LARGURA_SEQUENCIA, LARGURA_LOCAL = 24.0, 17.0
+    X_LOCAL, X_ACAO = X0 + LARGURA_SEQUENCIA, X0 + LARGURA_SEQUENCIA + LARGURA_LOCAL
+
+    def cabecalho_manobras(numero, titulo, continuacao=False):
+        regua_grossa()
+        rotulo(X0 + 1.0, estado["y"] + 4.2, numero, titulo + (" (continuação)" if continuacao else "") + ":", 10.0)
+        y = estado["y"] + 5.4
+        fonte("I", 8.0)
+        for texto, x_ini, x_fim in (("Sequência", X0, X_LOCAL), ("Local", X_LOCAL, X_ACAO), ("Ação", X_ACAO, X1)):
+            pdf.text(x_ini + (x_fim - x_ini - pdf.get_string_width(texto)) / 2.0, y + 3.0, texto)
+        regua(y + 4.2)
+        estado["y"] = y + 4.2
+
+    def tabela_manobras(numero, titulo, manobras):
+        manobras = list(manobras) or [{}] * 5                    # formulário em branco: algumas linhas para o preenchimento
+        identificacoes = doc_lib_identificar_sequencias_sm([m.get("numero") for m in manobras])
+        garantir(11.0 + 6.4 + 4.4 + 7.0)
+        cabecalho_manobras(numero, titulo)
+        for manobra, identificacao in zip(manobras, identificacoes):
+            linhas = linhas_de(manobra.get("acao"), X1 - X_ACAO - 2.0)
+            altura = max(6.0, len(linhas) * ALTURA_LINHA + 2.2)
+            if estado["y"] + altura > PDFSM.Y_MAXIMO:
+                nova_pagina()
+                cabecalho_manobras(numero, titulo, continuacao=True)
+            y = estado["y"]
+            fonte("", 9.5)
+            pdf.text(X0 + (LARGURA_SEQUENCIA - pdf.get_string_width(identificacao)) / 2.0, y + 4.3, identificacao)
+            local = _doc_lib_txt(manobra.get("local"))
+            pdf.text(X_LOCAL + (LARGURA_LOCAL - pdf.get_string_width(local)) / 2.0, y + 4.3, local)
+            escrever(X_ACAO + 1.2, y + 4.3, linhas)
+            pdf.set_line_width(0.2)
+            pdf.line(X_LOCAL, y, X_LOCAL, y + altura)
+            pdf.line(X_ACAO, y, X_ACAO, y + altura)
+            estado["y"] += altura
+            regua(estado["y"])
+
+    def executantes(numero, titulo, campo_local, campo_remoto):
+        valor_local, valor_remoto = _doc_lib_txt(doc.get(campo_local)), _doc_lib_txt(doc.get(campo_remoto))
+        largura_metade = LARGURA / 2.0 - 2.0
+        ativos = []
+        for sufixo, nome, valor, x_ini in ((".1", "No local:", valor_local, X0), (".2", "Remotamente:", valor_remoto, X_MEIO)):
+            numero_item = f"{numero}{sufixo}"
+            x_valor = x_ini + 1.0 + largura_texto(f"{numero_item}.", "I", 5.6) + largura_texto(nome, "I", 8.5) + 2.0
+            ativos.append((numero_item, nome, x_ini, x_valor, linhas_de(valor, x_ini + LARGURA / 2.0 - 1.0 - x_valor, 9.5)))
+        altura = max(5.4, max(len(item[4]) for item in ativos) * ALTURA_LINHA + 1.4)
+        secao(numero, "Executantes", altura)
+        y = estado["y"]
+        for numero_item, nome, x_ini, x_valor, linhas in ativos:
+            rotulo(x_ini + 1.0, y + 3.6, numero_item, nome, 8.5)
+            escrever(x_valor, y + 3.6, linhas)
+        pdf.set_line_width(0.2)
+        pdf.line(X_MEIO, y - 0.3, X_MEIO, y + altura)
+        estado["y"] += altura
+        regua(estado["y"])
+
+    tabela_manobras("6", "Manobras de Liberação", doc.get("liberacao") or [])
+    executantes("7", "Executantes", "exec_lib_local", "exec_lib_remoto")
+    tabela_manobras("8", "Manobras de Normalização", doc.get("normalizacao") or [])
+    executantes("9", "Executantes", "exec_nor_local", "exec_nor_remoto")
+
+    # ---- 10. Observações -----------------------------------------------------------------------------------------------
+    regua_grossa()
+    estado["y"] += 0.4
+    bloco_texto("10", "Observações:", linhas_de(doc.get("observacoes"), LARGURA_TEXTO), y_titulo=4.2, y_primeira=8.2,
+                minimo=7.0, tamanho_rotulo=10.0)
+
+    # ---- 11. Elaborado por (nome, Área, Data e Ass.) ---------------------------------------------------------------------
+    garantir(6.4 + 5.6 + 4.8 * 3)
+    regua_grossa()
+    y_base = estado["y"] + 5.0
+    fim = rotulo(X0 + 1.0, y_base, "11", "Elaborado por:", 9.5)
+    fonte("", 9.5)
+    pdf.text(fim + 2.0, y_base, " ".join(str(doc.get("elaborado_por") or "").split()))
+    for ratio, nome, campo in ((0.45, "Área:", "elaborado_area"), (0.62, "Data:", "elaborado_data"),
+                               (0.80, "Ass:", "elaborado_ass")):
+        x = X0 + LARGURA * ratio
+        fim = x + largura_texto(nome, "I", 9.5)
+        fonte("I", 9.5)
+        pdf.text(x, y_base, nome)
+        fonte("", 9.5)
+        pdf.text(fim + 2.0, y_base, " ".join(str(doc.get(campo) or "").split()))
+    estado["y"] += 6.4
+    regua(estado["y"])
+
+    # ---- 12. Conferência: as conferências registradas (até 10) e, no mínimo, 3 linhas (as que faltam, em branco) ----------
+    conferencias = list(doc.get("conferencias") or [])
+    total_linhas = max(3, len(conferencias))
+    garantir(5.6 + 4.8)
+    rotulo(X0 + 1.0, estado["y"] + 4.2, "12", "Conferência:", 10.0)
+    estado["y"] += 5.6
+    for indice in range(total_linhas):
+        garantir(4.8)
+        conferencia = conferencias[indice] if indice < len(conferencias) else {}
+        y_base = estado["y"] + 3.5
+        for ratio, nome, campo in ((0.0, "Nome:", "nome"), (0.42, "Área:", "area"), (0.61, "Data:", "data"),
+                                   (0.80, "Ass:", "ass")):
+            x = X0 + 1.0 + LARGURA * ratio
+            fonte("", 8.0)
+            pdf.text(x, y_base, nome)
+            fim = x + pdf.get_string_width(nome)
+            valor = " ".join(str(conferencia.get(campo) or "").split())
+            tamanho = 9.0
+            largura_disponivel = (X0 + LARGURA * ({"nome": 0.42, "area": 0.61, "data": 0.80, "ass": 1.0}[campo])) - fim - 3.0
+            fonte("", tamanho)
+            while tamanho > 6.0 and pdf.get_string_width(valor) > largura_disponivel:
+                tamanho -= 0.5
+                fonte("", tamanho)
+            pdf.text(fim + 1.5, y_base, valor)
+        estado["y"] += 4.8
+        regua(estado["y"])
+
+    # ---- Cancelamento: informações no final do documento (o aviso de conferência pendente vai no cabeçalho) -----------------
+    avisos = []                              # (texto, negrito)
+    if cancelada:
+        descricao = (f"SM cancelada em {doc.get('data_cancelamento')} por {doc.get('cancelada_por')}. "
+                     f"Justificativa: {doc.get('justificativa_cancelamento')}")
+        linhas_cancelamento = linhas_de(descricao, LARGURA_TEXTO, 8.5)
+        if len(linhas_cancelamento) > 8:                   # limita o espaço tomado
+            linhas_cancelamento = linhas_cancelamento[:8]
+            linhas_cancelamento[-1] = linhas_cancelamento[-1].rstrip()[:-1] + "…"
+        avisos = [(linha, False) for linha in linhas_cancelamento]
+    if avisos:
+        garantir(len(avisos) * 3.8 + 2.0)
+    for indice, (linha, negrito) in enumerate(avisos):
+        pdf.set_font("DejaVuC", "B" if negrito else "", 8.5)
+        pdf.set_text_color(176, 0, 0)
+        pdf.text(X0 + 1.0, estado["y"] + 4.1 + indice * 3.8, linha)
+    pdf.set_text_color(0, 0, 0)
+    pdf.output(caminho)
+
+
+def doc_lib_registrar_e_arquivar_sm(doc, usuario):
+    """Gera o PDF da SM, arquiva na pasta do Doc_Lib. (nunca sobrescreve um arquivo anterior), registra o arquivo no banco e,
+    na primeira geração, emite a SM (doc_lib_registrar_geracao_sm). Retorna (caminho, aviso). A SM só é emitida se estiver
+    válida: a validação roda antes de gerar o arquivo (DocLibValidacaoSM)."""
+    if not doc.get("emitido") and doc.get("status") == STATUS_ATEIE_EM_ANALISE:
+        erros = doc_lib_erros_geracao_sm(doc)
+        if erros:
+            raise DocLibValidacaoSM(erros)
+    agora = datetime.now()
+    pasta, aviso = doc_lib_pasta_destino("SM", doc.get("ano") or agora.year)
+    prefixo = "SM_RESERVADA_" if doc_lib_documento_reservado_sm(doc) else "SM_"
+    nome_base = f"{prefixo}{(doc.get('numero') or 'id' + str(doc['id'])).replace('/', '-')}_{agora.strftime('%Y%m%d-%H%M%S')}"
+    caminho = os.path.join(pasta, nome_base + ".pdf")
+    repeticao = 1
+    while os.path.exists(caminho):          # duas gerações no mesmo segundo: nunca sobrescreve o PDF anterior
+        repeticao += 1
+        caminho = os.path.join(pasta, f"{nome_base}-{repeticao}.pdf")
+    caminho_temporario = caminho + ".tmp"
+    # a primeira geração é o documento que vai para a conferência: o PDF já sai com o estado que a emissão vai gravar
+    primeira = not doc.get("emitido") and doc.get("status") == STATUS_ATEIE_EM_ANALISE
+    try:
+        doc_lib_gerar_pdf_sm(dict(doc, emitido=1, status=STATUS_SM_AGUARDA_CONFERENCIA) if primeira else doc,
+                             caminho_temporario, usuario)
+        os.replace(caminho_temporario, caminho)
+    finally:
+        if os.path.exists(caminho_temporario):
+            os.remove(caminho_temporario)
+    try:
+        doc_lib_registrar_geracao_sm(doc, caminho, usuario)
+    except Exception:
+        if os.path.exists(caminho):            # documento não registrado/emitido: não deixa arquivo órfão
+            os.remove(caminho)
+        raise
+    return caminho, aviso
+
+
+
+
+# ---------------------------------------------------
+# GRID SM, TABELAS DA JANELA E JANELA DA SM
+# ---------------------------------------------------
+# Colunas da janela "GRID SM": (campo, título, largura em pixels, exibir sempre em caixa alta). A Programação é o período em
+# vigor (a última reprogramação preenchida ou, se não houver, a Programação original).
+DOC_LIB_COLUNAS_LISTA_SM = [
+    ("numero", "N° SM", 105, False),
+    ("prog_inicio", "Programação Início", 135, False),
+    ("prog_termino", "Programação Término", 135, False),
+    ("local", "Local", 120, True),
+    ("equipamento", "Equipamento", 190, True),
+    ("motivo", "Motivo", 280, False),
+    ("elaborado", "Elaborado por", 150, False),
+    ("status", "Status", 160, False),
+]
+
+
+class JanelaListaSM(JanelaListaAteie):
+    """Janela "GRID SM": a mesma do GRID ATEIE (JanelaListaAteie), lendo as SMs. Mesmos filtros, busca e seleção. A SM tem um
+    número por documento (não há o que agrupar) e não é encaminhada por e-mail (sem a marcação de e-mail enviado)."""
+    ROTULO = "SM"
+    PLURAL = "SMs"
+    ARTIGO = "a"
+    PERMITE_AGRUPAR = False
+    PERMITE_EMAIL = False
+    COLUNAS = DOC_LIB_COLUNAS_LISTA_SM
+    COLUNAS_COM_QUEBRA = ("motivo",)
+
+    @staticmethod
+    def _criar_documento():
+        return JanelaSMAvulso()
+
+    @staticmethod
+    def _listar():
+        return doc_lib_listar_sm()
+
+    def valores_distintos(self, chave):
+        if chave == "status":
+            existentes = {self.valor_filtro(registro, chave) for registro in self.registros}
+            return [status for status in DOC_LIB_STATUS_SM if status in existentes]
+        return super().valores_distintos(chave)
+
+
+def doc_lib_escolher_sm(parent):
+    """Abre a janela "GRID SM" e devolve (id do documento, linha da tabela) da SM escolhida, ou None se o usuário voltar
+    sem escolher."""
+    janela = JanelaListaSM(parent)
+    try:
+        janela.janela.grab_set()
+    except TclError:
+        pass
+    janela.janela.wait_window()
+    return janela.resultado
+
+
+class DicaBotaoSM(ToolTipSGA):
+    """ToolTipSGA para os botões do Doc_Lib.: acrescenta (add="+") aos eventos Enter e Leave em vez de substituí-los, para o
+    botão não perder o efeito de cor ao passar o mouse (doc_lib_criar_botao)."""
+
+    def __init__(self, widget, texto):
+        self.widget, self.texto, self.tipwindow = widget, texto, None
+        widget.bind("<Enter>", self.mostrar, add="+")
+        widget.bind("<Leave>", self.esconder, add="+")
+
+
+class LinhasManobrasSM:
+    """Tabela de manobras (Liberação ou Normalização) da janela da SM, com de 1 a 30 linhas: mostra só as linhas necessárias
+    e o botão Adicionar manobra até o limite. Cada linha tem:
+      - Data e hora da manobra: controle interno do COG (só na tela, NÃO vai para o PDF), preenchida depois da conferência;
+      - Sequência: o número arábico digitado + a letra calculada (1A, 1B, 2A...), recalculada a cada inclusão, exclusão,
+        troca de ordem e digitação;
+      - Local: até 6 caracteres;
+      - Ação: texto livre, a coluna mais larga, que quebra sozinho e aumenta a altura da linha.
+    O botão Inverter Manobras pode marcar uma linha da normalização para conferência manual (alerta na linha)."""
+
+    COLUNAS = (("Data e hora (controle interno)", 252), ("Sequência", 96), ("Local", 92), ("Ação", 120), ("", 196))
+
+    def __init__(self, janela, pai, prefixo, nome, limite=DOC_LIB_LIMITE_MANOBRAS_SM):
+        self.janela = janela              # JanelaSMAvulso (calendário, marcas de erro e rolagem)
+        self.prefixo = prefixo            # "lib" ou "nor": prefixo das chaves de erro (lib:3:acao)
+        self.nome = nome
+        self.limite = limite
+        self.linhas = []
+        self.estrutura_travada = False    # número, local, ação, ordem e inclusão/exclusão de linhas
+        self.datas_travadas = True        # data e hora das manobras
+        self.grade = Frame(pai, bg=SGA_CARD)
+        self.grade.pack(fill=X, padx=12, pady=(4, 0))
+        for coluna, (titulo, minimo) in enumerate(self.COLUNAS):
+            self.grade.grid_columnconfigure(coluna, minsize=minimo, weight=1 if titulo == "Ação" else 0)
+            Label(self.grade, text=titulo, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="w"
+                  ).grid(row=0, column=coluna, sticky="w", padx=4)
+        barra = Frame(pai, bg=SGA_CARD)
+        barra.pack(fill=X, padx=12, pady=(4, 10))
+        self.btn_adicionar = doc_lib_criar_botao(barra, "Adicionar manobra", self._ao_adicionar, "primario",
+                                                 fonte=(SGA_FONTE, 9, "bold"))
+        self.btn_adicionar.pack(side=LEFT, padx=4, ipadx=6)
+        self.lbl_contador = Label(barra, text="", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9))
+        self.lbl_contador.pack(side=LEFT, padx=10)
+        self.adicionar_linha()
+
+    # ---- linhas ------------------------------------------------------------------------------------------------------
+    def adicionar_linha(self, valores=None):
+        """Inclui uma linha no fim da tabela (None se já está no limite)."""
+        if len(self.linhas) >= self.limite:
+            return None
+        janela = self.janela
+        linha = {"conferir": 0, "acao_origem": ""}
+        quadro_data = Frame(self.grade, bg=SGA_CARD)
+        linha["data"] = criar_entrada_sga(quadro_data, width=10)
+        linha["data"].pack(side=LEFT)
+        linha["icone"] = IconeCalendarioDocLib(quadro_data, lambda l=linha: janela.abrir_calendario(
+            l["data"], False, l["hora"]))
+        linha["icone"].pack(side=LEFT, padx=(2, 6))
+        linha["hora"] = criar_entrada_sga(quadro_data, width=6)
+        linha["hora"].pack(side=LEFT)
+        janela.configurar_entrada(linha["data"], "data", ano_curto=False, atualiza_estado=True)
+        janela.configurar_entrada(linha["hora"], "hora", atualiza_estado=True)
+        ToolTipSGA(linha["data"], "Data da execução da manobra (controle interno: não vai para o documento impresso)")
+
+        quadro_sequencia = Frame(self.grade, bg=SGA_CARD)
+        apenas_numero = (janela.janela.register(lambda p: p == "" or (p.isascii() and p.isdigit() and len(p) <= 2)), "%P")
+        linha["numero"] = criar_entrada_sga(quadro_sequencia, width=3, justify="center", validate="key",
+                                            validatecommand=apenas_numero)
+        linha["numero"].pack(side=LEFT)
+        linha["letra"] = Label(quadro_sequencia, text="", width=3, anchor="w", bg=SGA_CARD, fg=SGA_AZUL,
+                               font=(SGA_FONTE, 12, "bold"))
+        linha["letra"].pack(side=LEFT, padx=(4, 0))
+        janela.configurar_entrada(linha["numero"], "texto")
+        linha["numero"].bind("<KeyRelease>", lambda e: self.atualizar_identificacoes(), add="+")
+        linha["numero"].bind("<FocusOut>", lambda e: self.atualizar_identificacoes(), add="+")
+        ToolTipSGA(linha["numero"], f"Número arábico da sequência (1 a {DOC_LIB_LIMITE_SEQUENCIA_SM}); a letra é automática")
+
+        limite_local = (janela.janela.register(lambda p: len(p) <= DOC_LIB_LIMITE_LOCAL_MANOBRA_SM), "%P")
+        linha["local"] = criar_entrada_sga(self.grade, width=9, validate="key", validatecommand=limite_local)
+        janela.configurar_entrada(linha["local"], "texto")
+        ToolTipSGA(linha["local"], f"Local da manobra (até {DOC_LIB_LIMITE_LOCAL_MANOBRA_SM} caracteres)")
+
+        linha["acao"] = criar_area_texto_sga(self.grade, wrap=WORD, height=1, width=30)
+        linha["acao"].configure(padx=6, pady=4)
+        linha["acao"].bind("<Tab>", lambda e: (e.widget.tk_focusNext().focus_set(), "break")[1])
+        linha["acao"].bind("<Key>", lambda e, w=linha["acao"]: janela._limpar_marca(w), add="+")
+        linha["acao"].bind("<KeyRelease>", lambda e, l=linha: self._ao_digitar_acao(l), add="+")
+        linha["acao"].bind("<Configure>", lambda e, l=linha: self._ajustar_altura(l), add="+")
+        linha["acao"].bind("<MouseWheel>", lambda e: (_rolar_area_sga(e), "break")[1])
+
+        quadro_botoes = Frame(self.grade, bg=SGA_CARD)
+        linha["btn_conferir"] = doc_lib_criar_botao(quadro_botoes, "Conferir ação", lambda l=linha: self._confirmar_acao(l),
+                                                    "aviso", fonte=(SGA_FONTE, 8, "bold"))
+        linha["btn_subir"] = doc_lib_criar_botao(quadro_botoes, "▲", lambda l=linha: self.mover(l, -1), "neutro",
+                                                 fonte=(SGA_FONTE, 8, "bold"))
+        linha["btn_descer"] = doc_lib_criar_botao(quadro_botoes, "▼", lambda l=linha: self.mover(l, 1), "neutro",
+                                                  fonte=(SGA_FONTE, 8, "bold"))
+        linha["btn_remover"] = doc_lib_criar_botao(quadro_botoes, "Remover", lambda l=linha: self.remover_linha(l), "neutro",
+                                                   fonte=(SGA_FONTE, 8, "bold"))
+        DicaBotaoSM(linha["btn_conferir"], "A ação foi mantida sem inverter: confira-a e confirme (ou altere o texto)")
+        for botao, largura in ((linha["btn_subir"], 3), (linha["btn_descer"], 3), (linha["btn_remover"], 8)):
+            botao.configure(width=largura)
+            botao.pack(side=LEFT, padx=2)
+        DicaBotaoSM(linha["btn_subir"], "Subir a manobra (a sequência é recalculada)")
+        DicaBotaoSM(linha["btn_descer"], "Descer a manobra (a sequência é recalculada)")
+
+        linha["celulas"] = [quadro_data, quadro_sequencia, linha["local"], linha["acao"], quadro_botoes]
+        if valores:
+            for chave in ("data", "hora", "numero", "local"):
+                doc_lib_definir_entrada(linha[chave], valores.get(chave) or "")
+            janela._definir_texto(linha["acao"], valores.get("acao") or "")
+            if valores.get("conferir"):
+                self._definir_conferir(linha, 1)
+        self.linhas.append(linha)
+        self._reorganizar()
+        return linha
+
+    def _ao_adicionar(self):
+        linha = self.adicionar_linha()
+        if linha is not None:
+            linha["numero"].focus_set()
+            self.janela.rolar_ate(linha["numero"])
+
+    def remover_linha(self, linha):
+        if self.estrutura_travada or linha not in self.linhas:
+            return
+        if len(self.linhas) == 1:                       # a tabela mantém uma linha: ela é apenas limpa
+            for chave in ("data", "hora", "numero", "local"):
+                doc_lib_definir_entrada(linha[chave], "")
+            self.janela._definir_texto(linha["acao"], "")
+            self._definir_conferir(linha, 0)
+        else:
+            self._destruir(linha)
+            self.linhas.remove(linha)
+        self._reorganizar()
+
+    def _destruir(self, linha):
+        for celula in linha["celulas"]:
+            self.janela.esquecer_marcas(celula)
+            celula.destroy()
+
+    def mover(self, linha, deslocamento):
+        """Troca a linha de lugar com a vizinha (a Sequência é recalculada pela nova ordem)."""
+        if self.estrutura_travada or linha not in self.linhas:
+            return
+        posicao = self.linhas.index(linha)
+        destino = posicao + deslocamento
+        if 0 <= destino < len(self.linhas):
+            self.linhas[posicao], self.linhas[destino] = self.linhas[destino], self.linhas[posicao]
+            self._reorganizar()
+
+    def compactar(self):
+        """Remove as linhas totalmente vazias (sempre fica uma): as posições das linhas passam a ser as dos dados salvos."""
+        for linha in list(self.linhas):
+            vazia = not any(linha[chave].get().strip() for chave in ("data", "hora", "numero", "local")) \
+                and not linha["acao"].get("1.0", "end-1c").strip() and not linha["conferir"]
+            if vazia and len(self.linhas) > 1 and not self.estrutura_travada:
+                self._destruir(linha)
+                self.linhas.remove(linha)
+        self._reorganizar()
+
+    def preencher(self, lista):
+        """Recria as linhas com as manobras informadas (pelo menos uma linha, no máximo o limite)."""
+        for linha in self.linhas:
+            self._destruir(linha)
+        self.linhas = []
+        for valores in (lista or [])[:self.limite]:
+            self.adicionar_linha(valores)
+        if not self.linhas:
+            self.adicionar_linha()
+        self._reorganizar()
+
+    def coletar(self):
+        return [{"data": linha["data"].get().strip(), "hora": linha["hora"].get().strip(),
+                 "numero": linha["numero"].get().strip(), "local": linha["local"].get().strip(),
+                 "acao": linha["acao"].get("1.0", "end-1c").strip(), "conferir": linha["conferir"]}
+                for linha in self.linhas]
+
+    def entrada(self, posicao, chave):
+        """Campo da linha (1, 2, 3...) indicado, ou None."""
+        if 1 <= posicao <= len(self.linhas):
+            return self.linhas[posicao - 1].get(chave)
+        return None
+
+    # ---- sequência, altura e alerta de conferência -------------------------------------------------------------------
+    def atualizar_identificacoes(self):
+        """Recalcula a letra de cada manobra pela ordem das linhas (1A, 1B, 2A...): o número fica no campo e a letra ao lado."""
+        identificacoes = doc_lib_identificar_sequencias_sm([linha["numero"].get() for linha in self.linhas])
+        for linha, identificacao in zip(self.linhas, identificacoes):
+            linha["letra"].configure(text=self._so_letras(identificacao))
+
+    @staticmethod
+    def _so_letras(identificacao):
+        """'12AB' -> 'AB' (a coluna mostra o número digitado e, ao lado, só a letra calculada)."""
+        return "".join(caractere for caractere in identificacao if caractere.isalpha())
+
+    def _ajustar_altura(self, linha):
+        try:
+            resultado = linha["acao"].count("1.0", "end-1c", "displaylines")
+            linhas = resultado[0] if isinstance(resultado, (tuple, list)) and resultado else resultado
+            linha["acao"].configure(height=max(1, min(int(linhas or 1), 8)))
+        except (TclError, ValueError, TypeError):
+            pass
+
+    def _ao_digitar_acao(self, linha):
+        self._ajustar_altura(linha)
+        if linha["conferir"] and linha["acao"].get("1.0", "end-1c").strip() != linha["acao_origem"]:
+            self._definir_conferir(linha, 0)         # a ação foi alterada pelo usuário: conferida
+
+    def _definir_conferir(self, linha, valor):
+        linha["conferir"] = 1 if valor else 0
+        linha["acao_origem"] = linha["acao"].get("1.0", "end-1c").strip() if valor else ""
+        cor = "#CC8400" if valor else SGA_BORDA
+        linha["acao"].configure(highlightbackground=cor, highlightcolor="#CC8400" if valor else SGA_AZUL,
+                                highlightthickness=2 if valor else 1)
+        if valor:
+            linha["btn_conferir"].pack(side=LEFT, padx=2, before=linha["btn_subir"])
+        else:
+            linha["btn_conferir"].pack_forget()
+        doc_lib_estado_botao(linha["btn_conferir"], not self.estrutura_travada)
+
+    def _confirmar_acao(self, linha):
+        texto = linha["acao"].get("1.0", "end-1c").strip()
+        if messagebox.askyesno("Conferir ação", f"A ação abaixo foi mantida SEM inverter, porque a inversão automática não "
+                                                f"era segura:\n\n\"{texto}\"\n\nConfirma que ela está correta para a "
+                                                f"normalização do jeito que está?", icon="warning", default="no",
+                               parent=self.janela.janela):
+            self._definir_conferir(linha, 0)
+            self.janela._atualizar_estado()
+
+    # ---- apresentação e travas ---------------------------------------------------------------------------------------
+    def _reorganizar(self):
+        for posicao, linha in enumerate(self.linhas, start=1):
+            for coluna, celula in enumerate(linha["celulas"]):
+                celula.grid(row=posicao, column=coluna, sticky="nw" if coluna != 3 else "new", padx=4, pady=3)
+        self.atualizar_identificacoes()
+        for linha in self.linhas:
+            self._ajustar_altura(linha)
+        self.lbl_contador.configure(text=f"{len(self.linhas)} de {self.limite} manobras")
+        self._aplicar_travas()
+
+    def travar(self, estrutura, datas):
+        """estrutura=True trava número, local, ação, ordem e inclusão/exclusão; datas=True trava a data e a hora."""
+        self.estrutura_travada, self.datas_travadas = estrutura, datas
+        self._aplicar_travas()
+
+    def _aplicar_travas(self):
+        total = len(self.linhas)
+        for posicao, linha in enumerate(self.linhas):
+            for chave in ("numero", "local", "acao"):
+                doc_lib_bloquear_widget(linha[chave], self.estrutura_travada)
+            for chave in ("data", "hora", "icone"):
+                doc_lib_bloquear_widget(linha[chave], self.datas_travadas)
+            doc_lib_estado_botao(linha["btn_subir"], not self.estrutura_travada and posicao > 0)
+            doc_lib_estado_botao(linha["btn_descer"], not self.estrutura_travada and posicao < total - 1)
+            doc_lib_estado_botao(linha["btn_remover"], not self.estrutura_travada)
+            doc_lib_estado_botao(linha["btn_conferir"], not self.estrutura_travada)
+        doc_lib_estado_botao(self.btn_adicionar, not self.estrutura_travada and total < self.limite)
+
+
+class LinhasConferenciaSM:
+    """Conferência da SM (item 12): até 10 linhas, cada uma com a modalidade gravada de forma explícita.
+      - Conferência MANUAL: o profissional da Manutenção que conferiu a SM (via fonia). Conferido por e Ass. são digitados;
+        Área começa com "Manutenção", Ass. com "via fonia" e Data com a data de hoje.
+      - Conferência PELO SISTEMA: o profissional autenticado (Operação). Conferido por e Ass. são o nome completo e o login
+        dele, sem digitação; Área começa com "COG" e Data com a data de hoje.
+    A SM só é aprovada com pelo menos uma de cada. A conferência salva não muda mais (linha travada, com o selo Registrada)."""
+
+    COLUNAS = (("Modalidade", 116), ("Conferido por", 220), ("Área", 130), ("Data", 150), ("Ass.", 150), ("", 110))
+
+    def __init__(self, janela, pai, limite=DOC_LIB_LIMITE_CONFERENCIAS_SM):
+        self.janela = janela
+        self.limite = limite
+        self.linhas = []
+        self.permite_novas = False
+        self.grade = Frame(pai, bg=SGA_CARD)
+        self.grade.pack(fill=X, padx=12, pady=(4, 0))
+        for coluna, (titulo, minimo) in enumerate(self.COLUNAS):
+            self.grade.grid_columnconfigure(coluna, minsize=minimo, weight=1 if titulo == "Conferido por" else 0)
+            Label(self.grade, text=titulo, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="w"
+                  ).grid(row=0, column=coluna, sticky="w", padx=4)
+        barra = Frame(pai, bg=SGA_CARD)
+        barra.pack(fill=X, padx=12, pady=(4, 10))
+        self.btn_manual = doc_lib_criar_botao(barra, "Conferência manual", lambda: self.adicionar_nova(DOC_LIB_MODALIDADE_MANUAL_SM),
+                                              "aviso", fonte=(SGA_FONTE, 9, "bold"))
+        self.btn_sistema = doc_lib_criar_botao(barra, "Conferência pelo sistema",
+                                               lambda: self.adicionar_nova(DOC_LIB_MODALIDADE_SISTEMA_SM), "primario",
+                                               fonte=(SGA_FONTE, 9, "bold"))
+        self.btn_manual.pack(side=LEFT, padx=4, ipadx=6)
+        self.btn_sistema.pack(side=LEFT, padx=4, ipadx=6)
+        self.lbl_contador = Label(barra, text="", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9))
+        self.lbl_contador.pack(side=LEFT, padx=10)
+        self._reorganizar()
+
+    def adicionar_nova(self, modalidade):
+        """Nova linha de conferência, com os valores iniciais da modalidade (nome e Ass. do usuário, na do sistema)."""
+        if not self.permite_novas or len(self.linhas) >= self.limite:
+            return None
+        hoje = datetime.now().strftime("%d/%m/%Y")
+        if modalidade == DOC_LIB_MODALIDADE_SISTEMA_SM:
+            usuario = obter_nome_usuario_logado()
+            valores = {"nome": obter_nome_completo_usuario(usuario), "area": DOC_LIB_AREA_CONFERENCIA_SISTEMA_SM,
+                       "data": hoje, "ass": usuario or ""}
+        else:
+            valores = {"nome": "", "area": DOC_LIB_AREA_CONFERENCIA_MANUAL_SM, "data": hoje,
+                       "ass": DOC_LIB_ASS_CONFERENCIA_MANUAL_SM}
+        linha = self.adicionar_linha(modalidade, valores, registrada=False)
+        if linha is not None:
+            primeira = linha["area"] if modalidade == DOC_LIB_MODALIDADE_SISTEMA_SM else linha["nome"]
+            primeira.focus_set()
+            self.janela.rolar_ate(primeira)
+            self.janela._atualizar_estado()                 # Salvar habilita e Gerar SM Avulso desabilita na hora
+        return linha
+
+    def adicionar_linha(self, modalidade, valores, registrada):
+        if len(self.linhas) >= self.limite:
+            return None
+        janela = self.janela
+        linha = {"modalidade": modalidade, "registrada": registrada}
+        eh_sistema = modalidade == DOC_LIB_MODALIDADE_SISTEMA_SM
+        linha["selo"] = Label(self.grade, text=DOC_LIB_MODALIDADES_SM.get(modalidade, modalidade), bg="#DCE8F8" if eh_sistema
+                              else "#FBE8C8", fg=SGA_TEXTO, font=(SGA_FONTE, 9, "bold"), padx=8, pady=4)
+        linha["nome"] = criar_entrada_sga(self.grade, width=26)
+        linha["area"] = criar_entrada_sga(self.grade, width=14)
+        quadro_data = Frame(self.grade, bg=SGA_CARD)
+        linha["data"] = criar_entrada_sga(quadro_data, width=11)
+        linha["data"].pack(side=LEFT)
+        linha["icone"] = IconeCalendarioDocLib(quadro_data, lambda l=linha: janela.abrir_calendario(l["data"], False, None))
+        linha["icone"].pack(side=LEFT, padx=(2, 0))
+        linha["ass"] = criar_entrada_sga(self.grade, width=16)
+        for chave, tipo in (("nome", "texto"), ("area", "texto"), ("data", "data"), ("ass", "texto")):
+            janela.configurar_entrada(linha[chave], tipo, ano_curto=False)
+            doc_lib_definir_entrada(linha[chave], (valores or {}).get(chave) or "")
+        quadro_acao = Frame(self.grade, bg=SGA_CARD)
+        linha["btn_remover"] = doc_lib_criar_botao(quadro_acao, "Remover", lambda l=linha: self.remover_linha(l), "neutro",
+                                                   fonte=(SGA_FONTE, 8, "bold"))
+        linha["btn_remover"].pack(side=LEFT)
+        linha["lbl_registrada"] = Label(quadro_acao, text="✔ Registrada", bg=SGA_CARD, fg=SGA_VERDE, font=(SGA_FONTE, 9, "bold"))
+        linha["celulas"] = [linha["selo"], linha["nome"], linha["area"], quadro_data, linha["ass"], quadro_acao]
+        self.linhas.append(linha)
+        self._reorganizar()
+        return linha
+
+    def remover_linha(self, linha):
+        if linha["registrada"] or linha not in self.linhas:
+            return
+        for celula in linha["celulas"]:
+            self.janela.esquecer_marcas(celula)
+            celula.destroy()
+        self.linhas.remove(linha)
+        self._reorganizar()
+        self.janela._atualizar_estado()
+
+    def preencher(self, conferencias):
+        """Mostra as conferências já registradas (linhas travadas)."""
+        for linha in self.linhas:
+            for celula in linha["celulas"]:
+                self.janela.esquecer_marcas(celula)
+                celula.destroy()
+        self.linhas = []
+        for conferencia in (conferencias or [])[:self.limite]:
+            self.adicionar_linha(conferencia["modalidade"], conferencia, registrada=True)
+        self._reorganizar()
+
+    def coletar(self):
+        return [{"modalidade": linha["modalidade"], "nome": linha["nome"].get().strip(), "area": linha["area"].get().strip(),
+                 "data": linha["data"].get().strip(), "ass": linha["ass"].get().strip()} for linha in self.linhas]
+
+    def entrada(self, posicao, chave):
+        if 1 <= posicao <= len(self.linhas):
+            return self.linhas[posicao - 1].get(chave)
+        return None
+
+    def travar(self, permite_novas):
+        """permite_novas=True deixa incluir e preencher novas conferências (as já registradas ficam sempre travadas)."""
+        self.permite_novas = permite_novas
+        self._reorganizar()
+
+    def _reorganizar(self):
+        for posicao, linha in enumerate(self.linhas, start=1):
+            for coluna, celula in enumerate(linha["celulas"]):
+                celula.grid(row=posicao, column=coluna, sticky="w" if coluna in (0, 5) else "ew", padx=4, pady=3)
+            travada = linha["registrada"] or not self.permite_novas
+            automatico = linha["modalidade"] == DOC_LIB_MODALIDADE_SISTEMA_SM      # nome e Ass. vêm do usuário autenticado
+            for chave in ("nome", "area", "data", "ass"):
+                doc_lib_bloquear_widget(linha[chave], travada or (automatico and chave in ("nome", "ass")))
+            doc_lib_bloquear_widget(linha["icone"], travada)
+            if linha["registrada"]:
+                linha["btn_remover"].pack_forget()
+                linha["lbl_registrada"].pack(side=LEFT)
+            else:
+                doc_lib_estado_botao(linha["btn_remover"], self.permite_novas)
+        livre = self.permite_novas and len(self.linhas) < self.limite
+        doc_lib_estado_botao(self.btn_manual, livre)
+        doc_lib_estado_botao(self.btn_sistema, livre)
+        self.lbl_contador.configure(text=f"{len(self.linhas)} de {self.limite} conferências")
+
+
+class JanelaSMAvulso:
+    """Janela da SM Avulso (Doc_Lib. - Click_25): cadastro, edição, salvamento e geração da Sequência de Manobras. Segue o
+    mesmo conceito da janela da MO (JanelaMO), com os campos da SM: 1 SM Nº (no alto e à direita, automático), 2 Período
+    programado (programação e três reprogramações, habilitadas em ordem), 3 Equipamento(s) a impedir, 4 Motivo, 5 Condições
+    de Segurança, 6 Manobras de Liberação, 7 Executantes, 8 Manobras de Normalização (com o botão Inverter Manobras),
+    9 Executantes, 10 Observações, 11 Elaborado por e 12 Conferência (manual e pelo sistema).
+
+    Reaproveita da JanelaMO, sem alterá-la, os utilitários genéricos de campos (marcas de erro, calendário, textos de várias
+    linhas, rolagem), listados logo abaixo. Os botões são os da MO (Voltar, Salvar, Editar, Gerar, Cancelar, Reservado,
+    Referência e o GRID), menos o Encaminhar por e-mail: a SM não tem destinatário externo nem a coluna "Enviado e-mail".
+
+    O que cada status deixa alterar está em _DOC_LIB_GRUPOS_EDITAVEIS_SM (a mesma regra vale no banco): Em análise é o único
+    com edição geral (depois de Salvar os campos ficam travados até o Editar); depois de gerado o documento só mudam as
+    reprogramações (até a conclusão), as conferências (Aguarda Conferência), a data e hora das manobras e os executantes.
+
+    Estados dos botões:
+      - janela nova ........ Voltar e Salvar habilitados; Editar e Gerar SM Avulso desabilitados
+      - depois de Salvar ... campos travados; Editar e Gerar SM Avulso habilitados; Salvar desabilitado
+      - depois de Editar ... campos liberados; Gerar desabilitado até um novo Salvar
+      - depois de Gerar .... SM emitida (Aguarda Conferência): só os campos de acompanhamento do status podem ser preenchidos
+      - SM-Referência ...... habilitado em qualquer SM já salva, menos a Reservada: abre uma SM nova com os dados da aberta
+    """
+
+    # utilitários genéricos da JanelaMO (a SM não herda a MO: usa só o que está listado aqui)
+    _rotulo = JanelaMO._rotulo
+    _nova_linha = JanelaMO._nova_linha
+    _separador = JanelaMO._separador
+    _titulo_secao = JanelaMO._titulo_secao
+    _campo_texto = JanelaMO._campo_texto
+    _roda_texto = JanelaMO._roda_texto
+    _entrada_com_data = JanelaMO._entrada_com_data
+    abrir_calendario = JanelaMO.abrir_calendario
+    _apos_escolher_data = JanelaMO._apos_escolher_data
+    configurar_entrada = JanelaMO.configurar_entrada
+    _ao_sair_campo = JanelaMO._ao_sair_campo
+    _marcar = JanelaMO._marcar
+    _limpar_marca = JanelaMO._limpar_marca
+    esquecer_marcas = JanelaMO.esquecer_marcas
+    _limpar_erros = JanelaMO._limpar_erros
+    rolar_ate = JanelaMO.rolar_ate
+    _mostrar_erros = JanelaMO._mostrar_erros
+    _assinatura = JanelaMO._assinatura
+    _tem_alteracoes_pendentes = JanelaMO._tem_alteracoes_pendentes
+    _vigiar_alteracoes = JanelaMO._vigiar_alteracoes
+    forcar_maiusculas = staticmethod(JanelaMO.forcar_maiusculas)
+    _texto = staticmethod(JanelaMO._texto)
+    _definir_texto = staticmethod(JanelaMO._definir_texto)
+
+    def __init__(self, referencia=None):
+        self.sm_id = None
+        self.revisao = None
+        self.numero = ""              # número da SM (vazio enquanto ela é nova; depois do primeiro Salvar nunca muda)
+        self.status = ""
+        self.salvo = False            # versão atual gravada e campos travados (documento ainda não emitido)
+        self.emitido = False          # documento já gerado: só os campos de acompanhamento do status são editáveis
+        self.reservado = False        # SM reservada aberta para preenchimento: editável, PDF em branco, não emite
+        self.cancelada = False        # SM cancelada: nada mais pode ser alterado
+        self.numero_previsto = ""     # número que a SM nova vai receber ao ser salva (ainda não consumido)
+        self.referencia_id = None     # SM de origem (SM-Referência), gravada junto com a SM nova
+        self.referencia_numero = ""
+        self.reprogramacoes_habilitadas = 0
+        # "Elaborado por" mostra o nome completo do usuário logado e "Ass." o login dele
+        self.usuario = obter_nome_usuario_logado()
+        self.elaborador_nome = obter_nome_completo_usuario(self.usuario)
+        self._doc_gravado = None      # a SM como está gravada no banco (None enquanto for nova)
+        self._ultimo_pendente = None  # "há dados não salvos" na última vez em que os botões foram atualizados
+        self._controles = []          # campos da edição geral (travam e liberam em bloco)
+        self._alvos = {}              # chave de campo -> (widget com contorno ou None, rótulo)
+        self._marcados = {}           # widget -> cores originais do contorno
+        self._rotulos_marcados = {}   # rótulo -> cor original
+        self._hora_da_data = {}       # entrada de data -> entrada da hora que recebe a hora atual
+        self.periodo = {}             # "p0" a "p3" -> campos, ícones e botão do período
+        self.equip = []               # tabela 3: uma lista de {campo: Entry} por linha
+        self.txt_condicoes = {}       # campo de condição -> Text
+
+        self.janela = Toplevel(root)
+        self.janela.title('COG - DOC_LIB. - SM AVULSO')
+        self.janela.geometry('1280x860')
+        self.janela.minsize(1180, 640)        # largura mínima: cabem os 7 botões do rodapé
+        self.janela.resizable(True, True)
+        self.janela['bg'] = SGA_FUNDO
+        self.janela.protocol("WM_DELETE_WINDOW", self.voltar)
+
+        self._montar_cabecalho()
+        self._montar_formulario()
+        self._montar_rodape()
+        doc_lib_definir_entrada(self.ent_elaborado_area, DOC_LIB_AREA_ELABORADOR_SM)
+        doc_lib_definir_entrada(self.ent_elaborado_data, datetime.now().strftime("%d/%m/%Y"))
+        if referencia:
+            self._aplicar_referencia(referencia)
+        self._aplicar_bloqueios()
+        self._atualizar_estado()
+        self._assinatura_ref = self._assinatura()
+        self.janela.after(300, self._avisar_sem_nome_completo)
+        self.janela.after(300, self._vigiar_alteracoes)
+
+    def _avisar_sem_nome_completo(self):
+        """Usuário sem nome completo cadastrado: "Elaborado por" usará o login até o administrador cadastrar."""
+        if self.sm_id is None and not buscar_nome_completo(self.usuario):
+            messagebox.showwarning(
+                "Nome completo não cadastrado",
+                f"O usuário '{self.usuario}' não tem nome completo cadastrado, por isso o campo 'Elaborado por' "
+                f"mostrará o próprio login.\n\nPeça ao administrador para cadastrar o nome "
+                f"(menu ADMIN > Nomes dos Usuários).", parent=self.janela)
+
+    def _ao_alterar_tratativas(self):
+        """Depois da emissão (ou numa SM reservada), alterar um campo de acompanhamento atualiza os botões na hora (Salvar
+        habilita e Gerar SM Avulso desabilita até salvar)."""
+        if self.emitido or self.reservado:
+            try:
+                self._atualizar_estado()
+            except TclError:
+                pass
+
+    # ------------------------------------------------------------------ montagem da janela
+
+    def _montar_cabecalho(self):
+        faixa = ui_dialogo(self.janela, "SM Avulso - Sequência de Manobras.", "Sequência de Manobras do COG-Alupar")
+        doc_lib_criar_botao(faixa, "GRID SM", self.abrir_salvo, "neutro"
+                            ).place(relx=1.0, x=-24, rely=0.5, anchor="e", width=170, height=34)
+        self.lbl_status = Label(faixa, text="", bg=SGA_AZUL, fg="#B8CCE8", font=(SGA_FONTE, 9, "bold"))
+        self.lbl_status.place(relx=1.0, x=-208, rely=0.5, anchor="e")
+
+    def _novo_cartao(self, primeiro=False):
+        """Novo quadro branco do formulário (o formulário é feito de quadros, para as tabelas ocuparem a largura toda)."""
+        card = Frame(self.inner, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
+        card.pack(fill=X, padx=24, pady=(16, 0) if primeiro else (8, 0))
+        card.grid_columnconfigure(0, minsize=250)
+        card.grid_columnconfigure(1, weight=1)
+        self.card = card
+        self._linha = 0
+        return card
+
+    def _linha_larga(self, widget, pady=(2, 8)):
+        """Coloca o widget na linha seguinte do quadro, ocupando as duas colunas."""
+        widget.grid(row=self._linha, column=0, columnspan=2, sticky="ew", padx=16, pady=pady)
+        self._linha += 1
+
+    def _campo_entrada_sm(self, chave, rotulo_texto, largura=46, geral=True):
+        """Linha com rótulo + campo de texto livre de uma linha (geral=True: trava e libera com a edição geral)."""
+        rot = self._rotulo(rotulo_texto)
+        entrada = criar_entrada_sga(self.card, width=largura)
+        self.configurar_entrada(entrada, "texto", atualiza_estado=not geral)
+        if geral:
+            self._controles.append(entrada)
+        self._nova_linha(rot, entrada)
+        self._alvos[chave] = (entrada, rot)
+        return entrada
+
+    def _montar_formulario(self):
+        area = Frame(self.janela, bg=SGA_FUNDO)
+        area.place(x=0, y=64, relwidth=1.0, relheight=1.0, height=-(64 + 76))
+        self.inner = criar_area_rolavel(area, bg=SGA_FUNDO)
+        self.canvas = self.inner.master
+
+        # ---- 1 (SM Nº, no alto e à direita), 2 a 5
+        card = self._novo_cartao(primeiro=True)
+        topo = Frame(card, bg=SGA_CARD)
+        Label(topo, text="SEQUÊNCIA DE MANOBRAS - SM", bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 14, "bold")
+              ).pack(side=LEFT)
+        caixa_numero = Frame(topo, bg=SGA_CARD)
+        caixa_numero.pack(side=RIGHT)
+        linha_numero = Frame(caixa_numero, bg=SGA_CARD)
+        linha_numero.pack(anchor="e")
+        Label(linha_numero, text="1.", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8, "italic")
+              ).pack(side=LEFT, anchor="s")
+        Label(linha_numero, text="SM Nº COG-", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 13, "bold")).pack(side=LEFT)
+        self.lbl_numero = Label(linha_numero, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 15, "bold"))
+        self.lbl_numero.pack(side=LEFT)
+        self.lbl_nota_numero = Label(caixa_numero, text="", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "italic"))
+        self.lbl_nota_numero.pack(anchor="e")
+        self._linha_larga(topo, pady=(14, 4))
+        self.lbl_referencia = Label(card, text="", bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 10, "bold"), anchor="w")
+        self.lbl_referencia.grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16)
+        self._linha += 1
+        self._separador()
+
+        self._titulo_secao("2. Período programado para execução do(s) serviço(s):",
+                           "Informe a programação original. As reprogramações são habilitadas em ordem, pelos botões, e "
+                           "não apagam os períodos anteriores.")
+        quadro = Frame(card, bg=SGA_CARD)
+        quadro.grid_columnconfigure(0, weight=1, uniform="periodo")
+        quadro.grid_columnconfigure(1, weight=1, uniform="periodo")
+        self._linha_larga(quadro)
+        for indice, (prefixo, numero, nome) in enumerate(DOC_LIB_PERIODOS_SM):
+            self._montar_periodo(quadro, indice, prefixo, numero, nome)
+        self._separador()
+
+        self._titulo_secao("3. Equipamento(s) a impedir:",
+                           "Três linhas de texto livre. A primeira é obrigatória; as outras, se usadas, devem ser preenchidas "
+                           "por inteiro. Tempo de Retorno à Operação em HH:MM.")
+        self._montar_equipamentos()
+        self._separador()
+
+        self.txt_motivo = self._campo_texto(
+            "motivo", "4. Motivo", DOC_LIB_LINHAS_MOTIVO_SM,
+            dica=f"Descrever os serviços a ser executado na intervenção.\n(texto livre, no máximo {DOC_LIB_LINHAS_MOTIVO_SM} "
+                 f"linhas)")
+        bloco_rotulo = self.card.grid_slaves(row=self._linha - 2, column=0)[0]
+        self.lbl_linhas_motivo = Label(bloco_rotulo, text="", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"))
+        self.lbl_linhas_motivo.pack(anchor="nw", pady=(4, 0))
+        self.txt_motivo.bind("<KeyRelease>", lambda e: self._atualizar_contador_motivo(), add="+")
+        self._atualizar_contador_motivo()
+
+        self._titulo_secao("5. Condições de Segurança:",
+                           "Os cinco campos são obrigatórios: se não houver, escreva Nenhuma (ou Nenhum).")
+        for campo, numero, titulo in DOC_LIB_CONDICOES_SM:
+            if campo == "cond_loto_com":
+                self._titulo_secao("5.4. Outras condições:")
+            self.txt_condicoes[campo] = self._campo_texto(campo, f"{numero} {titulo}", DOC_LIB_LINHAS_CONDICAO_SM, barra=True)
+
+        # ---- 6 e 7
+        card = self._novo_cartao()
+        self._titulo_secao("6. Manobras de Liberação:",
+                           "Até 30 manobras. A data e a hora de cada manobra são controle interno (só nesta tela, não vão para o\n"
+                           "documento impresso) e são preenchidas depois da conferência da SM.")
+        quadro = Frame(card, bg=SGA_CARD)
+        self._linha_larga(quadro)
+        self.tab_lib = LinhasManobrasSM(self, quadro, "lib", "Manobras de Liberação")
+        self._separador()
+        self._titulo_secao("7. Executantes da Liberação:",
+                           "Preenchido depois da conferência da SM, ao lançar os horários das manobras e da liberação. "
+                           "Ao salvar, a SM passa a Em Execução.")
+        self.ent_exec_lib_local = self._campo_entrada_sm("exec_lib_local", "7.1 No local", 70, geral=False)
+        self.ent_exec_lib_remoto = self._campo_entrada_sm("exec_lib_remoto", "7.2 Remotamente", 70, geral=False)
+
+        # ---- 8 e 9
+        card = self._novo_cartao()
+        topo = Frame(card, bg=SGA_CARD)
+        Label(topo, text="8. Manobras de Normalização:", bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 11, "bold")
+              ).pack(side=LEFT)
+        self.btn_inverter = doc_lib_criar_botao(topo, "Inverter Manobras", self.inverter_manobras, "agendar",
+                                                fonte=(SGA_FONTE, 9, "bold"))
+        self.btn_inverter.pack(side=RIGHT, ipadx=8, ipady=2)
+        DicaBotaoSM(self.btn_inverter, "Gera a normalização a partir da liberação: ordem inversa e ação com o antônimo")
+        self._linha_larga(topo, pady=(10, 2))
+        Label(card, text="Até 30 manobras. O botão Inverter Manobras monta a normalização a partir da liberação (ordem "
+                         "inversa e ação com o antônimo operacional); ação sem inversão segura é mantida e marcada para "
+                         "conferência. Depois de gerada, a normalização continua editável.",
+              bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left", wraplength=1050
+              ).grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 2))
+        self._linha += 1
+        quadro = Frame(card, bg=SGA_CARD)
+        self._linha_larga(quadro)
+        self.tab_nor = LinhasManobrasSM(self, quadro, "nor", "Manobras de Normalização")
+        self._separador()
+        self._titulo_secao("9. Executantes da Normalização:",
+                           "Preenchido ao lançar os horários das manobras e da normalização. Ao salvar, a SM passa a Concluído "
+                           "(só com todas as manobras de liberação e de normalização datadas).")
+        self.ent_exec_nor_local = self._campo_entrada_sm("exec_nor_local", "9.1 No local", 70, geral=False)
+        self.ent_exec_nor_remoto = self._campo_entrada_sm("exec_nor_remoto", "9.2 Remotamente", 70, geral=False)
+
+        # ---- 10, 11 e 12
+        card = self._novo_cartao()
+        self.txt_observacoes = self._campo_texto("observacoes", "10. Observações", DOC_LIB_LINHAS_OBSERVACOES_SM,
+                                                 opcional=True, barra=True)
+        rot = self._rotulo("11. Elaborado por")
+        quadro = Frame(card, bg=SGA_CARD)
+        self.lbl_elaborado_nome = Label(quadro, text=self.elaborador_nome or "-", bg=SGA_CARD, fg=SGA_TEXTO,
+                                        font=(SGA_FONTE, 10, "bold"))
+        self.lbl_elaborado_nome.pack(side=LEFT)
+        Label(quadro, text="Área:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(24, 6))
+        self.ent_elaborado_area = criar_entrada_sga(quadro, width=12)
+        self.ent_elaborado_area.pack(side=LEFT)
+        self.configurar_entrada(self.ent_elaborado_area, "texto")
+        Label(quadro, text="Data:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(24, 6))
+        self.ent_elaborado_data, icone = self._entrada_com_data(quadro, False)
+        Label(quadro, text="Ass.:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(24, 6))
+        self.lbl_elaborado_ass = Label(quadro, text=self.usuario or "-", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"))
+        self.lbl_elaborado_ass.pack(side=LEFT)
+        self._controles += [self.ent_elaborado_area, self.ent_elaborado_data, icone]
+        self._nova_linha(rot, quadro)
+        self._alvos["elaborado_por"] = (None, rot)
+        self._alvos["elaborado_ass"] = (None, rot)
+        self._alvos["elaborado_area"] = (self.ent_elaborado_area, rot)
+        self._alvos["elaborado_data"] = (self.ent_elaborado_data, rot)
+
+        self._titulo_secao("12. Conferência:",
+                           "Feita depois de gerada a SM, com até 10 linhas. A SM só passa a Aprovado para Execução com pelo menos\n"
+                           "uma Conferência manual (profissional da Manutenção) E uma Conferência pelo sistema (profissional "
+                           "autenticado, Operação);\nsó uma delas não aprova. A conferência salva não muda mais.")
+        quadro = Frame(card, bg=SGA_CARD)
+        self._linha_larga(quadro)
+        self.conferencias = LinhasConferenciaSM(self, quadro)
+        Frame(self.inner, bg=SGA_FUNDO, height=24).pack(fill=X)
+
+    def _montar_periodo(self, quadro, indice, prefixo, numero, nome):
+        """Quadro de um período (2.1 Programação ou 2.2 a 2.4 Reprogramações): Início e Término, com data (calendário) e hora.
+        As reprogramações têm o botão que as habilita."""
+        bloco = Frame(quadro, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
+        bloco.grid(row=indice // 2, column=indice % 2, sticky="nsew", padx=6, pady=6)
+        cabecalho = Frame(bloco, bg="#DCE8F8")
+        cabecalho.pack(fill=X)
+        rotulo = Label(cabecalho, text=f"{numero}  {nome}", bg="#DCE8F8", fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"), anchor="w")
+        rotulo.pack(side=LEFT, padx=8, pady=5)
+        dados = {"widgets": [], "botao": None}
+        if prefixo != "p0":
+            dados["botao"] = doc_lib_criar_botao(cabecalho, "Habilitar", lambda p=prefixo: self.habilitar_reprogramacao(p),
+                                                 "aviso", fonte=(SGA_FONTE, 8, "bold"))
+            dados["botao"].pack(side=RIGHT, padx=6, pady=3, ipadx=6)
+            DicaBotaoSM(dados["botao"], "Habilita o preenchimento desta reprogramação (as reprogramações seguem a ordem)")
+        corpo = Frame(bloco, bg=SGA_CARD)
+        corpo.pack(fill=X, padx=8, pady=6)
+        for linha, (titulo, campo_data, campo_hora) in enumerate((("Início", "data_inicio", "hora_inicio"),
+                                                                    ("Término", "data_termino", "hora_termino"))):
+            Label(corpo, text=f"{titulo}:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold"), width=8, anchor="w"
+                  ).grid(row=linha, column=0, sticky="w", pady=3)
+            linha_campos = Frame(corpo, bg=SGA_CARD)
+            linha_campos.grid(row=linha, column=1, sticky="w", pady=3)
+            entrada_data, icone = self._entrada_com_data(linha_campos, False)
+            Label(linha_campos, text="Hora:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")
+                  ).pack(side=LEFT, padx=(14, 4))
+            entrada_hora = criar_entrada_sga(linha_campos, width=7)
+            entrada_hora.pack(side=LEFT)
+            self.configurar_entrada(entrada_hora, "hora", atualiza_estado=prefixo != "p0")
+            Label(linha_campos, text="hs", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).pack(side=LEFT, padx=(4, 0))
+            for campo, widget in ((campo_data, entrada_data), (campo_hora, entrada_hora)):
+                dados[campo] = widget
+                self._alvos[f"{prefixo}_{campo}"] = (widget, rotulo)
+            dados["widgets"] += [entrada_data, icone, entrada_hora]
+        if prefixo == "p0":
+            self._controles += dados["widgets"]
+        else:                                   # reprogramação digitada depois da emissão: Salvar habilita na hora
+            for campo in ("data_inicio", "data_termino"):
+                dados[campo].bind("<KeyRelease>", lambda e: self._ao_alterar_tratativas(), add="+")
+        self.periodo[prefixo] = dados
+
+    def _montar_equipamentos(self):
+        """Tabela 3: 3 linhas x 6 colunas (Local, Instalação, Equipamento, Caracterização, Local da Execução dos Serviços e
+        Tempo de Retorno à Operação em HH:MM)."""
+        quadro = Frame(self.card, bg=SGA_CARD)
+        pesos = (2, 2, 3, 2, 3, 1)
+        quebras = (150, 150, 230, 150, 220, 96)           # largura (px) em que cada cabeçalho quebra de linha
+        for coluna, ((campo, numero, titulo), peso, quebra) in enumerate(zip(DOC_LIB_COLUNAS_EQUIPAMENTO_SM, pesos, quebras)):
+            quadro.grid_columnconfigure(coluna, weight=peso, uniform="equip", minsize=96)
+            Label(quadro, text=f"{numero} {titulo}", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"),
+                  anchor="w", justify="left", wraplength=quebra).grid(row=0, column=coluna, sticky="w", padx=4)
+        for linha in range(1, DOC_LIB_LINHAS_EQUIPAMENTOS_SM + 1):
+            campos = {}
+            for coluna, (campo, numero, titulo) in enumerate(DOC_LIB_COLUNAS_EQUIPAMENTO_SM):
+                entrada = criar_entrada_sga(quadro, width=8)
+                entrada.grid(row=linha, column=coluna, sticky="ew", padx=4, pady=3)
+                self.configurar_entrada(entrada, "texto")
+                if campo == "tempo_retorno":
+                    entrada.configure(justify="center")
+                    entrada.bind("<FocusOut>", lambda e, w=entrada: self._ao_sair_duracao(w), add="+")
+                    ToolTipSGA(entrada, "Tempo de retorno à operação, em horas e minutos (HH:MM)")
+                campos[campo] = entrada
+                self._controles.append(entrada)
+                self._alvos[f"equip:{linha}:{campo}"] = (entrada, None)
+            self.equip.append(campos)
+        self._linha_larga(quadro)
+
+    def _ao_sair_duracao(self, entrada):
+        """Tempo de Retorno à Operação: ao sair do campo, aceita 1:30, 0130 ou 1h30 e mostra HH:MM; formato inválido marca o campo."""
+        try:
+            if str(entrada.cget("state")) != "normal":
+                return
+            texto = entrada.get().strip()
+            if not texto:
+                return
+            novo = doc_lib_normalizar_duracao_sm(texto)
+            if novo:
+                self._limpar_marca(entrada)
+                if novo != entrada.get():
+                    entrada.delete(0, END)
+                    entrada.insert(0, novo)
+            else:
+                self._marcar(entrada)
+        except TclError:
+            return
+
+    def _atualizar_contador_motivo(self):
+        """Mostra quantas das 6 linhas do Motivo estão ocupadas (medido como no PDF); vermelho quando passa do máximo."""
+        linhas = doc_lib_linhas_texto_sm(self._texto(self.txt_motivo))
+        excedeu = linhas > DOC_LIB_LINHAS_MOTIVO_SM
+        self.lbl_linhas_motivo.configure(text=f"{linhas} de {DOC_LIB_LINHAS_MOTIVO_SM} linhas",
+                                         fg=SGA_VERMELHO if excedeu else SGA_TEXTO_SUAVE)
+
+    def _montar_rodape(self):
+        rodape = criar_rodape_sga(self.janela)
+        self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "voltar")
+        self.btn_salvar = doc_lib_criar_botao(rodape, "Salvar", self.salvar, "sucesso")
+        self.btn_editar = doc_lib_criar_botao(rodape, "Editar", self.editar, "aviso")
+        self.btn_gerar = doc_lib_criar_botao(rodape, "Gerar SM Avulso", self.gerar, "primario")
+        self.btn_reservar = doc_lib_criar_botao(rodape, "SM-Reservado", self.reservar, "aviso")
+        self.btn_cancelar = doc_lib_criar_botao(rodape, "Cancelar SM", self.cancelar_sm, "perigo")
+        self.btn_referencia = doc_lib_criar_botao(rodape, "SM-Referência", self.referencia, "primario")
+        botoes = (self.btn_voltar, self.btn_salvar, self.btn_editar, self.btn_gerar, self.btn_reservar, self.btn_cancelar,
+                  self.btn_referencia)
+        for posicao, botao in enumerate(botoes):
+            botao.place(relx=0.5, x=-483 + posicao * 138, rely=0.5, anchor="w", width=132, height=42)
+
+    # ------------------------------------------------------------------ reprogramações
+
+    def habilitar_reprogramacao(self, prefixo):
+        """Botão Habilitar de uma reprogramação: só na ordem (Reprogramação-1, depois a 2, depois a 3) e com o status
+        permitindo; os dados dos períodos anteriores não são alterados."""
+        numero = int(prefixo[1])
+        if numero != self.reprogramacoes_habilitadas + 1 or "reprogramacao" not in self._grupos_editaveis():
+            return
+        self.reprogramacoes_habilitadas = numero
+        self._aplicar_periodos()
+        self._atualizar_estado()
+        self.periodo[prefixo]["data_inicio"].focus_set()
+        self.rolar_ate(self.periodo[prefixo]["data_inicio"])
+
+    def _aplicar_periodos(self):
+        """Libera os campos das reprogramações habilitadas (se o status permite) e o botão da próxima, na ordem."""
+        editavel = "reprogramacao" in self._grupos_editaveis()
+        for numero in (1, 2, 3):
+            dados = self.periodo[f"p{numero}"]
+            habilitada = numero <= self.reprogramacoes_habilitadas
+            for widget in dados["widgets"]:
+                doc_lib_bloquear_widget(widget, not (habilitada and editavel))
+            botao = dados["botao"]
+            botao.configure(text="Habilitada" if habilitada else "Habilitar")
+            doc_lib_estado_botao(botao, editavel and numero == self.reprogramacoes_habilitadas + 1)
+
+    # ------------------------------------------------------------------ número, estados e bloqueios
+
+    def _atualizar_numero_provisorio(self):
+        """Mostra o número da SM no alto e à direita: o definitivo (depois do primeiro Salvar) ou o que ela vai receber
+        (cinza e itálico: só é consumido ao salvar, como na MO)."""
+        if self.numero:
+            self.lbl_numero.configure(text=self.numero, fg=SGA_VERMELHO if self.cancelada else SGA_TEXTO,
+                                      font=(SGA_FONTE, 15, "bold overstrike" if self.cancelada else "bold"))
+            self.lbl_nota_numero.configure(text="")
+        else:
+            try:
+                self.numero_previsto = doc_lib_numeros_previstos(1, "SM")[0]
+            except sqlite3.Error:
+                self.numero_previsto = ""
+            self.lbl_numero.configure(text=self.numero_previsto, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 15, "italic"))
+            self.lbl_nota_numero.configure(text="número previsto: só é consumido ao salvar")
+        self.lbl_referencia.configure(text=f"SM de referência: COG-{self.referencia_numero}" if self.referencia_numero else "")
+
+    def _grupos_editaveis(self):
+        """Grupos de campos que o status atual deixa alterar nesta janela (a mesma regra vale no banco). Em análise, depois
+        de Salvar, tudo fica travado até o Editar."""
+        if self.cancelada or self.status in DOC_LIB_STATUS_DEFINITIVOS_SM:
+            return ()
+        if self.sm_id is None:
+            return _DOC_LIB_GRUPOS_EDITAVEIS_SM[None]
+        if self.status in (STATUS_ATEIE_RESERVADO, STATUS_ATEIE_EM_ANALISE) and not self.emitido:
+            return () if self.salvo and self.status == STATUS_ATEIE_EM_ANALISE else _DOC_LIB_GRUPOS_EDITAVEIS_SM[self.status]
+        return _DOC_LIB_GRUPOS_EDITAVEIS_SM.get(self.status, ())
+
+    def _aplicar_bloqueios(self):
+        """Libera ou trava cada grupo de campos conforme o status (ver _grupos_editaveis)."""
+        grupos = self._grupos_editaveis()
+        geral = "geral" in grupos
+        for widget in self._controles:
+            doc_lib_bloquear_widget(widget, not geral)
+        self.tab_lib.travar(estrutura=not geral, datas="datas_lib" not in grupos)
+        self.tab_nor.travar(estrutura=not geral, datas="datas_nor" not in grupos)
+        for entrada in (self.ent_exec_lib_local, self.ent_exec_lib_remoto):
+            doc_lib_bloquear_widget(entrada, "exec_lib" not in grupos)
+        for entrada in (self.ent_exec_nor_local, self.ent_exec_nor_remoto):
+            doc_lib_bloquear_widget(entrada, "exec_nor" not in grupos)
+        self.conferencias.travar("conferencias" in grupos)
+        self._aplicar_periodos()
+
+    def _pendente(self):
+        """True se existem dados ainda não salvos (SM nova, em edição ou, depois de emitida, com campos de acompanhamento
+        alterados)."""
+        if self.sm_id is None:
+            return True
+        if self.cancelada or self.status in DOC_LIB_STATUS_DEFINITIVOS_SM:
+            return False
+        if self.emitido or self.reservado:      # reservada: já nasce editável, só há o que salvar depois de digitar
+            return self._assinatura() != self._assinatura_ref
+        return not self.salvo
+
+    def _atualizar_estado(self):
+        pendente = self._pendente()
+        self._ultimo_pendente = pendente
+        doc_lib_estado_botao(self.btn_voltar, True)
+        doc_lib_estado_botao(self.btn_salvar, pendente)
+        doc_lib_estado_botao(self.btn_editar, self.sm_id is not None and not self.emitido and self.salvo
+                             and self.status == STATUS_ATEIE_EM_ANALISE and not self.cancelada)
+        doc_lib_estado_botao(self.btn_gerar, self.sm_id is not None and not pendente)
+        doc_lib_estado_botao(self.btn_cancelar, self.sm_id is not None and not pendente
+                             and self.status in DOC_LIB_STATUS_CANCELAVEIS_SM)
+        doc_lib_estado_botao(self.btn_referencia, self.sm_id is not None and self.status not in DOC_LIB_STATUS_SEM_REFERENCIA_SM)
+        doc_lib_estado_botao(self.btn_inverter, "geral" in self._grupos_editaveis())
+        if self.sm_id is None:
+            texto = "Nova SM (não salva)"
+        else:
+            situacao = ("cancelada" if self.cancelada else "emitida" if self.emitido else
+                        "reservada" if self.reservado else "salva" if self.salvo else "em edição")
+            texto = f"SM {self.numero} - {self.status} ({situacao}, rev. {self.revisao})" \
+                    + (" - alterações não salvas" if pendente and (self.emitido or self.reservado) else "")
+        self.lbl_status.configure(text=texto)
+        self._atualizar_numero_provisorio()
+
+    # ------------------------------------------------------------------ leitura e gravação dos campos
+
+    def _alvo_da_chave(self, chave):
+        """(widget, rótulo) do campo identificado pela chave devolvida pela validação ('lib:2:acao', 'conf:1:nome'...)."""
+        if chave in self._alvos:
+            return self._alvos[chave]
+        partes = chave.split(":")
+        if len(partes) == 3 and partes[1].isdigit():
+            tabela = {"lib": self.tab_lib, "nor": self.tab_nor, "conf": self.conferencias}.get(partes[0])
+            if tabela is not None:
+                return tabela.entrada(int(partes[1]), partes[2]), None
+        return None, None
+
+    def _coletar(self):
+        """Todos os dados da tela (como digitados, sem normalizar)."""
+        dados = {"id": self.sm_id, "revisao": self.revisao, "referencia_id": self.referencia_id,
+                 "reprogramacoes": self.reprogramacoes_habilitadas,
+                 "motivo": self._texto(self.txt_motivo), "observacoes": self._texto(self.txt_observacoes),
+                 "elaborado_por": self.elaborador_nome or "", "elaborado_ass": self.usuario or "",
+                 "elaborado_area": self.ent_elaborado_area.get().strip(), "elaborado_data": self.ent_elaborado_data.get().strip(),
+                 "equipamentos": [{campo: entrada.get().strip() for campo, entrada in linha.items()} for linha in self.equip],
+                 "liberacao": self.tab_lib.coletar(), "normalizacao": self.tab_nor.coletar(),
+                 "conferencias": self.conferencias.coletar(),
+                 "exec_lib_local": self.ent_exec_lib_local.get().strip(), "exec_lib_remoto": self.ent_exec_lib_remoto.get().strip(),
+                 "exec_nor_local": self.ent_exec_nor_local.get().strip(), "exec_nor_remoto": self.ent_exec_nor_remoto.get().strip()}
+        for campo, texto in self.txt_condicoes.items():
+            dados[campo] = self._texto(texto)
+        for prefixo, campos in self.periodo.items():
+            for campo in DOC_LIB_CAMPOS_PERIODO_SM:
+                dados[f"{prefixo}_{campo}"] = campos[campo].get().strip()
+        return dados
+
+    def _preencher(self, doc):
+        """Mostra na tela uma SM gravada no banco."""
+        self._limpar_erros()
+        self.sm_id, self.revisao, self.numero, self.status = doc["id"], doc["revisao"], doc["numero"], doc["status"]
+        self.cancelada = doc["status"] == STATUS_ATEIE_CANCELADO
+        self.referencia_id, self.referencia_numero = doc.get("referencia_id"), doc.get("referencia_numero") or ""
+        if doc_lib_documento_reservado_sm(doc):
+            # SM reservada: quem a preenche passa a constar como elaborador (a reserva fica registrada em reservado_por)
+            self.usuario = obter_nome_usuario_logado()
+            self.elaborador_nome = obter_nome_completo_usuario(self.usuario)
+        else:
+            self.elaborador_nome, self.usuario = doc.get("elaborado_por") or "", doc.get("elaborado_ass") or ""
+        self.lbl_elaborado_nome.configure(text=self.elaborador_nome or "-")
+        self.lbl_elaborado_ass.configure(text=self.usuario or "-")
+        for prefixo, campos in self.periodo.items():
+            for campo in DOC_LIB_CAMPOS_PERIODO_SM:
+                doc_lib_definir_entrada(campos[campo], doc.get(f"{prefixo}_{campo}") or "")
+        self.reprogramacoes_habilitadas = int(doc.get("reprogramacoes") or 0)
+        for indice, linha in enumerate(self.equip):
+            item = (doc.get("equipamentos") or [])[indice] if indice < len(doc.get("equipamentos") or []) else {}
+            for campo, entrada in linha.items():
+                doc_lib_definir_entrada(entrada, item.get(campo) or "")
+        self._definir_texto(self.txt_motivo, doc.get("motivo") or "")
+        self._definir_texto(self.txt_observacoes, doc.get("observacoes") or "")
+        for campo, texto in self.txt_condicoes.items():
+            self._definir_texto(texto, doc.get(campo) or "")
+        reservada = doc_lib_documento_reservado_sm(doc)
+        doc_lib_definir_entrada(self.ent_elaborado_area, doc.get("elaborado_area") or (DOC_LIB_AREA_ELABORADOR_SM if reservada else ""))
+        doc_lib_definir_entrada(self.ent_elaborado_data, doc.get("elaborado_data") or
+                                (datetime.now().strftime("%d/%m/%Y") if reservada else ""))
+        self.tab_lib.preencher(doc.get("liberacao"))
+        self.tab_nor.preencher(doc.get("normalizacao"))
+        for campo, entrada in (("exec_lib_local", self.ent_exec_lib_local), ("exec_lib_remoto", self.ent_exec_lib_remoto),
+                               ("exec_nor_local", self.ent_exec_nor_local), ("exec_nor_remoto", self.ent_exec_nor_remoto)):
+            doc_lib_definir_entrada(entrada, doc.get(campo) or "")
+        self.conferencias.preencher(doc.get("conferencias"))
+        self._atualizar_contador_motivo()
+        self._atualizar_numero_provisorio()
+
+    def _aplicar_referencia(self, referencia):
+        """SM-Referência: preenche a SM nova com os dados herdados da SM de origem (doc_lib_dados_referencia_sm). Período,
+        data e hora das manobras, executantes e conferências ficam em branco; o número é o previsto e o status começa do zero."""
+        self.referencia_id, self.referencia_numero = referencia["referencia_id"], referencia["referencia_numero"]
+        for indice, linha in enumerate(self.equip):
+            item = referencia["equipamentos"][indice] if indice < len(referencia["equipamentos"]) else {}
+            for campo, entrada in linha.items():
+                doc_lib_definir_entrada(entrada, item.get(campo) or "")
+        self._definir_texto(self.txt_motivo, referencia["motivo"])
+        self._definir_texto(self.txt_observacoes, referencia["observacoes"])
+        for campo, texto in self.txt_condicoes.items():
+            self._definir_texto(texto, referencia[campo])
+        self.tab_lib.preencher(referencia["liberacao"])
+        self.tab_nor.preencher(referencia["normalizacao"])
+        self._atualizar_contador_motivo()
+
+    def _carregar_documento(self, doc):
+        """Mostra a SM gravada: travada (versão salva) e, se já foi gerada, no estado EMITIDO (só os campos de acompanhamento do
+        status editáveis). Uma SM RESERVADA abre editável para o preenchimento; uma SM CANCELADA abre só para consulta."""
+        self._preencher(doc)
+        self._doc_gravado = doc
+        self.emitido = bool(doc.get("emitido"))
+        self.reservado = doc_lib_documento_reservado_sm(doc) and not self.emitido
+        self.salvo = not self.reservado
+        self._aplicar_bloqueios()
+        self._assinatura_ref = self._assinatura()
+        self._atualizar_estado()
+
+    # ------------------------------------------------------------------ ações dos botões
+
+    def salvar(self):
+        self._limpar_erros()
+        for tabela in (self.tab_lib, self.tab_nor):       # linhas vazias saem: as posições passam a ser as dos dados gravados
+            tabela.compactar()
+        dados = doc_lib_normalizar_sm(self._coletar())
+        erros = doc_lib_validar_sm(dados, self._doc_gravado)
+        if erros:
+            self._mostrar_erros(erros)
+            return
+        usuario = obter_nome_usuario_logado()
+        status_antes = self.status
+        numero_previsto = self.numero_previsto if self.sm_id is None else ""
+        era_reservada = self.reservado
+        ja_emitida = self.emitido
+        conferencias_antes = len((self._doc_gravado or {}).get("conferencias") or [])
+        try:
+            sm_id = doc_lib_salvar_sm(dados, usuario)
+        except DocLibValidacaoSM as erro:
+            self._mostrar_erros(erro.erros)
+            return
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except DocLibBloqueado as erro:
+            messagebox.showwarning("Alteração não permitida", str(erro), parent=self.janela)
+            return
+        except DocLibRegra as erro:
+            messagebox.showwarning("Regra da SM", str(erro), parent=self.janela)
+            return
+        except (sqlite3.Error, OSError) as erro:
+            messagebox.showerror("Erro", f"Não foi possível salvar a SM: {erro}", parent=self.janela)
+            return
+        doc = doc_lib_carregar_sm(sm_id)
+        self._carregar_documento(doc)
+
+        if ja_emitida:
+            mensagem = "SM atualizada com sucesso!"
+            if status_antes != doc["status"]:
+                mensagem += f"\n\nStatus atualizado: {status_antes} passou a {doc['status']}."
+            if len(doc["conferencias"]) > conferencias_antes and doc["status"] == STATUS_SM_AGUARDA_CONFERENCIA:
+                mensagem += ("\n\nConferência registrada. A SM só passa a Aprovado para Execução com uma conferência manual "
+                             "E uma conferência pelo sistema; a SM continua em Aguarda Conferência.")
+            if doc["status"] != STATUS_ATEIE_CONCLUIDO and doc["status"] != STATUS_ATEIE_CANCELADO:
+                mensagem += "\n\nGere o documento novamente para que o PDF mostre as alterações."
+        else:
+            mensagem = ("SM reservada preenchida e salva com sucesso!" if era_reservada else "SM salva com sucesso!") + \
+                f"\n\nSM Nº COG: {doc['numero']}\nStatus: {doc['status']}"
+            if numero_previsto and numero_previsto != doc["numero"]:
+                mensagem += (f"\n\nA numeração foi atualizada porque outro usuário emitiu números enquanto esta SM era "
+                             f"preenchida: {numero_previsto} passou a {doc['numero']}.")
+            mensagem += "\n\nUse 'Gerar SM Avulso' para emitir o PDF e enviar a SM para conferência."
+        messagebox.showinfo("Sucesso", mensagem, parent=self.janela)
+
+    def editar(self):
+        if not self.salvo or self.emitido or self.cancelada or self.status != STATUS_ATEIE_EM_ANALISE:
+            return
+        self.salvo = False
+        self._aplicar_bloqueios()
+        self._atualizar_numero_provisorio()
+        self._assinatura_ref = self._assinatura()
+        self._atualizar_estado()
+
+    def gerar(self):
+        """Botão Gerar SM Avulso: gera o PDF a partir da versão salva (revalida antes), arquiva e oferece abrir/imprimir. A
+        primeira geração EMITE a SM: ela vai de Em análise para Aguarda Conferência e os dados gerais ficam protegidos.
+        Nos demais status só gera o PDF de novo, com o que foi salvo."""
+        if self.sm_id is None or self._pendente():
+            if self.reservado and self.sm_id is not None:
+                messagebox.showwarning(
+                    "Atenção", "Há dados digitados que ainda não foram salvos.\n\nSalve o preenchimento da SM reservada "
+                               "ou, para imprimir o formulário em branco, abra-a novamente pelo GRID SM.", parent=self.janela)
+            else:
+                messagebox.showwarning("Atenção", "Salve a SM antes de gerar o documento.", parent=self.janela)
+            return
+        try:
+            doc = doc_lib_carregar_sm(self.sm_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler a SM salva: {erro}", parent=self.janela)
+            return
+        if doc is None or doc["revisao"] != self.revisao:
+            messagebox.showwarning("Documento alterado",
+                                   "Esta SM foi alterada por outro usuário depois de aberta nesta janela.\n\n"
+                                   "Feche-a e abra-a novamente (GRID SM) antes de gerar o documento.", parent=self.janela)
+            return
+        primeira = not doc["emitido"] and doc["status"] == STATUS_ATEIE_EM_ANALISE
+        if primeira:
+            erros = doc_lib_erros_geracao_sm(doc)
+            if erros:
+                messagebox.showwarning("Campos obrigatórios",
+                                       "A SM salva possui pendências e não pode ser gerada:\n\n"
+                                       + "\n".join(f"• {mensagem}" for _, mensagem in erros[:14]), parent=self.janela)
+                return
+            if not messagebox.askyesno(
+                    "Gerar SM Avulso",
+                    "Ao gerar o documento a SM será considerada EMITIDA, com status 'Aguarda Conferência'.\n\nA partir daí "
+                    "os dados gerais da SM não poderão mais ser alterados (só as reprogramações, a conferência, a data e "
+                    "hora das manobras e os executantes).\n\nDeseja gerar o documento?", parent=self.janela):
+                return
+        try:
+            caminho, aviso = doc_lib_registrar_e_arquivar_sm(doc, obter_nome_usuario_logado())
+        except DocLibValidacaoSM as erro:
+            self._mostrar_erros(erro.erros)
+            return
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except Exception as erro:
+            messagebox.showerror("Erro", f"Falha ao gerar/arquivar o documento SM: {erro}", parent=self.janela)
+            return
+        doc = doc_lib_carregar_sm(self.sm_id)
+        self._carregar_documento(doc)
+        lembrete = None
+        if doc_lib_documento_reservado_sm(doc):
+            lembrete = ("SM reservada: o PDF é um formulário em branco (só o número). A SM continua Reservada e editável; "
+                        "depois de usá-la, abra-a no GRID SM e preencha todos os campos.")
+        elif doc["status"] == STATUS_ATEIE_CANCELADO:
+            lembrete = "SM cancelada: o PDF traz o número riscado e as informações do cancelamento."
+        elif doc["status"] == STATUS_SM_AGUARDA_CONFERENCIA:
+            lembrete = ("Status: Aguarda Conferência. Registre a conferência manual (Manutenção) e a conferência pelo "
+                        "sistema: a SM só é aprovada para execução com as duas.")
+        doc_lib_dialogo_documento_gerado(self.janela, caminho, aviso, lembrete)
+
+    def reservar(self):
+        """Botão SM-Reservado: pede a quantidade (1 a 10) e reserva os números na sequência da última SM emitida ou
+        reservada. Cada número vira uma SM no GRID SM, com status Reservado."""
+        usuario = obter_nome_usuario_logado()
+        reservados = doc_lib_dialogo_reserva(self.janela, usuario, obter_nome_completo_usuario(usuario), rotulo="SM",
+                                             tipo="SM", reservar_numeros=doc_lib_reservar_sm)
+        if not reservados:
+            return
+        self._atualizar_numero_provisorio()            # o número previsto da SM nova avançou
+        numeros = [item["numero"] for item in reservados]
+        messagebox.showinfo(
+            "SM-Reservado",
+            f"{len(numeros)} número(s) de SM reservado(s):\n\n{', '.join(numeros)}\n\n"
+            f"As SMs reservadas aparecem no GRID SM com status 'Reservado'. Para imprimir o formulário em branco, abra a "
+            f"SM reservada no GRID e use 'Gerar SM Avulso'.", parent=self.janela)
+
+    def cancelar_sm(self):
+        """Cancela a SM (com justificativa), em qualquer status menos Concluído. O número cancelado fica registrado e nunca é
+        reaproveitado."""
+        if self.sm_id is None or self._pendente() or self.status not in DOC_LIB_STATUS_CANCELAVEIS_SM:
+            return
+        aviso_execucao = ""
+        if self.status == STATUS_ATEIE_EM_EXECUCAO:
+            aviso_execucao = ("\n\nATENÇÃO: a SM está EM EXECUÇÃO, ou seja, a liberação já foi executada. Cancelar a SM NÃO "
+                              "normaliza o equipamento: confirme que ele foi (ou será) normalizado por outro meio.")
+        if not messagebox.askyesno(
+                "Confirmar cancelamento",
+                f"Deseja realmente cancelar a SM {self.numero}?\n\nO número {self.numero} fica registrado como cancelado "
+                f"e não será reaproveitado." + aviso_execucao, icon="warning" if aviso_execucao else "question",
+                parent=self.janela):
+            return
+        justificativa = solicitar_justificativa(self.janela, self.numero, rotulo="SM")
+        if justificativa is None:
+            return
+        try:
+            doc_lib_cancelar_sm(self.sm_id, obter_nome_usuario_logado(), justificativa, self.revisao)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except (ValueError, DocLibRegra, sqlite3.Error) as erro:
+            messagebox.showerror("Erro", f"Não foi possível cancelar a SM: {erro}", parent=self.janela)
+            return
+        self._carregar_documento(doc_lib_carregar_sm(self.sm_id))
+        messagebox.showinfo("SM cancelada", f"A SM {self.numero} foi cancelada.\n\nGere o documento novamente para que o "
+                                            f"PDF mostre o cancelamento.", parent=self.janela)
+
+    def inverter_manobras(self):
+        """Botão Inverter Manobras: monta as Manobras de Normalização a partir das de Liberação (ordem inversa, ação com o
+        antônimo operacional e Sequência recalculada). As de Liberação não são alteradas, a normalização gerada continua
+        editável e, se já houver manobras de normalização preenchidas, pede confirmação antes de substituí-las. Ação sem
+        inversão inequívoca é mantida e marcada para conferência manual."""
+        titulo = "Inverter Manobras"
+        if "geral" not in self._grupos_editaveis():
+            return
+        liberacao = self.tab_lib.coletar()
+        if not any(manobra[campo] for manobra in liberacao for campo in ("numero", "local", "acao")):
+            messagebox.showwarning(titulo, "Informe as Manobras de Liberação antes de inverter.", parent=self.janela)
+            return
+        if any(manobra[campo] for manobra in self.tab_nor.coletar() for campo in ("numero", "local", "acao")) \
+                and not messagebox.askyesno(
+                    titulo, "As Manobras de Normalização já têm dados preenchidos.\n\nInverter as manobras SUBSTITUI toda a "
+                            "normalização atual pela gerada a partir da liberação.\n\nDeseja substituir?", icon="warning",
+                    default="no", parent=self.janela):
+            return
+        geradas = doc_lib_inverter_manobras_sm(liberacao)
+        self.tab_nor.preencher(geradas)
+        a_conferir = sum(manobra["conferir"] for manobra in geradas)
+        mensagem = f"{len(geradas)} manobra(s) de normalização gerada(s), na ordem inversa da liberação."
+        if a_conferir:
+            mensagem += (f"\n\n{a_conferir} ação(ões) NÃO foram invertidas, porque não há antônimo inequívoco (ou a ação "
+                         f"tem mais de um verbo, ou é condicional, ou está incompleta). O texto original foi mantido e a "
+                         f"linha ficou marcada: confira cada uma (botão 'Conferir ação' ou altere o texto). A SM só pode ser "
+                         f"gerada depois disso.")
+        messagebox.showinfo(titulo, mensagem, parent=self.janela)
+
+    def referencia(self):
+        """Botão SM-Referência: reabre a janela da SM como se fosse aberta na fase inicial, para elaborar uma SM nova, com o
+        número previsto (só consumido ao salvar) e os dados herdados da SM aberta (doc_lib_dados_referencia_sm): equipamentos,
+        motivo, condições de segurança, manobras (sem data e hora) e observações. Período programado, reprogramações, data e
+        hora das manobras, executantes, conferências e status NÃO são copiados. Vale para qualquer status, menos Reservado."""
+        titulo = "SM-Referência"
+        if self.sm_id is None or self.status in DOC_LIB_STATUS_SEM_REFERENCIA_SM:
+            return
+        if self._tem_alteracoes_pendentes() and not messagebox.askyesno(
+                "Dados não salvos", "Existem dados não salvos nesta SM. Abrir a SM-Referência descarta essas "
+                                    "alterações.\n\nDeseja continuar?", parent=self.janela):
+            return
+        try:
+            doc = doc_lib_carregar_sm(self.sm_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler a SM salva: {erro}", parent=self.janela)
+            return
+        if doc is None:
+            messagebox.showerror("Erro", "A SM selecionada não foi encontrada.", parent=self.janela)
+            return
+        if doc["status"] in DOC_LIB_STATUS_SEM_REFERENCIA_SM:
+            messagebox.showwarning(titulo, f"A SM {doc['numero']} está com status '{doc['status']}' e não pode ser usada "
+                                           f"como referência.", parent=self.janela)
+            return
+        geometria = self.janela.geometry()
+        nova = JanelaSMAvulso(referencia=doc_lib_dados_referencia_sm(doc))
+        try:
+            nova.janela.geometry(geometria)          # a nova SM abre no mesmo lugar e no mesmo tamanho desta janela
+        except TclError:
+            pass
+        self.janela.destroy()
+
+    def abrir_salvo(self):
+        if self._tem_alteracoes_pendentes() and not messagebox.askyesno(
+                "Dados não salvos", "Existem dados não salvos nesta SM. Abrir outro documento descarta essas "
+                                    "alterações.\n\nDeseja continuar?", parent=self.janela):
+            return
+        try:
+            escolha = doc_lib_escolher_sm(self.janela)
+            doc = doc_lib_carregar_sm(escolha[0]) if escolha else None
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler as SMs salvas: {erro}", parent=self.janela)
+            return
+        if escolha is None:
+            return
+        if doc is None:
+            messagebox.showerror("Erro", "A SM selecionada não foi encontrada.", parent=self.janela)
+            return
+        self._carregar_documento(doc)
+
+    def voltar(self):
+        if self._tem_alteracoes_pendentes() and not messagebox.askyesno(
+                "Dados não salvos", "Existem dados não salvos nesta SM.\n\nDeseja sair mesmo assim?",
+                parent=self.janela):
+            return
+        self.janela.destroy()
+
+
 # ---------------------------------------------------
 # JANELAS DO MENU Doc_Lib. (CLICK_25)
 # ---------------------------------------------------
@@ -22397,7 +25336,19 @@ def cmd_click25_mo():
 
 
 def cmd_click25_sm_avulso():
-    doc_lib_pagina_em_construcao("SM_Avulso")
+    """Doc_Lib. > SM_Avulso: cadastro, edição, salvamento e geração da SM Avulso (Sequência de Manobras)."""
+    if not current_user:
+        messagebox.showwarning("Atenção", "Nenhum usuário está logado. Faça login primeiro.")
+        return
+    if not obter_nome_usuario_logado():
+        messagebox.showwarning("Atenção", "Não foi possível identificar o usuário logado.")
+        return
+    try:
+        garantir_banco_doc_lib()
+    except sqlite3.Error as erro:
+        messagebox.showerror("Erro", f"Não foi possível preparar o banco de dados do Doc_Lib.: {erro}")
+        return
+    JanelaSMAvulso()
 
 # =======cascate PRIMEIRA PARTE termina aqui
 
