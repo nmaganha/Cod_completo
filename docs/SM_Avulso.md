@@ -33,13 +33,14 @@ Alterações em código **compartilhado** (todas aditivas; o comportamento de AT
 | (nova) -> Em análise | primeiro Salvar (consome o número) |
 | Reservado -> Em análise | preencher e salvar a SM reservada (mantém o número) |
 | Em análise -> Aguarda Conferência | botão **Gerar SM Avulso** (documento emitido; dados gerais protegidos) |
-| Aguarda -> Aprovado | salvar ao menos **uma conferência manual E uma pelo sistema** válidas |
-| Aprovado -> Em Execução | salvar os Executantes da Liberação, com **todas** as manobras de liberação datadas |
+| Aguarda -> Aprovado | salvar ao menos **uma Conferência Manutenção E uma Conferência Operação** válidas |
+| Aprovado -> Em Execução | salvar os Executantes da Liberação, com **todas** as manobras de liberação datadas (a partir daí os itens 6 e 7 ficam bloqueados) |
 | Em Execução -> Concluído | salvar os Executantes da Normalização, com **todas** as manobras de normalização datadas |
 
 O que cada status deixa alterar (`_DOC_LIB_GRUPOS_EDITAVEIS_SM`, vale na tela e no `doc_lib_salvar_sm`):
 Em análise = edição geral; Aguarda = reprogramações e conferências; Aprovado = reprogramações, data/hora e executantes da
-liberação; Em Execução = reprogramações, data/hora das duas tabelas e executantes; Concluído/Cancelado = nada.
+liberação (itens 6 e 7); Em Execução = reprogramações, data/hora e executantes da normalização (itens 8 e 9). Os itens 6 e 7
+**ficam inativos para qualquer lançamento depois de salvos** (a SM passa a Em Execução ao salvar os executantes); Concluído/Cancelado = nada.
 
 ## Decisões sobre pontos ambíguos do enunciado
 
@@ -48,9 +49,11 @@ liberação; Em Execução = reprogramações, data/hora das duas tabelas e exec
    de salvamento, com `BEGIN IMMEDIATE` e contador por tipo e ano em `doclib_numeracao`. O botão **SM-Reservado** grava números
    com status Reservado. Reservar ao abrir a janela queimaria um número a cada janela fechada sem salvar.
 3. **"Em Análise"** usa a grafia do projeto (`Em análise`), para ter a mesma cor e o mesmo filtro dos outros documentos.
-4. **Aprovação**: "só a manual não aprova, só a do sistema não aprova" (13.1); "impedir que conferências pelo sistema aprovem a SM"
-   (item 18) foi lido como "sozinhas". A modalidade é uma coluna gravada com `CHECK`, não a aparência dos campos. A conferência
-   pelo sistema grava o nome completo e o login do usuário autenticado no `doc_lib_salvar_sm`, mesmo que os dados recebidos tragam outros.
+4. **Aprovação**: só a Conferência Manutenção não aprova, só a Conferência Operação não aprova (13.1); "impedir que conferências pelo
+   sistema aprovem a SM" (item 18) foi lido como "sozinhas". Os botões e as modalidades do item 12 se chamam **Manutenção** (antes
+   "Manual") e **Operação** (antes "Pelo Sistema"). No banco a coluna continua guardando `manual` e `sistema` (com `CHECK`), e a tela e o
+   PDF mostram os nomes novos (`DOC_LIB_MODALIDADES_SM`). A Conferência Operação grava o nome completo e o login do usuário
+   autenticado no `doc_lib_salvar_sm`, mesmo que os dados recebidos tragam outros.
    Não se exige que o conferente seja outra pessoa que o elaborador (regra não pedida; fica como sugestão).
 5. **Executantes antes da aprovação** (ponto de atenção 13.2): não são aceitos. Os da Liberação só com a SM Aprovada para Execução e
    os da Normalização só Em Execução; assim a SM nunca pula de estado e não conclui com a execução pela metade.
@@ -59,15 +62,32 @@ liberação; Em Execução = reprogramações, data/hora das duas tabelas e exec
 7. **Reprogramações** são o único grupo de período editável depois de gerado o documento (até Concluído/Cancelado): prazo pode mudar
    até o fim. A programação original fica protegida. Cada reprogramação só é habilitada na ordem 1, 2, 3; a habilitação é gravada.
 8. **Data e hora das manobras**: podem ser **corrigidas, não apagadas**; cada alteração vai para `doclib_sm_historico` (usuário e
-   momento). Devem seguir a ordem das linhas e a normalização não pode ser anterior à última liberação.
-9. **Tempo de Retorno à Operação** é uma duração `hh:mm` (horas 00-99, minutos 00-59), não um horário do dia.
+   momento). Devem seguir a ordem das linhas e a normalização não pode ser anterior à última liberação. Os itens 6 e 7 só aceitam
+   lançamento com a SM em Aprovado para Execução; ao salvar os executantes da liberação a SM vira Em Execução e eles ficam
+   desabilitados na tela e recusados no banco. A correção de um horário já lançado na liberação, portanto, não é mais possível
+   pelo sistema depois disso. O item 8 (normalização) continua corrigível até a SM ser Concluída.
+9. **3.6 Tempo Retorno à Operação**, como no AI: duas opções, **Indisponível** ou **Tempo de Retorno** em `hh:mm`. O campo do tempo só
+   é digitável com a opção do tempo escolhida (clicar nele a escolhe) e é limpo e travado com Indisponível. O tempo vai de 00:00
+   a 23:59 e é normalizado ao sair do campo (`2:30`, `0230` e `2h30` viram `02:30`). Isto **substitui** a decisão da primeira
+   entrega (duração com horas até 99): a regra agora é a mesma do AI. No banco e no PDF fica o texto `Indisponível` ou o `HH:MM`.
 10. **Equipamento(s) a impedir**: a 1ª linha é obrigatória; a 2ª e a 3ª são opcionais, mas só por inteiro.
+    - **3.1 Local, 3.2 Instalação e 3.3 Equipamento**: texto livre sempre em **caixa alta** (convertido ao digitar, ao salvar, ao
+      carregar e ao imprimir; espaços repetidos são reduzidos).
+    - **3.4 Caracterização**: lista de seleção com as **44 opções** informadas (`DOC_LIB_CARACTERIZACOES_SM`): 2 sem desligamento,
+      21 "Com desligamento ..." e 21 "Com risco desligamento ...". Escolheu-se uma lista única, e não o seletor combinado,
+      porque a relação já traz todas as combinações. A lista é somente de escolha (não aceita texto livre) e o banco recusa texto fora dela.
+    - **3.5 Local da Execução dos Serviços**: lista de seleção com as **30 opções** informadas (`DOC_LIB_LOCAIS_EXECUCAO_SM`), também sem texto livre.
+    - Os textos das listas foram mantidos **exatamente** como recebidos, inclusive "Com risco desligamento ..." sem "do/da" no início e a
+      ausência de "UG-3 e 4" nos grupos de duas unidades. Se forem ajustados, basta editar as duas constantes.
+    - SM antiga com texto livre em 3.4/3.5 (anterior a esta alteração) abre normalmente para consulta, mas exige escolher a opção
+      da lista ao editar uma SM Em análise.
 11. **Condições de segurança**: os cinco campos nascem em branco e são obrigatórios (escrever "Nenhuma" se não houver). O `CHECK` do
     banco recusa qualquer SM (fora Reservado e Cancelado) com uma delas vazia.
 12. **Motivo**: no máximo 6 linhas **medidas como no PDF** (cerca de 600 caracteres); Condições (3 linhas) e Observações (6) têm só
     capacidade visual com rolagem, e o PDF imprime tudo, quebrando de página se preciso.
-13. **Manobras**: número arábico 1-99, Local obrigatório de até 6 caracteres, Ação obrigatória, pelo menos uma linha em cada
-    tabela; linhas totalmente vazias são descartadas ao salvar. A letra é calculada pela ordem (1A, 1B, 2A; passa de Z para AA..AD).
+13. **Manobras**: número arábico 1-99, Local obrigatório de até 6 caracteres **em caixa alta** (itens 6 e 8), Ação obrigatória, pelo
+    menos uma linha em cada tabela; linhas totalmente vazias são descartadas ao salvar. A letra é calculada pela ordem (1A, 1B, 2A;
+    passa de Z para AA..AD).
 14. **Inverter Manobras**: só inverte a ação em que o **único** verbo conhecido é a **primeira palavra**, sem outro verbo no
     infinitivo e sem negação, condição, verificação ou estado já descrito. Pares: abrir/fechar, bloquear/desbloquear, ligar/desligar,
     energizar/desenergizar, extrair/inserir, conectar/desconectar, habilitar/desabilitar, ativar/desativar, aterrar/desaterrar,
@@ -76,7 +96,10 @@ liberação; Em Execução = reprogramações, data/hora das duas tabelas e exec
 15. **Sem Encaminhar por e-mail**: a SM não tem destinatário externo nem a coluna "Enviado e-mail".
 16. **Permissões**: o Doc_Lib não distingue perfis (só exige usuário autenticado). Vale a mesma regra, e toda operação grava o usuário
     e o momento (`criado_*`, `atualizado_*`, `emitido_*`, `cancelada_*`, histórico).
-17. **PDF**: fiel ao formulário (12 itens, número no alto à direita, rodapé com página e número). O aviso vermelho
+17. **Frase solta no fim do pedido de alteração**: o texto "Tempo de Retorno à operação: ao invés de texto livre, colocar uma lista para
+    selecionar o local de execução dos serviços" não trouxe lista e repete o pedido do 3.5. Foi lido como sobra de colagem; o 3.6 seguiu a
+    instrução específica (igual ao AI). Se a intenção era outra, informar.
+18. **PDF**: fiel ao formulário (12 itens, número no alto à direita, rodapé com página e número). O aviso vermelho
     "Aguardando a Conferência do documento" fica no cabeçalho enquanto a SM aguarda; o primeiro PDF gerado já o traz.
 
 ## Banco de dados
@@ -103,10 +126,10 @@ xvfb-run -a python -m pytest tests  # Linux sem tela (o conftest também inicia 
 
 | Arquivo | O que cobre |
 |---|---|
-| `test_sm_avulso_dados.py` | numeração, reserva, reinício anual, criação simultânea (threads), programação/reprogramações, campos obrigatórios, manobras, inversão, status, conferência, cancelamento, triggers, SM-Referência, listagem |
+| `test_sm_avulso_dados.py` | numeração, reserva, reinício anual, criação simultânea (threads), programação/reprogramações, campos obrigatórios, listas 3.4/3.5, caixa alta, Indisponível/hh:mm, manobras, bloqueio dos itens 6 e 7, inversão, status, conferência, cancelamento, triggers, SM-Referência, listagem |
 | `test_sm_avulso_concorrencia.py` | 4 processos separados salvando e reservando ao mesmo tempo no mesmo banco |
-| `test_sm_avulso_interface.py` | janela real (Tk): número no alto à direita, padrões, reprogramações em ordem, tabelas de manobras, validações, fluxo completo até Concluído, inversão, referência, reserva, GRID, menu |
-| `test_sm_avulso_pdf.py` | conteúdo, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
+| `test_sm_avulso_interface.py` | janela real (Tk): número no alto à direita, padrões, listas de seleção, opção Indisponível/hh:mm, caixa alta ao digitar, reprogramações em ordem, tabelas de manobras, bloqueio dos itens 6 e 7, rótulos Manutenção/Operação, validações, fluxo completo até Concluído, inversão, referência, reserva, GRID, menu |
+| `test_sm_avulso_pdf.py` | conteúdo, caixa alta, Indisponível, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
 | `test_regressao_doc_lib.py` | ATEIE, AI e MO (salvar, gerar, De acordo, reserva, MO-Referência, janelas, menu, GRID) e numerações independentes |
 
 ## Limites desta entrega
