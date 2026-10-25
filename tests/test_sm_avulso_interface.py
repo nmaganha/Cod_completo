@@ -338,6 +338,29 @@ def _todos_os_widgets(raiz):
         yield from _todos_os_widgets(filho)
 
 
+class TestAntecedenciaDaLiberacaoPelaJanela:
+    def test_manobra_com_mais_de_3_horas_de_antecedencia_e_recusada_e_marcada(self, app, banco, janelas, fluxo, mensagens):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))                         # programação: 25/10/2026 08:00
+        for indice, hora in enumerate(("04:59", "05:00", "05:10")):
+            definir(app, janela.tab_lib.linhas[indice]["data"], "25/10/2026")
+            definir(app, janela.tab_lib.linhas[indice]["hora"], hora)
+        janela.salvar()
+        texto = mensagens.avisos[-1][1]
+        assert "linha 1 (sequência 1A)" in texto and "3 horas do início programado (25/10/2026 08:00)" in texto
+        assert "linha 2" not in texto and "linha 3" not in texto
+        assert str(janela.tab_lib.linhas[0]["hora"].cget("highlightbackground")) == app.SGA_VERMELHO
+        assert str(janela.tab_lib.linhas[1]["hora"].cget("highlightbackground")) != app.SGA_VERMELHO
+        definir(app, janela.tab_lib.linhas[0]["hora"], "05:00")                             # no limite: aceita
+        janela.salvar()
+        assert fluxo.doc(janela.sm_id)["liberacao"][0]["hora"] == "05:00"
+
+    def test_dica_do_item_6_informa_a_antecedencia(self, app, banco, janelas):
+        janela = janelas()
+        textos = [w.cget("text") for w in _todos_os_widgets(janela.janela) if w.winfo_class() == "Label"]
+        assert any("mais de 3 horas de antecedência do início programado" in texto for texto in textos)
+
+
 class TestRotulosDaConferencia:
     def test_botoes_e_modalidades_manutencao_e_operacao(self, app, banco, janelas, fluxo):
         janela = janelas()

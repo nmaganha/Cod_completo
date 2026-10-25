@@ -533,6 +533,70 @@ class TestManobras:
         with pytest.raises(app.DocLibValidacaoSM, match=r"linha 7 \(sequência 4A\).*sequência 3C \(linha 6\)"):
             fluxo.alterar(sm_id, liberacao=[dict(m, data="25/10/2026", hora=h) for m, h in zip(base, trocada)])
 
+    # ---- antecedência máxima da liberação: 3 horas antes do início programado --------------------------------------------
+    @staticmethod
+    def _liberacao_em(fluxo, sm_id, *momentos):
+        """Liberação gravada com os (data, hora) informados, na ordem das linhas (as que sobram ficam sem horário)."""
+        base = fluxo.doc(sm_id)["liberacao"]
+        return [dict(m, data=data, hora=hora) for m, (data, hora) in zip(base, momentos)] + base[len(momentos):]
+
+    def test_tres_horas_antes_do_inicio_programado_e_aceito_e_um_minuto_antes_nao(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)                                                      # programação: 25/10/2026 08:00
+        fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, ("25/10/2026", "05:00")))
+        assert fluxo.doc(sm_id)["liberacao"][0]["hora"] == "05:00"
+        with pytest.raises(app.DocLibValidacaoSM) as erro:
+            fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, ("25/10/2026", "04:59")))
+        texto = str(erro.value)
+        assert "linha 1 (sequência 1A)" in texto and "3 horas do início programado (25/10/2026 08:00)" in texto
+        assert "primeiro horário permitido é 25/10/2026 05:00" in texto
+        assert fluxo.doc(sm_id)["liberacao"][0]["hora"] == "05:00"                       # nada foi gravado
+
+    def test_exemplo_do_enunciado_10_10_2026_14h(self, app, fluxo):
+        sm_id = fluxo.salvar(p0_data_inicio="10/10/2026", p0_hora_inicio="14:00", p0_data_termino="10/10/2026", p0_hora_termino="18:00")
+        fluxo.gerar(sm_id)
+        fluxo.aprovar(sm_id)
+        for momento, aceito in ((("10/10/2026", "11:00"), True), (("10/10/2026", "10:59"), False), (("09/10/2026", "23:00"), False)):
+            if aceito:
+                fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, momento))
+            else:
+                with pytest.raises(app.DocLibValidacaoSM, match="3 horas do início programado"):
+                    fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, momento))
+
+    def test_antecedencia_atravessa_a_meia_noite(self, app, fluxo):
+        sm_id = fluxo.salvar(p0_data_inicio="26/10/2026", p0_hora_inicio="01:00", p0_data_termino="26/10/2026", p0_hora_termino="06:00")
+        fluxo.gerar(sm_id)
+        fluxo.aprovar(sm_id)
+        fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, ("25/10/2026", "22:00")))
+        with pytest.raises(app.DocLibValidacaoSM, match="3 horas do início programado"):
+            fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, ("25/10/2026", "21:59")))
+
+    def test_vale_o_inicio_do_periodo_em_vigor_depois_de_uma_reprogramacao(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        reprogramada = dict(p1_data_inicio="26/10/2026", p1_hora_inicio="14:00", p1_data_termino="26/10/2026",
+                            p1_hora_termino="18:00", reprogramacoes=1)
+        with pytest.raises(app.DocLibValidacaoSM, match=r"início programado \(26/10/2026 14:00\)"):
+            fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, ("25/10/2026", "08:00")), **reprogramada)
+        fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, ("26/10/2026", "11:00")), **reprogramada)
+        assert fluxo.doc(sm_id)["liberacao"][0]["data"] == "26/10/2026"
+
+    def test_reprogramar_depois_de_lancar_a_liberacao_exige_corrigir_as_manobras_na_mesma_gravacao(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, ("25/10/2026", "08:00")))
+        reprogramada = dict(p1_data_inicio="27/10/2026", p1_hora_inicio="08:00", p1_data_termino="27/10/2026",
+                            p1_hora_termino="17:00", reprogramacoes=1)
+        with pytest.raises(app.DocLibValidacaoSM, match="linha 1"):
+            fluxo.alterar(sm_id, **reprogramada)                                            # manobra de 25/10 ficou longe demais
+        fluxo.alterar(sm_id, liberacao=self._liberacao_em(fluxo, sm_id, ("27/10/2026", "07:30")), **reprogramada)
+        assert fluxo.doc(sm_id)["p1_data_inicio"] == "27/10/2026"
+
+    def test_regra_nao_vale_para_a_normalizacao_nem_depois_de_registrada_a_liberacao(self, app, fluxo):
+        sm_id = fluxo.ate(EM_EXECUCAO)                                                   # liberação 25/10 08:00 a 08:20
+        fluxo.alterar(sm_id, p1_data_inicio="30/10/2026", p1_hora_inicio="08:00", p1_data_termino="30/10/2026",
+                      p1_hora_termino="17:00", reprogramacoes=1)                          # a liberação já registrada não é conferida
+        normalizacao = [dict(m, data="25/10/2026", hora=f"09:{indice * 10:02d}") for indice, m in enumerate(fluxo.doc(sm_id)["normalizacao"])]
+        fluxo.alterar(sm_id, normalizacao=normalizacao)                                   # normalização sem limite de antecedência
+        assert fluxo.doc(sm_id)["normalizacao"][0]["hora"] == "09:00"
+
     def test_correcao_de_horario_antes_dos_executantes_e_apagar_nao(self, app, fluxo):
         sm_id = fluxo.ate(APROVADO)
         base = fluxo.doc(sm_id)["liberacao"]

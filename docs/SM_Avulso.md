@@ -16,6 +16,8 @@ Segue os padrões da MO (numeração, reserva, status, GRID, referência, PDF) e
 | SM-Referência | `doc_lib_dados_referencia_sm` e o botão em `JanelaSMAvulso.referencia` |
 | PDF | `PDFSM`, `doc_lib_gerar_pdf_sm`, `doc_lib_registrar_e_arquivar_sm` |
 | Ordem dos horários das manobras | `doc_lib_conflitos_horarios_sm` (chamada por `doc_lib_validar_sm`) |
+| Antecedência da liberação (3 h) | `DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM`, `doc_lib_inicio_vigente_sm` (usadas por `doc_lib_validar_sm`) |
+| Prorrogar | `doc_lib_prefixo_vigente_sm`, `doc_lib_validar_prorrogacao_sm`, `doc_lib_dados_prorrogacao_sm`, `doc_lib_prorrogar_sm`, `DialogoProrrogarSM`, `JanelaSMAvulso.prorrogar` / `_aplicar_periodos` / `_atualizar_prorrogar` |
 | Encaminhar SM por e-mail | `doc_lib_listar_contatos_sm`, `doc_lib_incluir_contato_sm`, `doc_lib_salvar_padroes_contatos_sm`, `doc_lib_enderecos_envio_sm`, `doc_lib_validar_envio_sm`, `doc_lib_pdf_para_envio_sm`, `doc_lib_registrar_envio_sm`, `doc_lib_definir_email_enviado_sm`, `DialogoEncaminharSM`, `JanelaSMAvulso.encaminhar` |
 | Telas | `JanelaSMAvulso`, `LinhasManobrasSM`, `LinhasConferenciaSM`, `JanelaListaSM` (GRID SM) |
 
@@ -44,7 +46,7 @@ O e-mail da SM sai no status **Aguarda Conferência** (ver "Encaminhar SM por e-
 
 O que cada status deixa alterar (`_DOC_LIB_GRUPOS_EDITAVEIS_SM`, vale na tela e no `doc_lib_salvar_sm`):
 Em análise = edição geral; Aguarda = reprogramações e conferências; Aprovado = reprogramações, data/hora e executantes da
-liberação (itens 6 e 7); Em Execução = reprogramações, data/hora e executantes da normalização (itens 8 e 9). Os itens 6 e 7
+liberação (itens 6 e 7); Em Execução = nova reprogramação, **Prorrogar**, data/hora e executantes da normalização (itens 8 e 9). Os itens 6 e 7
 **ficam inativos para qualquer lançamento depois de salvos** (a SM passa a Em Execução ao salvar os executantes); Concluído/Cancelado = nada.
 
 ## Decisões sobre pontos ambíguos do enunciado
@@ -66,6 +68,8 @@ liberação (itens 6 e 7); Em Execução = reprogramações, data/hora e executa
    enunciado; em **Em Execução** a janela avisa que cancelar não normaliza o equipamento. Justificativa obrigatória; número nunca reaproveitado.
 7. **Reprogramações** são o único grupo de período editável depois de gerado o documento (até Concluído/Cancelado): prazo pode mudar
    até o fim. A programação original fica protegida. Cada reprogramação só é habilitada na ordem 1, 2, 3; a habilitação é gravada.
+   Com a SM **Em Execução**, uma reprogramação já salva também fica protegida (só o botão Prorrogar muda o término dela); preencher uma
+   reprogramação nova, ainda vazia, continua possível (ver item 19).
 8. **Data e hora das manobras**: podem ser **corrigidas, não apagadas**; cada alteração vai para `doclib_sm_historico` (usuário e
    momento). A ordem segue o **número arábico da Sequência**, e a **letra não conta** (valem as duas tabelas, Liberação e
    Normalização):
@@ -144,11 +148,44 @@ liberação (itens 6 e 7); Em Execução = reprogramações, data/hora e executa
     instrução específica (igual ao AI). Se a intenção era outra, informar.
 18. **PDF**: fiel ao formulário (12 itens, número no alto à direita, rodapé com página e número). O aviso vermelho
     "Aguardando a Conferência do documento" fica no cabeçalho enquanto a SM aguarda; o primeiro PDF gerado já o traz.
+19. **Prorrogar** (SM em andamento): botão no quadro do **período em vigor** (a última reprogramação habilitada ou, se não houver, a
+    Programação), no lugar do Habilitar: ao habilitar a Reprogramação-1, o Prorrogar sai do quadro 2.1 e passa para o 2.2, e assim por
+    diante; o Habilitar segue para o quadro seguinte. O botão aparece sempre e só fica ativo quando:
+    - a SM está **Em Execução** (liberação feita e executantes registrados; antes disso o instrumento é a Reprogramação);
+    - não há alterações pendentes na janela (salvar antes, como em Gerar e Cancelar);
+    - o período em vigor está preenchido e salvo (uma reprogramação habilitada e ainda vazia aponta o Prorrogar para o quadro dela,
+      onde ele fica desativado até ela ser preenchida e salva).
+    Ao clicar abre a janela **Prorrogar SM** com o período em vigor, o término atual, o número da prorrogação (P1, P2...) e os campos
+    de data (com calendário) e hora do **novo término**, que **substitui** o término do período e passa a ser a data e hora válidas para
+    o fim da atividade. Regras:
+    - o novo término precisa ser **posterior** ao atual (igual ou anterior é recusado; para antecipar, use uma nova Reprogramação);
+    - não há limite de prorrogações: P1, P2, P3, P4... A contagem é **por período**: a Programação prorrogada duas vezes mostra P2, e a
+      Reprogramação-1, quando entra em vigor, começa de novo em P1 (cada término impresso leva o seu P);
+    - **impresso**: ao lado do término prorrogado aparece o termo (P1, P2...) em fonte menor (6,5 pt, contra 9 pt da data e da hora);
+      na tela o mesmo termo aparece ao lado da hora do término. Período sem prorrogação não mostra nada;
+    - cada prorrogação fica em `doclib_sm_prorrogacoes` (período, número, término anterior, novo término, usuário e momento; o banco
+      não deixa alterar nem excluir) e no histórico da SM, a revisão do documento avança e o status não muda. Gere o documento de
+      novo para o PDF mostrar a prorrogação;
+    - com a SM Em Execução o período **já salvo** não é mais editado direto (nem a Programação, que já era protegida, nem uma
+      reprogramação salva): o término só muda pelo Prorrogar. Antes da execução (Aguarda, Aprovado) as reprogramações continuam
+      editáveis como antes. O GRID SM mostra o término vigente.
+20. **Antecedência das manobras de liberação**: a data e hora de cada manobra de liberação não pode ser **anterior a 3 horas do início
+    programado**. O "programado" é o início do período em vigor (se houve reprogramação preenchida, vale o início dela). Exemplo: programado
+    para 10/10/2026 14:00, a primeira manobra pode ser lançada a partir de 10/10/2026 11:00 (exatamente 3 horas antes é aceito; 10:59
+    é recusado). A regra atravessa a meia-noite. Detalhes:
+    - vale enquanto a liberação pode ser lançada (SM **Aprovada para Execução**). Depois de registrada a liberação ela fica bloqueada e
+      não é conferida de novo: uma reprogramação posterior não invalida manobras já executadas;
+    - se uma reprogramação for salva com a liberação já lançada em Aprovado e as manobras ficarem a mais de 3 horas do novo início, a
+      gravação é recusada até as datas serem corrigidas **na mesma gravação**;
+    - não há limite do outro lado (manobra depois do início) nem regra equivalente para a normalização;
+    - a mensagem aponta a linha ("linha 1 (sequência 1A)"), o início programado e o primeiro horário permitido, e as caixas de data e
+      hora ficam em vermelho. A dica do item 6 informa a regra.
 
 ## Banco de dados
 
 Tabelas novas, criadas por `garantir_banco_doc_lib` sem tocar nos dados existentes: `doclib_sm`, `doclib_sm_equipamentos`,
-`doclib_sm_manobras`, `doclib_sm_conferencias`, `doclib_sm_historico`, `doclib_sm_transicoes`, `doclib_sm_pdfs`.
+`doclib_sm_manobras`, `doclib_sm_conferencias`, `doclib_sm_historico`, `doclib_sm_transicoes`, `doclib_sm_pdfs`,
+`doclib_sm_prorrogacoes`, `doclib_sm_contatos` e `doclib_sm_emails`.
 
 Proteções no banco (valem mesmo para quem alterar o `dados_turno.db` direto): `UNIQUE(numero)` e `UNIQUE(ano, sequencia)`;
 `CHECK` do status, das condições, de 1 a 30 manobras, do Local (6 caracteres) e da modalidade; triggers que recusam transição de
@@ -173,6 +210,7 @@ xvfb-run -a python -m pytest tests  # Linux sem tela (o conftest também inicia 
 | `test_sm_avulso_concorrencia.py` | 4 processos separados salvando e reservando ao mesmo tempo no mesmo banco |
 | `test_sm_avulso_interface.py` | janela real (Tk): número no alto à direita, padrões, listas de seleção, opção Indisponível/hh:mm, caixa alta ao digitar, reprogramações em ordem, tabelas de manobras, bloqueio dos itens 6 e 7, rótulos Manutenção/Operação, validações, fluxo completo até Concluído, inversão, referência, reserva, GRID, menu |
 | `test_sm_avulso_email.py` | lista de contatos (incluir, repetido, inválido, ordem, última escolha), regras de status do envio, PDF para envio (arquivo, aviso, reaproveitamento, revisão), registro dos envios e imutabilidade, banco antigo, marcação manual no GRID, janela de envio (Para/Cc, novo e-mail, excluir, confirmar), botão da janela da SM, fluxo de envio com falha, reenvio e SM alterada durante o envio |
+| `test_sm_avulso_prorrogacao.py` | Prorrogar: regras no banco (só Em Execução, novo término posterior, P1 a P5, conflito de revisão, imutabilidade), período em vigor e reprogramação, trava do período salvo, botão no quadro certo e alternando com o Habilitar, janela do Prorrogar, P no PDF (fonte menor, ao lado do término, margens) |
 | `test_sm_avulso_pdf.py` | conteúdo, caixa alta, Indisponível, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
 | `test_regressao_doc_lib.py` | ATEIE, AI e MO (salvar, gerar, De acordo, reserva, MO-Referência, janelas, menu, GRID) e numerações independentes |
 
