@@ -15,18 +15,23 @@ Segue os padrões da MO (numeração, reserva, status, GRID, referência, PDF) e
 | Sequência 1A/1B/2A e inversão | `doc_lib_identificar_sequencias_sm`, `doc_lib_inverter_acao_sm`, `doc_lib_inverter_manobras_sm` |
 | SM-Referência | `doc_lib_dados_referencia_sm` e o botão em `JanelaSMAvulso.referencia` |
 | PDF | `PDFSM`, `doc_lib_gerar_pdf_sm`, `doc_lib_registrar_e_arquivar_sm` |
+| Ordem dos horários das manobras | `doc_lib_conflitos_horarios_sm` (chamada por `doc_lib_validar_sm`) |
+| Encaminhar SM por e-mail | `doc_lib_listar_contatos_sm`, `doc_lib_incluir_contato_sm`, `doc_lib_salvar_padroes_contatos_sm`, `doc_lib_enderecos_envio_sm`, `doc_lib_validar_envio_sm`, `doc_lib_pdf_para_envio_sm`, `doc_lib_registrar_envio_sm`, `doc_lib_definir_email_enviado_sm`, `DialogoEncaminharSM`, `JanelaSMAvulso.encaminhar` |
 | Telas | `JanelaSMAvulso`, `LinhasManobrasSM`, `LinhasConferenciaSM`, `JanelaListaSM` (GRID SM) |
 
 Alterações em código **compartilhado** (todas aditivas; o comportamento de ATEIE, AI e MO não muda):
 1. `_doc_lib_ultimo_numero`: ramo `tipo == "SM"` (numeração própria, como a MO);
 2. `garantir_banco_doc_lib`: chama `_garantir_tabelas_doc_lib_sm`;
-3. `JanelaListaAteie`: atributo `PERMITE_EMAIL = True` (a SM o desliga, pois não tem "Marcar e-mail enviado");
-4. `cmd_click25_sm_avulso` deixou de ser "Página em Construção".
+3. `cmd_click25_sm_avulso` deixou de ser "Página em Construção".
+
+O envio usa, sem alteração, `doc_lib_enviar_email`, `EMAIL_ATEIE_REMETENTES`, `config_email_ateie.json` e
+`doc_lib_copiar_para_downloads` (os mesmos do ATEIE, do AI e da MO).
 
 ## Status e transições
 
 `Reservado` -> `Em análise` -> `Aguarda Conferência` -> `Aprovado para Execução` -> `Em Execução` -> `Concluído`.
 `Cancelado` vale de qualquer status, **menos Concluído**. Concluído e Cancelado não têm saída.
+O e-mail da SM sai no status **Aguarda Conferência** (ver "Encaminhar SM por e-mail" abaixo); o envio não muda o status.
 
 | Passagem | O que a provoca |
 |---|---|
@@ -62,7 +67,17 @@ liberação (itens 6 e 7); Em Execução = reprogramações, data/hora e executa
 7. **Reprogramações** são o único grupo de período editável depois de gerado o documento (até Concluído/Cancelado): prazo pode mudar
    até o fim. A programação original fica protegida. Cada reprogramação só é habilitada na ordem 1, 2, 3; a habilitação é gravada.
 8. **Data e hora das manobras**: podem ser **corrigidas, não apagadas**; cada alteração vai para `doclib_sm_historico` (usuário e
-   momento). Devem seguir a ordem das linhas e a normalização não pode ser anterior à última liberação. Os itens 6 e 7 só aceitam
+   momento). A ordem segue o **número arábico da Sequência**, e a **letra não conta** (valem as duas tabelas, Liberação e
+   Normalização):
+   - número arábico maior não pode ter data e hora anteriores às de número menor: 2A não pode ser anterior a 1A, nem a 1B ou 1C
+     (entende-se que 1A, 1B e 1C formam a etapa 1, que precisa terminar antes de a etapa 2 começar); o mesmo instante é aceito;
+     a regra vale também quando falta um número no meio (3A não pode ser anterior a 1A, mesmo sem a etapa 2) e independe da
+     posição das linhas na tabela;
+   - com o mesmo número arábico o lançamento é livre: 2C pode ser anterior a 2A;
+   - linha sem número válido ou sem data e hora não entra na comparação;
+   - a mensagem aponta a linha em conflito (por exemplo "linha 3 (sequência 2A)") e a sequência de referência (a mais tardia entre as
+     de número menor), e as caixas de data e hora da linha ficam em vermelho.
+   A normalização continua sem poder ser anterior à última manobra de liberação. Os itens 6 e 7 só aceitam
    lançamento com a SM em Aprovado para Execução; ao salvar os executantes da liberação a SM vira Em Execução e eles ficam
    desabilitados na tela e recusados no banco. A correção de um horário já lançado na liberação, portanto, não é mais possível
    pelo sistema depois disso. O item 8 (normalização) continua corrigível até a SM ser Concluída.
@@ -93,7 +108,35 @@ liberação (itens 6 e 7); Em Execução = reprogramações, data/hora e executa
     energizar/desenergizar, extrair/inserir, conectar/desconectar, habilitar/desabilitar, ativar/desativar, aterrar/desaterrar,
     travar/destravar. Nas demais, o original é mantido e a linha fica marcada (alerta laranja); **Gerar SM Avulso** só é aceito
     depois de conferir ou editar cada uma. Pede confirmação antes de substituir uma normalização já preenchida.
-15. **Sem Encaminhar por e-mail**: a SM não tem destinatário externo nem a coluna "Enviado e-mail".
+15. **Encaminhar SM por e-mail** (a primeira entrega não tinha e-mail; agora o envio é para conferência, com destinatários internos):
+    - **Quando**: botão **Encaminhar SM** no rodapé da janela da SM, ativo só com a SM salva, sem alterações pendentes, emitida e no
+      status **Aguarda Conferência** (`doc_lib_validar_envio_sm` recusa qualquer outro status). O envio não muda o status nem a
+      revisão do documento.
+    - **Remetente, método de envio e cópia na pasta Downloads**: os mesmos do ATEIE, do AI e da MO (remetentes
+      `EMAIL_ATEIE_REMETENTES`, SMTP ou Outlook pelo `config_email_ateie.json`). O remetente escolhido por último vem sugerido.
+    - **Destinatários**: não são por empresa. Há uma **lista única de e-mails da SM** (tabela `doclib_sm_contatos`, com nome opcional) e,
+      para cada contato, as caixas **Para** e **Cc** (um contato não fica nos dois). Para o e-mail que não está na lista há o campo
+      **Novo e-mail** (e nome opcional), com a opção Para ou Cc e o botão **Adicionar à lista**: o e-mail é gravado na lista (passa a
+      aparecer nos próximos envios) e já vem marcado. Se o usuário digitar um e-mail e clicar direto em **Confirmar envio**, ele é
+      incluído na lista e usado. E-mail repetido (sem diferenciar maiúsculas) não duplica; e-mail inválido é recusado. Cada contato tem
+      o botão **Excluir** (com confirmação; os envios já registrados não mudam). A **última escolha de Para e Cc** fica gravada e vem
+      marcada no envio seguinte. A lista inicial, criada junto com a tabela, tem só `nmaganha@alupar.com.br` e `jbarros@alupar.com.br`
+      (endereços já citados no projeto): `DOC_LIB_CONTATOS_INICIAIS_SM`; o restante é cadastrado na própria janela de envio.
+    - **Anexo**: o PDF da SM como está, **com** o aviso vermelho "Aguardando a Conferência do documento" (quem recebe é quem vai
+      conferir). É arquivado em `SM/Enviados/<ano>` (tipo `envio` em `doclib_sm_pdfs`) e reaproveitado enquanto a revisão não muda; uma
+      reprogramação ou conferência nova gera outro PDF.
+    - **Assunto e texto**: constantes `EMAIL_SM_ASSUNTO` e `EMAIL_SM_TEXTO`. O assunto segue o padrão de teste dos demais documentos
+      ("TESTE DE ENVIO DE E-MAIL - SM - Para Conferência"); troque a constante quando o texto definitivo for escolhido.
+    - **Reenvio**: diferente de ATEIE, AI e MO, uma SM já encaminhada **pode** ser encaminhada de novo (por exemplo, esqueceram alguém ou
+      houve reprogramação). Antes, uma pergunta mostra os envios anteriores (data, usuário, Para e Cc). Todos os envios ficam em
+      `doclib_sm_emails`, que o banco não deixa alterar nem excluir.
+    - **GRID SM**: coluna **Enviado e-mail** ("Não" ou "Sim, em dd/mm/aaaa" do envio mais recente) e botão **Marcar e-mail enviado**,
+      para o caso de o envio automático falhar e o e-mail ser mandado à mão. Nesta marcação manual vale a regra dos demais documentos
+      (SM com "Sim" não é marcada de novo; "Voltar para Não" corrige) e só vale para SM em Aguarda Conferência, Aprovado para Execução ou
+      Em Execução. SM Concluída ou Cancelada não muda mais.
+    - **Falhas**: se o e-mail não sair, a mensagem mostra o motivo e o arquivo para envio manual e nada é registrado; se o e-mail sair
+      mas o registro no banco falhar, o aviso manda marcar no GRID. Se a SM mudar enquanto a janela de envio está aberta, o e-mail não é
+      enviado.
 16. **Permissões**: o Doc_Lib não distingue perfis (só exige usuário autenticado). Vale a mesma regra, e toda operação grava o usuário
     e o momento (`criado_*`, `atualizado_*`, `emitido_*`, `cancelada_*`, histórico).
 17. **Frase solta no fim do pedido de alteração**: o texto "Tempo de Retorno à operação: ao invés de texto livre, colocar uma lista para
@@ -129,10 +172,13 @@ xvfb-run -a python -m pytest tests  # Linux sem tela (o conftest também inicia 
 | `test_sm_avulso_dados.py` | numeração, reserva, reinício anual, criação simultânea (threads), programação/reprogramações, campos obrigatórios, listas 3.4/3.5, caixa alta, Indisponível/hh:mm, manobras, bloqueio dos itens 6 e 7, inversão, status, conferência, cancelamento, triggers, SM-Referência, listagem |
 | `test_sm_avulso_concorrencia.py` | 4 processos separados salvando e reservando ao mesmo tempo no mesmo banco |
 | `test_sm_avulso_interface.py` | janela real (Tk): número no alto à direita, padrões, listas de seleção, opção Indisponível/hh:mm, caixa alta ao digitar, reprogramações em ordem, tabelas de manobras, bloqueio dos itens 6 e 7, rótulos Manutenção/Operação, validações, fluxo completo até Concluído, inversão, referência, reserva, GRID, menu |
+| `test_sm_avulso_email.py` | lista de contatos (incluir, repetido, inválido, ordem, última escolha), regras de status do envio, PDF para envio (arquivo, aviso, reaproveitamento, revisão), registro dos envios e imutabilidade, banco antigo, marcação manual no GRID, janela de envio (Para/Cc, novo e-mail, excluir, confirmar), botão da janela da SM, fluxo de envio com falha, reenvio e SM alterada durante o envio |
 | `test_sm_avulso_pdf.py` | conteúdo, caixa alta, Indisponível, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
 | `test_regressao_doc_lib.py` | ATEIE, AI e MO (salvar, gerar, De acordo, reserva, MO-Referência, janelas, menu, GRID) e numerações independentes |
 
 ## Limites desta entrega
 
-- Testado em Linux com tela virtual; a impressão (`os.startfile`/`lp`) e o Outlook não foram exercitados.
+- Testado em Linux com tela virtual; a impressão (`os.startfile`/`lp`) e o Outlook não foram exercitados. O envio de e-mail foi
+  testado com o envio real trocado por um registro das chamadas (destinatários, Cc, assunto, anexo); a conexão SMTP ou Outlook
+  depende do `config_email_ateie.json` de cada computador, como nos demais documentos.
 - Os testes de regressão de ATEIE, AI e MO foram rodados também contra o `main.py` original (mesmo resultado).

@@ -1,4 +1,4 @@
-# Código atualizado em 25-10-26 - 0238 - Click_25: (SM_Avulso - listas, caixa alta, tempo de retorno, itens 6 e 7 bloqueados, conferência Manutenção/Operação)
+# Código atualizado em 25-10-26 - 1114 - Click_25: (SM_Avulso - ordem dos horários por número da sequência e Encaminhar SM por e-mail)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -14819,7 +14819,7 @@ class JanelaListaAteie:
     COLUNAS_COM_QUEBRA = ()              # colunas que mantêm na tela as quebras de linha digitadas (o texto continua
                                          # quebrando sozinho quando não cabe na largura da coluna)
     PERMITE_AGRUPAR = True               # a MO tem um número por documento: não há o que agrupar
-    PERMITE_EMAIL = True                 # a SM Avulso não é encaminhada por e-mail: sem o botão Marcar e-mail enviado
+    PERMITE_EMAIL = True                 # botão Marcar e-mail enviado (todos os documentos do Doc_Lib. são encaminhados)
     COLUNAS = DOC_LIB_COLUNAS_LISTA
 
     @staticmethod
@@ -22356,7 +22356,8 @@ class JanelaMO:
 #     (3 linhas x 6 colunas), 4 Motivo (até 6 linhas), 5 Condições de Segurança (5 campos obrigatórios), 6 Manobras de
 #     Liberação, 7 Executantes, 8 Manobras de Normalização, 9 Executantes, 10 Observações, 11 Elaborado por e 12 Conferência;
 #   - Manobras de Liberação e de Normalização: até 30 linhas cada; a Sequência é um número arábico digitado mais uma letra
-#     calculada (1A, 1B, 2A...); a data e a hora de cada manobra são de controle interno (só na tela, NÃO vão para o PDF);
+#     calculada (1A, 1B, 2A...); a data e a hora de cada manobra são de controle interno (só na tela, NÃO vão para o PDF) e
+#     seguem o número arábico: número maior nunca antes de número menor, e a letra não conta (2C pode ser anterior a 2A);
 #   - botão "Inverter Manobras": gera a Normalização a partir da Liberação (ordem inversa e ação com o antônimo operacional;
 #     ação sem antônimo inequívoco é mantida e marcada para conferência manual);
 #   - 12 Conferência (até 10 linhas): conferência MANUAL (profissional da Manutenção, via fonia) e conferência PELO SISTEMA
@@ -22392,6 +22393,18 @@ DOC_LIB_STATUS_DEFINITIVOS_SM = (STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO)
 # o botão SM-Referência vale para qualquer SM, menos a que ainda está Reservada (só tem o número)
 DOC_LIB_STATUS_SEM_REFERENCIA_SM = (STATUS_ATEIE_RESERVADO,)
 DOC_LIB_TEXTO_SM_RESERVADA = "SM RESERVADA"        # exibido no GRID SM, em Motivo, enquanto a SM está reservada
+# Encaminhar SM por e-mail: só com a SM emitida e no status Aguarda Conferência. O assunto segue o padrão de teste dos demais
+# documentos (ATEIE, AI e MO); troque aqui quando o texto definitivo for escolhido.
+EMAIL_SM_ASSUNTO = "TESTE DE ENVIO DE E-MAIL - SM - Para Conferência"
+EMAIL_SM_TEXTO = ("Prezados,\n\n"
+                  "Segue para conferência a SM (Sequência de Manobras) número: {numeros}.\n\n"
+                  "Atenciosamente,\n"
+                  "COG-ALUPAR")
+# a marcação manual de "Enviado e-mail" no GRID SM vale para SM emitida e ainda em andamento
+DOC_LIB_STATUS_MARCAR_EMAIL_SM = (STATUS_SM_AGUARDA_CONFERENCIA, STATUS_ATEIE_APROVADO_EXECUCAO, STATUS_ATEIE_EM_EXECUCAO)
+# Lista de e-mails da SM na primeira vez em que o banco é preparado; depois disso a lista vale a do banco, que o usuário
+# completa na janela do Encaminhar SM. (nome, e-mail)
+DOC_LIB_CONTATOS_INICIAIS_SM = [("", "nmaganha@alupar.com.br"), ("", "jbarros@alupar.com.br")]
 DOC_LIB_LIMITE_MANOBRAS_SM = 30                    # linhas de cada tabela de manobras (Liberação e Normalização)
 DOC_LIB_LIMITE_CONFERENCIAS_SM = 10                # linhas da Conferência
 DOC_LIB_LINHAS_EQUIPAMENTOS_SM = 3                 # linhas da tabela 3 Equipamento(s) a impedir
@@ -22737,6 +22750,41 @@ def _garantir_tabelas_doc_lib_sm(cursor):
                         gerado_por TEXT,
                         gerado_em TEXT,
                         revisao_final INTEGER)''')
+    # Encaminhar SM por e-mail: lista de contatos (com a última escolha de Para e de Cc), registro de cada envio e a marcação
+    # "Enviado e-mail" do GRID SM (data do envio mais recente; Sistema = Encaminhar SM, Manual = marcada no GRID)
+    contatos_existia = cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'doclib_sm_contatos'").fetchone()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_sm_contatos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        email TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                        nome TEXT NOT NULL DEFAULT '',
+                        padrao_para INTEGER NOT NULL DEFAULT 0 CHECK (padrao_para IN (0, 1)),
+                        padrao_copia INTEGER NOT NULL DEFAULT 0 CHECK (padrao_copia IN (0, 1)),
+                        incluido_por TEXT,
+                        incluido_em TEXT,
+                        CHECK (NOT (padrao_para = 1 AND padrao_copia = 1)))''')
+    if not contatos_existia:          # carga inicial só na criação: o que for excluído depois não volta
+        cursor.executemany("INSERT OR IGNORE INTO doclib_sm_contatos (email, nome, incluido_por, incluido_em) "
+                           "VALUES (?, ?, 'sistema', ?)",
+                           [(email, nome, datetime.now().strftime("%d/%m/%Y - %H:%Mh"))
+                            for nome, email in DOC_LIB_CONTATOS_INICIAIS_SM])
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_sm_emails (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
+                        numero TEXT NOT NULL,
+                        revisao INTEGER,
+                        destinatarios TEXT NOT NULL,
+                        copias TEXT,
+                        remetente TEXT,
+                        assunto TEXT,
+                        anexo TEXT,
+                        metodo TEXT,
+                        enviado_por TEXT,
+                        enviado_em TEXT)''')
+    _adicionar_coluna_se_necessario(cursor, "doclib_sm", "email_enviado_em", "TEXT")
+    _adicionar_coluna_se_necessario(cursor, "doclib_sm", "email_enviado_por", "TEXT")
+    _adicionar_coluna_se_necessario(cursor, "doclib_sm", "email_enviado_origem", "TEXT")
+    _adicionar_coluna_se_necessario(cursor, "doclib_sm_pdfs", "tipo", "TEXT")          # 'envio' = PDF anexado ao e-mail
     transicoes = {(origem, destino) for origem, destinos in DOC_LIB_TRANSICOES_SM.items() for destino in destinos}
     if set(cursor.execute("SELECT origem, destino FROM doclib_sm_transicoes").fetchall()) != transicoes:
         cursor.execute("DELETE FROM doclib_sm_transicoes")
@@ -22763,6 +22811,11 @@ def _garantir_tabelas_doc_lib_sm(cursor):
             BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser alterada'); END''',
         "trg_doclib_sm_conferencia_exclui": '''BEFORE DELETE ON doclib_sm_conferencias
             BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser excluída'); END''',
+        # o registro dos e-mails enviados é só de inclusão
+        "trg_doclib_sm_emails_altera": '''BEFORE UPDATE ON doclib_sm_emails
+            BEGIN SELECT RAISE(ABORT, 'SM: o registro de e-mail enviado não pode ser alterado'); END''',
+        "trg_doclib_sm_emails_exclui": '''BEFORE DELETE ON doclib_sm_emails
+            BEGIN SELECT RAISE(ABORT, 'SM: o registro de e-mail enviado não pode ser excluído'); END''',
         # histórico das mudanças de status, por qualquer caminho
         "trg_doclib_sm_historico_novo": '''AFTER INSERT ON doclib_sm
             BEGIN INSERT INTO doclib_sm_historico (sm_id, evento, status_anterior, status_novo, descricao, usuario, momento)
@@ -22977,6 +23030,31 @@ def _doc_lib_data_hora_manobra_sm(linha):
     return _doc_lib_data_hora(linha.get("data"), linha.get("hora"))
 
 
+def doc_lib_conflitos_horarios_sm(linhas):
+    """Ordem dos horários das manobras de uma tabela (Liberação ou Normalização). A regra vale para o número arábico da
+    Sequência, e a letra não conta:
+      - uma Sequência de número maior não pode ter data e hora anteriores às de qualquer Sequência de número menor (2A não
+        pode ser anterior a 1A, nem a 1B ou 1C; o mesmo instante é aceito);
+      - dentro do mesmo número os lançamentos são livres (2C pode ser anterior a 2A).
+    A posição das linhas na tabela não interfere. Linhas sem número válido ou sem data e hora completas não entram.
+    Devolve [(posição da linha em conflito, posição da linha que ela não poderia anteceder)], posições a partir de 1; a linha de
+    referência é a de data e hora mais tardia entre as de número menor."""
+    marcadas = []
+    for posicao, linha in enumerate(linhas, start=1):
+        numero, momento = doc_lib_numero_sequencia_sm(linha.get("numero")), _doc_lib_data_hora_manobra_sm(linha)
+        if numero is not None and momento is not None:
+            marcadas.append((numero, momento, posicao))
+    conflitos = []
+    for numero, momento, posicao in marcadas:
+        menores = [(outro_momento, outra_posicao) for outro_numero, outro_momento, outra_posicao in marcadas
+                   if outro_numero < numero]
+        if menores:
+            referencia = max(menores, key=lambda item: item[0])
+            if momento < referencia[0]:
+                conflitos.append((posicao, referencia[1]))
+    return conflitos
+
+
 def doc_lib_validar_sm(dados, atual=None):
     """Valida a SM (antes de salvar, antes de gerar o documento e dentro de doc_lib_salvar_sm). 'dados' já normalizados por
     doc_lib_normalizar_sm; 'atual' é o documento como está gravado (None na SM nova). O que se valida depende do status:
@@ -23101,16 +23179,13 @@ def doc_lib_validar_sm(dados, atual=None):
                         erro(f"{prefixo}:{posicao}:data", f"{rotulo}: data inválida (use DD/MM/AAAA).")
                     if not doc_lib_normalizar_hora(linha["hora"]):
                         erro(f"{prefixo}:{posicao}:hora", f"{rotulo}: hora inválida (use HH:MM).")
-        # a ordem dos horários acompanha a ordem das manobras (o mesmo instante é aceito)
-        anterior = None
-        for posicao, linha in enumerate(linhas, start=1):
-            momento = _doc_lib_data_hora_manobra_sm(linha)
-            if momento is None:
-                continue
-            if anterior is not None and momento < anterior[1]:
-                erro((f"{prefixo}:{posicao}:data", f"{prefixo}:{posicao}:hora"),
-                     f"{titulo}, linha {posicao}: a data e a hora não podem ser anteriores às da linha {anterior[0]}.")
-            anterior = (posicao, momento)
+        # ordem dos horários: número arábico maior nunca antes de número menor; a letra não conta (ver doc_lib_conflitos_horarios_sm)
+        identificacoes = doc_lib_identificar_sequencias_sm([linha["numero"] for linha in linhas])
+        for posicao, referencia in doc_lib_conflitos_horarios_sm(linhas):
+            erro((f"{prefixo}:{posicao}:data", f"{prefixo}:{posicao}:hora"),
+                 f"{titulo}, linha {posicao} (sequência {identificacoes[posicao - 1]}): a data e a hora não podem ser "
+                 f"anteriores às da sequência {identificacoes[referencia - 1]} (linha {referencia}), que tem número "
+                 f"arábico menor.")
     ultima_liberacao = max((m for m in map(_doc_lib_data_hora_manobra_sm, dados.get("liberacao") or []) if m), default=None)
     for posicao, linha in enumerate(dados.get("normalizacao") or [], start=1):
         momento = _doc_lib_data_hora_manobra_sm(linha)
@@ -23510,7 +23585,8 @@ def doc_lib_listar_sm():
     for linha in linhas:
         doc = dict(linha)
         registro = {"ateie_id": doc["id"], "ordem": 1, "numero": doc["numero"], "ano": doc["ano"],
-                    "sequencia": doc["sequencia"], "status": doc["status"], "email_enviado": "Não"}
+                    "sequencia": doc["sequencia"], "status": doc["status"],
+                    "email_enviado": doc_lib_texto_email_enviado(doc["email_enviado_em"])}
         if doc["status"] == STATUS_ATEIE_RESERVADO:          # só o número e a expressão SM RESERVADA; o resto em branco
             registro.update(prog_inicio="", prog_termino="", local="", equipamento="", motivo=DOC_LIB_TEXTO_SM_RESERVADA,
                             elaborado="")
@@ -24016,6 +24092,583 @@ def doc_lib_registrar_e_arquivar_sm(doc, usuario):
 
 
 # ---------------------------------------------------
+# ENCAMINHAR SM POR E-MAIL (status Aguarda Conferência)
+# ---------------------------------------------------
+# A SM é encaminhada, com o PDF anexado, quando está no status Aguarda Conferência. O envio, os remetentes (EMAIL_ATEIE_REMETENTES)
+# e o config_email_ateie.json são os do ATEIE, do AI e da MO. A diferença está nos destinatários: não são por Empresa Solicitante
+# e sim uma lista única de contatos (doclib_sm_contatos), da qual o usuário escolhe, a cada envio, quem recebe em "Para" e quem
+# recebe "Com cópia (Cc)". Um e-mail digitado que não esteja na lista passa a fazer parte dela. A última escolha vale como
+# sugestão no envio seguinte. Cada envio fica registrado em doclib_sm_emails (que não aceita alteração nem exclusão).
+def doc_lib_listar_contatos_sm():
+    """Contatos da lista de e-mails da SM: [{id, email, nome, padrao_para, padrao_copia}], em ordem alfabética do nome (ou do
+    e-mail, quando não há nome). padrao_para e padrao_copia dizem em que campo o contato foi escolhido no último envio."""
+    conexao = doc_lib_conectar()
+    conexao.row_factory = sqlite3.Row
+    try:
+        linhas = conexao.execute("SELECT id, email, nome, padrao_para, padrao_copia FROM doclib_sm_contatos "
+                                 "ORDER BY LOWER(CASE WHEN nome <> '' THEN nome ELSE email END), email").fetchall()
+    finally:
+        conexao.close()
+    return [dict(linha) for linha in linhas]
+
+
+def doc_lib_texto_contato_sm(contato):
+    """'Nome - e-mail' ou só o e-mail, como o contato aparece na lista."""
+    return f"{contato['nome']} - {contato['email']}" if contato.get("nome") else contato["email"]
+
+
+def doc_lib_incluir_contato_sm(email, nome, usuario):
+    """Inclui um e-mail na lista de contatos da SM. E-mail já existente (sem diferenciar maiúsculas) não é duplicado: devolve o
+    cadastro que já existe, e o nome informado só é aproveitado se o cadastro estava sem nome. Lança DocLibRegra se o e-mail for
+    inválido. Devolve {id, email, nome, criado}."""
+    email = str(email or "").strip().lower()
+    nome = " ".join(str(nome or "").split())
+    if not email:
+        raise DocLibRegra("Informe o e-mail.")
+    if not doc_lib_validar_email(email):
+        raise DocLibRegra(f"E-mail inválido: {email}")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        existente = cursor.execute("SELECT id, nome FROM doclib_sm_contatos WHERE email = ?", (email,)).fetchone()
+        if existente:
+            if nome and not existente[1]:
+                cursor.execute("UPDATE doclib_sm_contatos SET nome = ? WHERE id = ?", (nome, existente[0]))
+            cursor.execute("COMMIT")
+            return {"id": existente[0], "email": email, "nome": existente[1] or nome, "criado": False}
+        cursor.execute("INSERT INTO doclib_sm_contatos (email, nome, incluido_por, incluido_em) VALUES (?, ?, ?, ?)",
+                       (email, nome, usuario, datetime.now().strftime("%d/%m/%Y - %H:%Mh")))
+        novo = cursor.lastrowid
+        cursor.execute("COMMIT")
+        return {"id": novo, "email": email, "nome": nome, "criado": True}
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_remover_contato_sm(contato_id):
+    """Tira um e-mail da lista de contatos da SM (os envios já registrados não mudam)."""
+    conexao = doc_lib_conectar()
+    try:
+        conexao.execute("DELETE FROM doclib_sm_contatos WHERE id = ?", (contato_id,))
+        conexao.commit()
+    finally:
+        conexao.close()
+
+
+def doc_lib_salvar_padroes_contatos_sm(ids_para, ids_copia):
+    """Guarda, como sugestão para o próximo envio, quem foi escolhido em Para e quem foi escolhido em Cc (os demais ficam sem
+    escolha). Um contato não pode estar nos dois campos (DocLibRegra)."""
+    ids_para, ids_copia = {int(i) for i in ids_para}, {int(i) for i in ids_copia}
+    if ids_para & ids_copia:
+        raise DocLibRegra("Um e-mail não pode estar ao mesmo tempo em Para e em Com cópia.")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("UPDATE doclib_sm_contatos SET padrao_para = 0, padrao_copia = 0")
+        cursor.executemany("UPDATE doclib_sm_contatos SET padrao_para = 1 WHERE id = ?", [(i,) for i in sorted(ids_para)])
+        cursor.executemany("UPDATE doclib_sm_contatos SET padrao_copia = 1 WHERE id = ?", [(i,) for i in sorted(ids_copia)])
+        cursor.execute("COMMIT")
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_enderecos_envio_sm(para, copias):
+    """(Para, Cc) do envio a partir dos e-mails escolhidos: em minúsculas, sem repetição, e quem está em Para não repete em Cc.
+    Lança DocLibRegra se não houver nenhum destinatário em Para ou se algum endereço for inválido."""
+    def unicos(lista):
+        return list(dict.fromkeys(str(email or "").strip().lower() for email in lista if str(email or "").strip()))
+
+    para, copias = unicos(para), unicos(copias)
+    invalidos = [email for email in para + copias if not doc_lib_validar_email(email)]
+    if invalidos:
+        raise DocLibRegra("E-mail inválido: " + ", ".join(invalidos))
+    if not para:
+        raise DocLibRegra("Escolha pelo menos um destinatário em Para.")
+    return para, [email for email in copias if email not in para]
+
+
+def doc_lib_validar_envio_sm(doc):
+    """O e-mail da SM só sai com o documento emitido e no status Aguarda Conferência. Lança DocLibRegra com a orientação."""
+    if doc is None:
+        raise DocLibRegra("Esta SM não existe mais.")
+    if doc["status"] == STATUS_SM_AGUARDA_CONFERENCIA and doc.get("emitido"):
+        return
+    dica = {STATUS_ATEIE_RESERVADO: "\n\nPreencha e salve a SM reservada antes.",
+            STATUS_ATEIE_EM_ANALISE: "\n\nUse 'Gerar SM Avulso' para emitir a SM e mandá-la para a conferência."}.get(doc["status"], "")
+    raise DocLibRegra(f"O envio por e-mail só é permitido para SM no status '{STATUS_SM_AGUARDA_CONFERENCIA}'.\n\n"
+                      f"Situação atual: {doc['status']}{dica}")
+
+
+def doc_lib_emails_enviados_sm(sm_id):
+    """Envios por e-mail já registrados da SM, do mais antigo ao mais recente: [{enviado_em, enviado_por, remetente,
+    destinatarios, copias, metodo, revisao}]."""
+    conexao = doc_lib_conectar()
+    conexao.row_factory = sqlite3.Row
+    try:
+        linhas = conexao.execute("SELECT enviado_em, enviado_por, remetente, destinatarios, copias, metodo, revisao "
+                                 "FROM doclib_sm_emails WHERE sm_id = ? ORDER BY id", (sm_id,)).fetchall()
+    finally:
+        conexao.close()
+    return [dict(linha) for linha in linhas]
+
+
+def doc_lib_registrar_envio_sm(sm_id, remetente, destinatarios, copias, assunto, anexo, metodo, usuario):
+    """Registra o e-mail enviado (quem, quando, de qual remetente, para quem, com cópia para quem, qual PDF) e marca a SM como
+    "Sim, em dd/mm/aaaa" na coluna "Enviado e-mail" do GRID SM (a data do envio mais recente). O envio é sempre registrado, mesmo
+    que a SM tenha sido concluída ou cancelada enquanto o e-mail saía; só a coluna do GRID deixa de mudar nesses casos (o banco
+    não aceita alteração em SM concluída ou cancelada). Não altera a revisão do documento. Devolve a data gravada."""
+    agora = datetime.now()
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        linha = cursor.execute("SELECT numero, revisao, status FROM doclib_sm WHERE id = ?", (sm_id,)).fetchone()
+        if linha is None:
+            raise DocLibConflito("Esta SM não existe mais.")
+        numero, revisao, status = linha
+        cursor.execute("INSERT INTO doclib_sm_emails (sm_id, numero, revisao, destinatarios, copias, remetente, assunto, anexo, "
+                       "metodo, enviado_por, enviado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       (sm_id, numero, revisao, "; ".join(destinatarios), "; ".join(copias), remetente, assunto, anexo, metodo,
+                        usuario, agora.strftime("%d/%m/%Y - %H:%Mh")))
+        if status not in DOC_LIB_STATUS_DEFINITIVOS_SM:
+            cursor.execute("UPDATE doclib_sm SET email_enviado_em = ?, email_enviado_por = ?, email_enviado_origem = 'Sistema' "
+                           "WHERE id = ?", (agora.strftime("%d/%m/%Y"), usuario, sm_id))
+        cursor.execute("COMMIT")
+        return agora.strftime("%d/%m/%Y")
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_email_enviado_sm(sm_id):
+    """'dd/mm/aaaa' da data em que a SM consta como "Enviado e-mail: Sim", ou "" se ainda não foi enviada."""
+    conexao = doc_lib_conectar()
+    try:
+        linha = conexao.execute("SELECT email_enviado_em FROM doclib_sm WHERE id = ?", (sm_id,)).fetchone()
+    finally:
+        conexao.close()
+    return str((linha or [""])[0] or "")
+
+
+def doc_lib_definir_email_enviado_sm(selecao, data, usuario):
+    """Marcação manual da coluna "Enviado e-mail" do GRID SM (usada quando o envio pelo sistema falhou e o e-mail foi enviado à
+    mão). 'selecao' é a lista de (id do documento, linha da tabela); 'data' é dd/mm/aaaa para marcar "Sim, em dd/mm/aaaa" ou None
+    para voltar a "Não". Marcar só vale para SM já emitida e ainda em andamento (Aguarda Conferência, Aprovado para Execução ou
+    Em Execução) que ainda NÃO conste como enviada; para corrigir um registro errado é preciso voltá-la a "Não". SM concluída ou
+    cancelada não muda mais (DocLibRegra). Não altera a revisão do documento. Devolve a quantidade de SM."""
+    pares = list(dict.fromkeys((int(sm_id), int(ordem)) for sm_id, ordem in selecao))
+    if not pares:
+        raise DocLibRegra("Selecione pelo menos uma SM.")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        ja_enviadas = []
+        for sm_id, _ in pares:
+            cursor.execute("SELECT numero, status, email_enviado_em FROM doclib_sm WHERE id = ?", (sm_id,))
+            linha = cursor.fetchone()
+            if linha is None:
+                raise DocLibConflito("Uma das SMs selecionadas não existe mais.\n\n"
+                                     "Feche e abra novamente o GRID SM para ver a situação atual.")
+            numero, status, enviado_em = linha
+            if status in DOC_LIB_STATUS_DEFINITIVOS_SM:
+                raise DocLibRegra(f"A SM {numero} está com status '{status}' e não pode mais ser alterada.")
+            if data and status not in DOC_LIB_STATUS_MARCAR_EMAIL_SM:
+                raise DocLibRegra(f"A SM {numero} está com status '{status}'. Só é possível marcar o e-mail como enviado "
+                                  f"depois que o documento é gerado (a partir de '{STATUS_SM_AGUARDA_CONFERENCIA}').")
+            if data and enviado_em:
+                ja_enviadas.append(f"{numero} ({doc_lib_texto_email_enviado(enviado_em)})")
+        if ja_enviadas:
+            raise DocLibRegra("Já consta(m) como e-mail enviado: " + ", ".join(ja_enviadas) + ".\n\n"
+                              "Uma SM com 'Enviado e-mail: Sim' não pode ser marcada como enviada novamente. Para marcar, "
+                              "selecione somente SM com 'Não'. Se o registro estiver errado, use 'Voltar para Não'.")
+        for sm_id, _ in pares:
+            cursor.execute("UPDATE doclib_sm SET email_enviado_em = ?, email_enviado_por = ?, email_enviado_origem = ? "
+                           "WHERE id = ?", (data or None, usuario if data else None, "Manual" if data else None, sm_id))
+        cursor.execute("COMMIT")
+        return len(pares)
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_registrar_pdf_envio_sm(doc, caminho, usuario):
+    """Registra o PDF anexado ao e-mail (tipo 'envio') na revisão em que foi gerado. Não emite nem muda nada na SM. Lança
+    DocLibConflito se a SM foi alterada desde que foi lida (o PDF já nasceria desatualizado)."""
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        atual = cursor.execute("SELECT revisao FROM doclib_sm WHERE id = ?", (doc["id"],)).fetchone()
+        if atual is None or atual[0] != doc["revisao"]:
+            raise DocLibConflito("Esta SM foi alterada por outro usuário enquanto o PDF para envio era gerado.\n\n"
+                                 "Feche-a e abra-a novamente (GRID SM) antes de encaminhá-la.")
+        cursor.execute("INSERT INTO doclib_sm_pdfs (sm_id, revisao, caminho, gerado_por, gerado_em, revisao_final, tipo) "
+                       "VALUES (?, ?, ?, ?, ?, ?, 'envio')",
+                       (doc["id"], doc["revisao"], caminho, usuario, agora_texto, doc["revisao"]))
+        cursor.execute("COMMIT")
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
+
+
+def doc_lib_arquivar_pdf_envio_sm(doc, usuario):
+    """Gera o PDF da SM que vai anexado ao e-mail (o documento como está, com o aviso "Aguardando a Conferência"), arquiva em
+    SM/Enviados/<ano> sem sobrescrever arquivo anterior e o registra no banco. Só vale para SM emitida em Aguarda Conferência.
+    Devolve (caminho, aviso)."""
+    doc_lib_validar_envio_sm(doc)
+    agora = datetime.now()
+    pasta, aviso = doc_lib_pasta_destino(os.path.join("SM", "Enviados"), doc.get("ano") or agora.year)
+    nome_base = f"SM_{(doc.get('numero') or 'id' + str(doc['id'])).replace('/', '-')}_{agora.strftime('%Y%m%d-%H%M%S')}"
+    caminho = os.path.join(pasta, nome_base + ".pdf")
+    repeticao = 1
+    while os.path.exists(caminho):          # duas gerações no mesmo segundo: nunca sobrescreve o PDF anterior
+        repeticao += 1
+        caminho = os.path.join(pasta, f"{nome_base}-{repeticao}.pdf")
+    caminho_temporario = caminho + ".tmp"
+    try:
+        doc_lib_gerar_pdf_sm(doc, caminho_temporario, usuario)
+        os.replace(caminho_temporario, caminho)
+    finally:
+        if os.path.exists(caminho_temporario):
+            os.remove(caminho_temporario)
+    try:
+        doc_lib_registrar_pdf_envio_sm(doc, caminho, usuario)
+    except Exception:
+        if os.path.exists(caminho):            # PDF não registrado: não deixa arquivo órfão
+            os.remove(caminho)
+        raise
+    return caminho, aviso
+
+
+def doc_lib_pdf_para_envio_sm(doc, usuario):
+    """PDF a anexar no e-mail do Encaminhar SM. Reaproveita o PDF desse tipo já arquivado enquanto o documento não mudou (mesma
+    revisão); se não houver, ou se o arquivo não existir mais, gera e arquiva um novo. Devolve (caminho, aviso)."""
+    doc_lib_validar_envio_sm(doc)
+    conexao = doc_lib_conectar()
+    try:
+        linha = conexao.execute("SELECT caminho FROM doclib_sm_pdfs WHERE sm_id = ? AND tipo = 'envio' "
+                                "AND revisao_final = ? ORDER BY id DESC LIMIT 1", (doc["id"], doc["revisao"])).fetchone()
+    finally:
+        conexao.close()
+    if linha and os.path.isfile(linha[0]):
+        return linha[0], None
+    return doc_lib_arquivar_pdf_envio_sm(doc, usuario)
+
+
+class DialogoEncaminharSM:
+    """Janela de confirmação do botão Encaminhar SM. Mostra o remetente (a escolher entre EMAIL_ATEIE_REMETENTES), a SM, o anexo,
+    onde ficou a cópia do PDF na pasta Downloads (ou o motivo de não ter sido salva) e a lista de contatos de e-mail da SM, em que
+    o usuário marca, para cada contato, "Para" ou "Cc" (um contato não pode estar nos dois). A lista começa com a última escolha
+    feita. Um e-mail que não está na lista é digitado em "Novo e-mail" (com nome opcional) e, ao ser adicionado, já fica na lista
+    para os próximos envios e marcado em Para ou em Cc, conforme a opção ao lado. Cada contato pode ser excluído da lista.
+    'resultado' fica com {"remetente", "destinatarios", "copias"} depois de Confirmar envio, ou None se o envio for cancelado."""
+
+    LARGURAS_COLUNAS = {1: 66, 2: 66, 3: 84}          # Para, Cc e Excluir (iguais no título e em cada linha da lista)
+
+    def __init__(self, parent, doc, usuario, caminho_pdf=None, caminho_copia=None, erro_copia=None):
+        self.parent, self.doc, self.usuario = parent, doc, usuario
+        self.resultado = None
+        self.contatos = []                  # contatos da lista, na ordem exibida
+        self.linhas = {}                    # id do contato -> {"para": BooleanVar, "copia": BooleanVar}
+        self.assunto = f"{EMAIL_SM_ASSUNTO}: {doc['numero']}"
+        corpo = EMAIL_SM_TEXTO.format(numeros=doc_lib_texto_numeros([doc["numero"]]))
+
+        self.janela = janela = Toplevel(parent)
+        janela.title("Encaminhar SM")
+        altura = min(760, max(640, janela.winfo_screenheight() - 70))
+        janela.geometry(f"900x{altura}")
+        janela.resizable(False, False)
+        janela.transient(parent)
+        ui_dialogo(janela, "Encaminhar SM", "Envio por e-mail, com o PDF da SM anexado, para conferência")
+        cartao = self.cartao = ui_cartao(janela, 84, altura - 84 - 84)
+        cartao.grid_columnconfigure(1, weight=1)
+
+        def rotulo(linha, titulo, pady=(11, 0)):
+            Label(cartao, text=titulo, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
+                  ).grid(row=linha, column=0, sticky="nw", padx=(20, 10), pady=pady)
+
+        def valor(linha, texto, negrito=False, cor=SGA_TEXTO):
+            rotulo(linha, "")
+            return Label(cartao, text=texto, bg=SGA_CARD, fg=cor, font=(SGA_FONTE, 10, "bold" if negrito else ""),
+                         wraplength=640, justify="left", anchor="w")
+
+        self.var_remetente = StringVar(value=_DOC_LIB_ULTIMO_REMETENTE["valor"]
+                                       if _DOC_LIB_ULTIMO_REMETENTE["valor"] in EMAIL_ATEIE_REMETENTES else EMAIL_ATEIE_REMETENTE)
+        rotulo(0, "Remetente:", (12, 0))
+        quadro = Frame(cartao, bg=SGA_CARD)
+        quadro.grid(row=0, column=1, sticky="w", pady=(6, 0))
+        for endereco in EMAIL_ATEIE_REMETENTES:
+            Radiobutton(quadro, text=endereco, variable=self.var_remetente, value=endereco, tristatevalue="-",
+                        font=(SGA_FONTE, 10, "bold"), bg=SGA_CARD).pack(side=LEFT, padx=(0, 20))
+        rotulo(1, "SM:")
+        Label(cartao, text=f"{doc['numero']} ({doc['status']})", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"),
+              anchor="w").grid(row=1, column=1, sticky="w", pady=(11, 0))
+        rotulo(2, "Anexo:")
+        Label(cartao, text=(f"{os.path.basename(caminho_pdf)}\n" if caminho_pdf else "") + "PDF da SM, com o aviso "
+              "\"Aguardando a Conferência do documento\"", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10), wraplength=640,
+              justify="left", anchor="w").grid(row=2, column=1, sticky="w", pady=(11, 0))
+        rotulo(3, "Cópia salva em:")
+        Label(cartao, text=caminho_copia or (f"Não foi possível salvar em Downloads: {erro_copia}" if erro_copia else "(não gerada)"),
+              bg=SGA_CARD, fg=SGA_TEXTO if caminho_copia else SGA_VERMELHO, font=(SGA_FONTE, 10), wraplength=640,
+              justify="left", anchor="w").grid(row=3, column=1, sticky="w", pady=(11, 0))
+        rotulo(4, "Assunto:")
+        Label(cartao, text=self.assunto, bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10), wraplength=640, justify="left",
+              anchor="w").grid(row=4, column=1, sticky="w", pady=(11, 0))
+
+        # lista de contatos: um por linha, com as caixas Para e Cc
+        rotulo(5, "Destinatários:", (14, 0))
+        zona = Frame(cartao, bg=SGA_CARD)
+        zona.grid(row=5, column=1, sticky="ew", padx=(0, 20), pady=(12, 0))
+        zona.grid_columnconfigure(0, weight=1)
+        cabecalho = Frame(zona, bg=SGA_CARD)
+        cabecalho.grid(row=0, column=0, sticky="ew")
+        cabecalho.grid_columnconfigure(0, weight=1)
+        Label(cabecalho, text="Contato", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8, "bold"), anchor="w"
+              ).grid(row=0, column=0, sticky="w")
+        for coluna, titulo in ((1, "Para"), (2, "Cc")):
+            Label(cabecalho, text=titulo, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8, "bold")
+                  ).grid(row=0, column=coluna)
+        for coluna, largura in self.LARGURAS_COLUNAS.items():
+            cabecalho.grid_columnconfigure(coluna, minsize=largura)
+        Frame(zona, bg=SGA_CARD, width=17, height=1).grid(row=0, column=1)       # espaço da barra de rolagem
+        self.canvas = Canvas(zona, bg=SGA_CARD, height=132, highlightthickness=1, highlightbackground=SGA_BORDA)
+        barra = Scrollbar(zona, orient=VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=barra.set)
+        self.canvas.grid(row=1, column=0, sticky="ew")
+        barra.grid(row=1, column=1, sticky="ns")
+        self.lista = Frame(self.canvas, bg=SGA_CARD)
+        self.lista.grid_columnconfigure(0, weight=1)
+        self._janela_lista = self.canvas.create_window(0, 0, window=self.lista, anchor="nw")
+        self.lista.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self._janela_lista, width=e.width))
+        self._ligar_rolagem(self.canvas)
+
+        # novo e-mail (passa a fazer parte da lista)
+        rotulo(6, "Novo e-mail:", (14, 0))
+        novo = Frame(cartao, bg=SGA_CARD)
+        novo.grid(row=6, column=1, sticky="w", pady=(10, 0))
+        self.ent_email = criar_entrada_sga(novo, width=26)
+        self.ent_email.grid(row=0, column=0, padx=(0, 6))
+        self.ent_nome = criar_entrada_sga(novo, width=14)
+        self.ent_nome.grid(row=0, column=1, padx=(0, 8))
+        self.var_tipo_novo = StringVar(value="para")
+        for coluna, (chave, titulo) in enumerate((("para", "Para"), ("copia", "Cc")), start=2):
+            Radiobutton(novo, text=titulo, variable=self.var_tipo_novo, value=chave, tristatevalue="-", bg=SGA_CARD,
+                        font=(SGA_FONTE, 10, "bold")).grid(row=0, column=coluna, padx=(0, 4))
+        self.btn_adicionar = doc_lib_criar_botao(novo, "Adicionar à lista", self.adicionar, "neutro", fonte=(SGA_FONTE, 9, "bold"))
+        self.btn_adicionar.grid(row=0, column=4, padx=(8, 0), ipadx=6)
+        Label(novo, text="e-mail", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8)).grid(row=1, column=0, sticky="w")
+        Label(novo, text="nome (opcional)", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 8)).grid(row=1, column=1, sticky="w")
+        self.ent_email.bind("<Return>", lambda e: self.adicionar())
+        self.ent_nome.bind("<Return>", lambda e: self.adicionar())
+
+        # destinatários resultantes (atualizados a cada marcação)
+        rotulo(7, "Para:", (12, 0))
+        self.lbl_para = Label(cartao, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"), wraplength=640,
+                              justify="left", anchor="w")
+        self.lbl_para.grid(row=7, column=1, sticky="w", pady=(11, 0))
+        rotulo(8, "Com cópia (Cc):", (8, 0))
+        self.lbl_copia = Label(cartao, text="", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"), wraplength=640,
+                               justify="left", anchor="w")
+        self.lbl_copia.grid(row=8, column=1, sticky="w", pady=(7, 0))
+        rotulo(9, "Texto do e-mail:", (12, 0))
+        self.previa = criar_area_texto_sga(cartao, wrap=WORD, height=4, width=60)
+        self.previa.insert("1.0", corpo)
+        self.previa.configure(state=DISABLED, bg=DOC_LIB_COR_BLOQUEADO)
+        self.previa.grid(row=9, column=1, sticky="w", pady=(11, 0))
+
+        self.btn_confirmar = doc_lib_criar_botao(janela, "Confirmar envio", self.confirmar, "sucesso")
+        self.btn_confirmar.place(relx=0.5, x=-205, rely=1.0, y=-22, anchor="sw", width=200, height=42)
+        doc_lib_criar_botao(janela, "Cancelar", janela.destroy, "neutro"
+                            ).place(relx=0.5, x=10, rely=1.0, y=-22, anchor="sw", width=190, height=42)
+        janela.bind("<Escape>", lambda evento: janela.destroy())
+        self.carregar()
+
+    # ---- lista de contatos -----------------------------------------------------------------------------------------
+    def _ligar_rolagem(self, widget):
+        """Roda do mouse rola a lista quando o ponteiro está sobre ela (Windows e Linux)."""
+        widget.bind("<MouseWheel>", lambda e: self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        widget.bind("<Button-4>", lambda e: self.canvas.yview_scroll(-1, "units"))
+        widget.bind("<Button-5>", lambda e: self.canvas.yview_scroll(1, "units"))
+
+    def _marcados_atuais(self):
+        """{id do contato: 'para' | 'copia'} do que está marcado na tela."""
+        marcados = {}
+        for contato_id, linha in self.linhas.items():
+            if linha["para"].get():
+                marcados[contato_id] = "para"
+            elif linha["copia"].get():
+                marcados[contato_id] = "copia"
+        return marcados
+
+    def carregar(self, marcados=None):
+        """Lê a lista de contatos do banco e a desenha. 'marcados' = {id: 'para' | 'copia'} a manter marcados; sem ele valem as
+        marcações do último envio."""
+        self.contatos = doc_lib_listar_contatos_sm()
+        if marcados is None:
+            marcados = {c["id"]: "para" if c["padrao_para"] else "copia" for c in self.contatos
+                        if c["padrao_para"] or c["padrao_copia"]}
+        for filho in self.lista.winfo_children():
+            filho.destroy()
+        self.linhas = {}
+        if not self.contatos:
+            Label(self.lista, text="Nenhum e-mail na lista. Digite o e-mail abaixo e clique em Adicionar à lista.",
+                  bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).grid(row=0, column=0, sticky="w", padx=6, pady=8)
+        for posicao, contato in enumerate(self.contatos):
+            variaveis = {"para": BooleanVar(value=marcados.get(contato["id"]) == "para"),
+                         "copia": BooleanVar(value=marcados.get(contato["id"]) == "copia")}
+            self.linhas[contato["id"]] = variaveis
+            fundo = SGA_CARD if posicao % 2 == 0 else "#F6F8FC"
+            quadro = Frame(self.lista, bg=fundo)
+            quadro.grid(row=posicao, column=0, sticky="ew")
+            quadro.grid_columnconfigure(0, weight=1)
+            for coluna, largura in self.LARGURAS_COLUNAS.items():
+                quadro.grid_columnconfigure(coluna, minsize=largura)
+            texto = Label(quadro, text=doc_lib_texto_contato_sm(contato), bg=fundo, fg=SGA_TEXTO, font=(SGA_FONTE, 10),
+                          anchor="w")
+            texto.grid(row=0, column=0, sticky="ew", padx=(6, 0))
+            for coluna, campo in ((1, "para"), (2, "copia")):
+                Checkbutton(quadro, variable=variaveis[campo], bg=fundo, activebackground=fundo,
+                            command=lambda i=contato["id"], c=campo: self._ao_marcar(i, c)).grid(row=0, column=coluna)
+            excluir = Button(quadro, text="Excluir", font=(SGA_FONTE, 8), relief="flat", bg="#E4E8F0", fg=SGA_TEXTO,
+                             cursor="hand2", command=lambda i=contato["id"]: self.remover(i))
+            excluir.grid(row=0, column=3, padx=(6, 6), pady=1, sticky="ew")
+            for widget in (quadro, texto):
+                self._ligar_rolagem(widget)
+        self.janela.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self._atualizar_resumo()
+
+    def _ao_marcar(self, contato_id, campo):
+        """Marcar em Para desmarca em Cc e vice-versa."""
+        linha = self.linhas[contato_id]
+        if linha[campo].get():
+            linha["copia" if campo == "para" else "para"].set(False)
+        self._atualizar_resumo()
+
+    def marcar(self, email, campo, marcado=True):
+        """Marca (ou desmarca) o contato de e-mail 'email' em 'para' ou 'copia'. Devolve False se o e-mail não está na lista."""
+        contato = next((c for c in self.contatos if c["email"] == str(email).strip().lower()), None)
+        if contato is None:
+            return False
+        self.linhas[contato["id"]][campo].set(bool(marcado))
+        self._ao_marcar(contato["id"], campo)
+        return True
+
+    def escolhidos(self):
+        """(e-mails marcados em Para, e-mails marcados em Cc), na ordem da lista."""
+        marcados = self._marcados_atuais()
+        return ([c["email"] for c in self.contatos if marcados.get(c["id"]) == "para"],
+                [c["email"] for c in self.contatos if marcados.get(c["id"]) == "copia"])
+
+    def _atualizar_resumo(self):
+        para, copia = self.escolhidos()
+        self.lbl_para.config(text="; ".join(para) if para else "(escolha pelo menos um destinatário)",
+                             fg=SGA_TEXTO if para else SGA_VERMELHO)
+        self.lbl_copia.config(text="; ".join(copia) if copia else "(nenhum e-mail em cópia)",
+                              fg=SGA_TEXTO if copia else SGA_TEXTO_SUAVE)
+
+    def adicionar(self):
+        """Inclui na lista o e-mail digitado em "Novo e-mail" (ele passa a fazer parte da lista) e o deixa marcado em Para ou em
+        Cc, conforme a opção ao lado. E-mail que já está na lista só é marcado. Devolve o contato ou None se não foi possível."""
+        titulo = "Encaminhar SM"
+        if not self.ent_email.get().strip():
+            messagebox.showwarning(titulo, "Digite o e-mail a incluir na lista.", parent=self.janela)
+            self.ent_email.focus_set()
+            return None
+        try:
+            contato = doc_lib_incluir_contato_sm(self.ent_email.get(), self.ent_nome.get(), self.usuario)
+        except DocLibRegra as erro:
+            messagebox.showwarning(titulo, str(erro), parent=self.janela)
+            self.ent_email.focus_set()
+            return None
+        except sqlite3.Error as erro:
+            messagebox.showerror(titulo, f"Não foi possível gravar o e-mail na lista: {erro}", parent=self.janela)
+            return None
+        marcados = self._marcados_atuais()
+        marcados[contato["id"]] = self.var_tipo_novo.get()
+        self.carregar(marcados)
+        for entrada in (self.ent_email, self.ent_nome):
+            entrada.delete(0, END)
+        posicao = next((i for i, c in enumerate(self.contatos) if c["id"] == contato["id"]), 0)
+        self.canvas.yview_moveto(posicao / max(1, len(self.contatos)))
+        return contato
+
+    def remover(self, contato_id):
+        """Exclui o contato da lista, depois de confirmar (os envios já registrados não mudam)."""
+        contato = next((c for c in self.contatos if c["id"] == contato_id), None)
+        if contato is None:
+            return False
+        if not messagebox.askyesno("Encaminhar SM", f"Excluir da lista de e-mails da SM?\n\n{doc_lib_texto_contato_sm(contato)}",
+                                   parent=self.janela):
+            return False
+        try:
+            doc_lib_remover_contato_sm(contato_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Encaminhar SM", f"Não foi possível excluir o e-mail da lista: {erro}", parent=self.janela)
+            return False
+        marcados = self._marcados_atuais()
+        marcados.pop(contato_id, None)
+        self.carregar(marcados)
+        return True
+
+    def confirmar(self):
+        """Confirmar envio: o e-mail que ainda está em "Novo e-mail" é incluído na lista antes; depois valida os endereços, guarda
+        a escolha como sugestão do próximo envio e fecha a janela com o resultado."""
+        titulo = "Encaminhar SM"
+        if self.ent_email.get().strip() and self.adicionar() is None:
+            return
+        para, copia = self.escolhidos()
+        try:
+            para, copia = doc_lib_enderecos_envio_sm(para, copia)
+        except DocLibRegra as erro:
+            messagebox.showwarning(titulo, str(erro), parent=self.janela)
+            return
+        marcados = self._marcados_atuais()
+        try:
+            doc_lib_salvar_padroes_contatos_sm([i for i, campo in marcados.items() if campo == "para"],
+                                               [i for i, campo in marcados.items() if campo == "copia"])
+        except (DocLibRegra, sqlite3.Error):
+            pass                                    # a sugestão do próximo envio não é essencial para este envio
+        _DOC_LIB_ULTIMO_REMETENTE["valor"] = self.var_remetente.get()
+        self.resultado = {"remetente": self.var_remetente.get(), "destinatarios": para, "copias": copia}
+        self.janela.destroy()
+
+
+def doc_lib_dialogo_encaminhar_sm(parent, doc, usuario, caminho_pdf=None, caminho_copia=None, erro_copia=None):
+    """Abre a janela do Encaminhar SM (DialogoEncaminharSM) e espera o usuário. Devolve {"remetente", "destinatarios",
+    "copias"} ou None se o envio for cancelado."""
+    dialogo = DialogoEncaminharSM(parent, doc, usuario, caminho_pdf, caminho_copia, erro_copia)
+    try:
+        dialogo.janela.grab_set()
+    except TclError:
+        pass
+    dialogo.janela.wait_window()
+    return dialogo.resultado
+
+
+# ---------------------------------------------------
 # GRID SM, TABELAS DA JANELA E JANELA DA SM
 # ---------------------------------------------------
 # Colunas da janela "GRID SM": (campo, título, largura em pixels, exibir sempre em caixa alta). A Programação é o período em
@@ -24028,18 +24681,18 @@ DOC_LIB_COLUNAS_LISTA_SM = [
     ("equipamento", "Equipamento", 190, True),
     ("motivo", "Motivo", 280, False),
     ("elaborado", "Elaborado por", 150, False),
+    ("email_enviado", "Enviado e-mail", 140, False),
     ("status", "Status", 160, False),
 ]
 
 
 class JanelaListaSM(JanelaListaAteie):
-    """Janela "GRID SM": a mesma do GRID ATEIE (JanelaListaAteie), lendo as SMs. Mesmos filtros, busca e seleção. A SM tem um
-    número por documento (não há o que agrupar) e não é encaminhada por e-mail (sem a marcação de e-mail enviado)."""
+    """Janela "GRID SM": a mesma do GRID ATEIE (JanelaListaAteie), lendo as SMs. Mesmos filtros, busca, seleção múltipla,
+    Marcar e-mail enviado e coluna Enviado e-mail. A SM tem um número por documento (não há o que agrupar)."""
     ROTULO = "SM"
     PLURAL = "SMs"
     ARTIGO = "a"
     PERMITE_AGRUPAR = False
-    PERMITE_EMAIL = False
     COLUNAS = DOC_LIB_COLUNAS_LISTA_SM
     COLUNAS_COM_QUEBRA = ("motivo",)
 
@@ -24050,6 +24703,10 @@ class JanelaListaSM(JanelaListaAteie):
     @staticmethod
     def _listar():
         return doc_lib_listar_sm()
+
+    @staticmethod
+    def _definir_email_enviado(selecao, data, usuario):
+        return doc_lib_definir_email_enviado_sm(selecao, data, usuario)
 
     def valores_distintos(self, chave):
         if chave == "status":
@@ -24084,6 +24741,7 @@ class LinhasManobrasSM:
     """Tabela de manobras (Liberação ou Normalização) da janela da SM, com de 1 a 30 linhas: mostra só as linhas necessárias
     e o botão Adicionar manobra até o limite. Cada linha tem:
       - Data e hora da manobra: controle interno do COG (só na tela, NÃO vai para o PDF), preenchida depois da conferência;
+        número arábico maior não pode ter data e hora anteriores às de número menor (a letra não conta);
       - Sequência: o número arábico digitado + a letra calculada (1A, 1B, 2A...), recalculada a cada inclusão, exclusão,
         troca de ordem e digitação;
       - Local: até 6 caracteres;
@@ -24549,7 +25207,7 @@ class JanelaSMAvulso:
         self.janela = Toplevel(root)
         self.janela.title('COG - DOC_LIB. - SM AVULSO')
         self.janela.geometry('1280x860')
-        self.janela.minsize(1180, 640)        # largura mínima: cabem os 7 botões do rodapé
+        self.janela.minsize(1180, 640)        # largura mínima: cabem os 8 botões do rodapé
         self.janela.resizable(True, True)
         self.janela['bg'] = SGA_FUNDO
         self.janela.protocol("WM_DELETE_WINDOW", self.voltar)
@@ -24689,8 +25347,9 @@ class JanelaSMAvulso:
         card = self._novo_cartao()
         self._titulo_secao("6. Manobras de Liberação:",
                            "Até 30 manobras. A data e a hora de cada manobra são controle interno (só nesta tela, não vão para o\n"
-                           "documento impresso) e são preenchidas depois da conferência da SM. Depois de salvos os horários e os\n"
-                           "executantes (item 7), este item fica bloqueado.")
+                           "documento impresso) e são preenchidas depois da conferência da SM. A sequência de número maior não pode\n"
+                           "ter data e hora anteriores às de número menor (2A não antes de 1A); com o mesmo número a letra não conta.\n"
+                           "Depois de salvos os horários e os executantes (item 7), este item fica bloqueado.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.tab_lib = LinhasManobrasSM(self, quadro, "lib", "Manobras de Liberação")
@@ -24713,7 +25372,8 @@ class JanelaSMAvulso:
         self._linha_larga(topo, pady=(10, 2))
         Label(card, text="Até 30 manobras. O botão Inverter Manobras monta a normalização a partir da liberação (ordem "
                          "inversa e ação com o antônimo operacional); ação sem inversão segura é mantida e marcada para "
-                         "conferência. Depois de gerada, a normalização continua editável.",
+                         "conferência. Depois de gerada, a normalização continua editável. Datas e horas seguem o número da "
+                         "sequência (número maior nunca antes de número menor); com o mesmo número a letra não conta.",
               bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left", wraplength=1050
               ).grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 2))
         self._linha += 1
@@ -24919,10 +25579,11 @@ class JanelaSMAvulso:
         self.btn_reservar = doc_lib_criar_botao(rodape, "SM-Reservado", self.reservar, "aviso")
         self.btn_cancelar = doc_lib_criar_botao(rodape, "Cancelar SM", self.cancelar_sm, "perigo")
         self.btn_referencia = doc_lib_criar_botao(rodape, "SM-Referência", self.referencia, "primario")
-        botoes = (self.btn_voltar, self.btn_salvar, self.btn_editar, self.btn_gerar, self.btn_reservar, self.btn_cancelar,
-                  self.btn_referencia)
+        self.btn_encaminhar = doc_lib_criar_botao(rodape, "Encaminhar SM", self.encaminhar, "agendar")
+        botoes = (self.btn_voltar, self.btn_salvar, self.btn_editar, self.btn_gerar, self.btn_encaminhar, self.btn_reservar,
+                  self.btn_cancelar, self.btn_referencia)
         for posicao, botao in enumerate(botoes):
-            botao.place(relx=0.5, x=-483 + posicao * 138, rely=0.5, anchor="w", width=132, height=42)
+            botao.place(relx=0.5, x=-552 + posicao * 138, rely=0.5, anchor="w", width=132, height=42)
 
     # ------------------------------------------------------------------ reprogramações
 
@@ -25018,6 +25679,8 @@ class JanelaSMAvulso:
         doc_lib_estado_botao(self.btn_cancelar, self.sm_id is not None and not pendente
                              and self.status in DOC_LIB_STATUS_CANCELAVEIS_SM)
         doc_lib_estado_botao(self.btn_referencia, self.sm_id is not None and self.status not in DOC_LIB_STATUS_SEM_REFERENCIA_SM)
+        doc_lib_estado_botao(self.btn_encaminhar, self.sm_id is not None and not pendente and not self.cancelada
+                             and self.status == STATUS_SM_AGUARDA_CONFERENCIA)
         doc_lib_estado_botao(self.btn_inverter, "geral" in self._grupos_editaveis())
         if self.sm_id is None:
             texto = "Nova SM (não salva)"
@@ -25192,6 +25855,107 @@ class JanelaSMAvulso:
         self._atualizar_numero_provisorio()
         self._assinatura_ref = self._assinatura()
         self._atualizar_estado()
+
+    def encaminhar(self):
+        """Botão Encaminhar SM: depois de confirmar numa janela (remetente entre EMAIL_ATEIE_REMETENTES e, na lista de e-mails da
+        SM, quem recebe em Para e quem recebe em Cc), envia por e-mail, com o PDF da SM anexado, a SM que está no status Aguarda
+        Conferência. O status não muda; o envio fica registrado e a SM passa a "Sim, em dd/mm/aaaa" em "Enviado e-mail" no GRID SM.
+        Uma SM já encaminhada pode ser encaminhada de novo, depois de uma confirmação que mostra os envios anteriores."""
+        titulo = "Encaminhar SM"
+        if self.sm_id is None or self._pendente():
+            messagebox.showwarning(titulo, "Salve a SM e gere o documento antes de encaminhá-la.", parent=self.janela)
+            return
+        try:
+            doc = doc_lib_carregar_sm(self.sm_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler a SM salva: {erro}", parent=self.janela)
+            return
+        if doc is None or doc["revisao"] != self.revisao:
+            messagebox.showwarning("Documento alterado",
+                                   "Esta SM foi alterada por outro usuário depois de aberta nesta janela.\n\n"
+                                   "Feche-a e abra-a novamente (GRID SM) antes de encaminhá-la.", parent=self.janela)
+            return
+        try:
+            doc_lib_validar_envio_sm(doc)
+        except DocLibRegra as erro:
+            messagebox.showwarning(titulo, str(erro), parent=self.janela)
+            return
+        try:
+            anteriores = doc_lib_emails_enviados_sm(self.sm_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler os envios anteriores: {erro}", parent=self.janela)
+            return
+        if anteriores and not messagebox.askyesno(
+                titulo, f"A SM {doc['numero']} já foi encaminhada por e-mail:\n\n"
+                        + "\n".join(f"• {item['enviado_em']} por {item['enviado_por']}\n   Para: {item['destinatarios']}"
+                                    + (f"\n   Cc: {item['copias']}" if item["copias"] else "") for item in anteriores[-3:])
+                        + "\n\nDeseja encaminhá-la novamente?", parent=self.janela):
+            return
+        usuario = obter_nome_usuario_logado()
+
+        # Ao clicar no botão, junto com a abertura da janela de envio, o PDF que vai anexado ao e-mail é gerado e uma cópia vai
+        # para a pasta Downloads, para o caso de ser preciso enviar manualmente.
+        self.janela.configure(cursor="watch")
+        self.janela.update_idletasks()
+        try:
+            caminho_pdf, aviso = doc_lib_pdf_para_envio_sm(doc, usuario)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except (DocLibRegra, sqlite3.Error, OSError) as erro:
+            messagebox.showerror(titulo, f"Não foi possível preparar o PDF da SM para envio:\n\n{erro}", parent=self.janela)
+            return
+        finally:
+            self.janela.configure(cursor="")
+        caminho_copia, erro_copia = doc_lib_copiar_para_downloads(caminho_pdf)
+
+        envio = doc_lib_dialogo_encaminhar_sm(self.janela, doc, usuario, caminho_pdf, caminho_copia, erro_copia)
+        if not envio:
+            return
+        remetente, destinatarios, copias = envio["remetente"], envio["destinatarios"], envio["copias"]
+        try:                       # conferência final: a SM pode ter mudado enquanto a janela de envio estava aberta
+            atual = doc_lib_carregar_sm(self.sm_id)
+            if atual is None or atual["revisao"] != doc["revisao"]:
+                raise DocLibConflito("Esta SM foi alterada por outro usuário enquanto a janela de envio estava aberta.\n\n"
+                                     "Feche-a e abra-a novamente (GRID SM) antes de encaminhá-la.")
+            doc_lib_validar_envio_sm(atual)
+        except (DocLibRegra, DocLibConflito) as erro:
+            messagebox.showwarning(titulo, f"O e-mail NÃO foi enviado.\n\n{erro}", parent=self.janela)
+            return
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler a SM salva: {erro}", parent=self.janela)
+            return
+
+        assunto_final = f"{EMAIL_SM_ASSUNTO}: {doc['numero']}"
+        corpo = EMAIL_SM_TEXTO.format(numeros=doc["numero"])
+        manual = caminho_copia or caminho_pdf              # arquivo para enviar à mão se o e-mail falhar
+        self.janela.configure(cursor="watch")
+        self.janela.update_idletasks()
+        try:
+            metodo = doc_lib_enviar_email(remetente, destinatarios, copias, assunto_final, corpo, caminho_pdf)
+        except (DocLibEmailErro, OSError) as erro:
+            messagebox.showerror(titulo, f"O e-mail NÃO foi enviado.\n\n{erro}\n\n"
+                                         f"Para enviar manualmente, use o arquivo:\n{manual}\n\n"
+                                         f"Depois de enviar à mão, marque o e-mail como enviado no GRID SM "
+                                         f"(botão 'Marcar e-mail enviado').", parent=self.janela)
+            return
+        finally:
+            self.janela.configure(cursor="")
+        resumo = (f"E-mail enviado ({metodo}).\n\nDe: {remetente}\nPara: {'; '.join(destinatarios)}\n"
+                  + (f"Cc: {'; '.join(copias)}\n" if copias else "")
+                  + f"SM: {doc['numero']}\nAnexo: {os.path.basename(caminho_pdf)}")
+        if caminho_copia:
+            resumo += f"\nCópia do arquivo enviado: {caminho_copia}"
+        try:
+            data = doc_lib_registrar_envio_sm(doc["id"], remetente, destinatarios, copias, assunto_final, caminho_pdf, metodo,
+                                              usuario)
+            resumo += f"\n\nGRID SM, Enviado e-mail: Sim, em {data}"
+        except (sqlite3.Error, DocLibConflito) as erro:
+            resumo += (f"\n\nAtenção: o e-mail foi enviado, mas o envio não pôde ser registrado no banco: {erro}\n"
+                       f"Marque o e-mail como enviado no GRID SM (botão 'Marcar e-mail enviado').")
+        if aviso:
+            resumo += f"\n\n{aviso}"
+        messagebox.showinfo(titulo, resumo, parent=self.janela)
 
     def gerar(self):
         """Botão Gerar SM Avulso: gera o PDF a partir da versão salva (revalida antes), arquiva e oferece abrir/imprimir. A
