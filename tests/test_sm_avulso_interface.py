@@ -48,8 +48,7 @@ def preencher(app, janela, motivo="Manutenção preventiva do disjuntor 52-1."):
     for campo, valor in (("data_inicio", "25/10/2026"), ("hora_inicio", "08:00"), ("data_termino", "25/10/2026"),
                          ("hora_termino", "17:00")):
         definir(app, p0[campo], valor)
-    for campo, valor in zip(CAMPOS_EQUIP, ("SE MCP", "Pátio 230 kV", "DJ 52-1", "Disjuntor", "Campo", "2:30")):
-        definir(app, janela.equip[0][campo], valor)
+    preencher_equipamento(app, janela, 0)
     janela._definir_texto(janela.txt_motivo, motivo)
     for campo, texto in janela.txt_condicoes.items():
         janela._definir_texto(texto, "Nenhuma")
@@ -61,12 +60,40 @@ def preencher(app, janela, motivo="Manutenção preventiva do disjuntor 52-1."):
                               {"numero": "2", "local": "SE MCP", "acao": "Fechar DJ 52-1"}])
 
 
+def preencher_equipamento(app, janela, indice, caracterizacao="Sem desligamento de UG/LT", local_execucao="UHE MGP",
+                          tempo="2:30", local="SE MCP", instalacao="Pátio 230 kV", equipamento="DJ 52-1"):
+    """Linha da tabela 3 preenchida como o usuário faz: texto nos três primeiros campos, escolha nas duas listas e, no 3.6,
+    a opção Indisponível ou a opção do tempo com o HH:MM digitado."""
+    for campo, valor in (("local", local), ("instalacao", instalacao), ("equipamento", equipamento)):
+        definir(app, janela.equip[indice][campo], valor)
+    janela.equip[indice]["caracterizacao"].set(caracterizacao)
+    janela.equip[indice]["local_execucao"].set(local_execucao)
+    if tempo == "Indisponível":
+        janela.tempo_modo[indice].set("indisponivel")
+        janela._ao_mudar_tempo(indice)
+    else:
+        janela.tempo_modo[indice].set("tempo")
+        janela._ao_mudar_tempo(indice, True)
+        definir(app, janela.equip[indice]["tempo_retorno"], tempo)
+
+
 def estado(widget):
     return str(widget.cget("state"))
 
 
 def travado(widget):
+    """Campo que não aceita lançamento: Entry somente leitura, Text/botão/lista desabilitados ou ícone de calendário inativo.
+    (Uma lista de seleção liberada fica "readonly", pois aceita só a escolha; por isso o teste dela usa liberado.)"""
+    if hasattr(widget, "habilitado"):
+        return not widget.habilitado
     return estado(widget) in ("readonly", "disabled")
+
+
+def liberado(widget):
+    """Campo que aceita lançamento: Entry normal, lista de seleção pronta para escolher, ícone ativo."""
+    if hasattr(widget, "habilitado"):
+        return widget.habilitado
+    return estado(widget) == ("readonly" if widget.winfo_class() == "TCombobox" else "normal")
 
 
 def botoes(janela):
@@ -120,6 +147,169 @@ class TestAberturaEPadroes:
             botao.event_generate("<Leave>")
             app.root.update()
             assert str(botao.cget("bg")) == fundo
+
+
+class TestTabelaEquipamentos:
+    def test_caracterizacao_e_local_da_execucao_sao_listas_de_selecao(self, app, banco, janelas):
+        janela = janelas()
+        for indice in range(3):
+            caracterizacao, local = janela.equip[indice]["caracterizacao"], janela.equip[indice]["local_execucao"]
+            assert caracterizacao.winfo_class() == "TCombobox" and local.winfo_class() == "TCombobox"
+            assert estado(caracterizacao) == "readonly" and estado(local) == "readonly"          # não aceitam texto livre
+            assert list(caracterizacao.cget("values")) == app.DOC_LIB_CARACTERIZACOES_SM and len(app.DOC_LIB_CARACTERIZACOES_SM) == 44
+            assert list(local.cget("values")) == app.DOC_LIB_LOCAIS_EXECUCAO_SM and len(app.DOC_LIB_LOCAIS_EXECUCAO_SM) == 30
+            assert caracterizacao.get() == "" and local.get() == ""
+        for campo in ("local", "instalacao", "equipamento"):
+            assert janela.equip[0][campo].winfo_class() == "Entry"
+
+    def test_escolha_da_lista_e_coletada_e_gravada(self, app, banco, janelas, mensagens, dialogos):
+        janela = janelas()
+        preencher(app, janela)
+        janela.equip[0]["caracterizacao"].set("Com risco desligamento das UG-1, 2, 3 e 4")
+        janela.equip[0]["local_execucao"].current(app.DOC_LIB_LOCAIS_EXECUCAO_SM.index("EOL Ventos de Horizonte"))
+        janela.salvar()
+        assert not mensagens.avisos and janela.status == EM_ANALISE
+        gravado = app.doc_lib_carregar_sm(janela.sm_id)["equipamentos"][0]
+        assert gravado["caracterizacao"] == "Com risco desligamento das UG-1, 2, 3 e 4"
+        assert gravado["local_execucao"] == "EOL Ventos de Horizonte"
+
+    def test_lista_vazia_marca_o_combobox_em_vermelho_e_nao_grava(self, app, banco, janelas, mensagens):
+        janela = janelas()
+        preencher(app, janela)
+        janela.equip[0]["caracterizacao"].set("")
+        janela.equip[0]["local_execucao"].set("")
+        janela.salvar()
+        texto = mensagens.avisos[-1][1]
+        assert "3.4 Caracterização: selecione uma opção da lista" in texto and "3.5 Local da Execução do(s) Serviço(s): selecione" in texto
+        assert str(janela.equip[0]["caracterizacao"].cget("style")) == "DocLibErro.TCombobox"
+        assert janela.sm_id is None
+        janela.equip[0]["caracterizacao"].event_generate("<<ComboboxSelected>>")            # ao escolher, a marca sai
+        assert str(janela.equip[0]["caracterizacao"].cget("style")) != "DocLibErro.TCombobox"
+
+    def test_tempo_de_retorno_indisponivel_ou_hh_mm_como_no_ai(self, app, banco, janelas):
+        janela = janelas()
+        entrada, modo = janela.equip[0]["tempo_retorno"], janela.tempo_modo[0]
+        assert modo.get() == "" and travado(entrada) and janela._equip_valor(0, "tempo_retorno") == ""
+        entrada.event_generate("<Button-1>")                                                  # clicar no campo escolhe a opção do tempo
+        assert modo.get() == "tempo" and not travado(entrada)
+        definir(app, entrada, "0930")
+        janela._ao_sair_campo(entrada, "hora", False)
+        assert janela._equip_valor(0, "tempo_retorno") == "09:30"
+        modo.set("indisponivel")                                                              # Indisponível limpa e trava o campo
+        janela._ao_mudar_tempo(0)
+        assert entrada.get() == "" and travado(entrada) and janela._equip_valor(0, "tempo_retorno") == "Indisponível"
+        modo.set("tempo")
+        janela._ao_mudar_tempo(0, True)
+        assert not travado(entrada) and janela._equip_valor(0, "tempo_retorno") == ""
+
+    def test_indisponivel_e_gravado_e_reaberto(self, app, banco, janelas, mensagens, dialogos):
+        janela = janelas()
+        preencher(app, janela)
+        preencher_equipamento(app, janela, 1, tempo="Indisponível", caracterizacao="Com desligamento da LT", local_execucao="Ao longo da LT",
+                              local="se igu")
+        janela.salvar()
+        assert not mensagens.avisos
+        doc = app.doc_lib_carregar_sm(janela.sm_id)
+        assert [i["tempo_retorno"] for i in doc["equipamentos"]] == ["02:30", "Indisponível", ""] and doc["equipamentos"][1]["local"] == "SE IGU"
+        outra = janelas()
+        outra._carregar_documento(doc)
+        assert outra.tempo_modo[1].get() == "indisponivel" and outra.equip[1]["tempo_retorno"].get() == "" and travado(outra.equip[1]["tempo_retorno"])
+        assert outra._equip_valor(1, "tempo_retorno") == "Indisponível" and outra.tempo_modo[2].get() == ""
+
+    def test_sem_escolher_o_tempo_a_primeira_linha_e_recusada(self, app, banco, janelas, mensagens):
+        janela = janelas()
+        preencher(app, janela)
+        janela.tempo_modo[0].set("")
+        janela._ao_mudar_tempo(0)
+        janela.salvar()
+        assert "3.6 Tempo Retorno à Operação: selecione Indisponível ou informe o tempo" in mensagens.avisos[-1][1]
+
+    def test_campos_de_texto_ficam_em_caixa_alta_enquanto_se_digita(self, app, banco, janelas):
+        janela = janelas()
+        for campo in ("local", "instalacao", "equipamento"):
+            entrada = janela.equip[0][campo]
+            entrada.focus_force()
+            janela.janela.update()
+            entrada.insert("end", "dj 52-1 ação")
+            entrada.event_generate("<KeyRelease>", keysym="a")
+            janela.janela.update()
+            assert entrada.get() == "DJ 52-1 AÇÃO", campo
+        linha = janela.tab_lib.linhas[0]
+        linha["local"].focus_force()
+        for caractere in "se mcp":
+            linha["local"].insert("end", caractere)
+        linha["local"].event_generate("<KeyRelease>", keysym="a")
+        assert linha["local"].get() == "SE MCP"
+
+    def test_local_das_manobras_em_caixa_alta_na_liberacao_e_na_normalizacao(self, app, banco, janelas):
+        janela = janelas()
+        janela.tab_lib.preencher([{"numero": "1", "local": "se igu", "acao": "Abrir DJ"}])
+        janela.tab_nor.preencher([{"numero": "1", "local": "cog", "acao": "Fechar DJ"}])
+        assert janela.tab_lib.coletar()[0]["local"] == "SE IGU" and janela.tab_nor.coletar()[0]["local"] == "COG"
+
+    def test_tabela_travada_depois_de_salvar_e_liberada_pelo_editar(self, app, banco, janelas, mensagens):
+        janela = janelas()
+        preencher(app, janela)
+        janela.salvar()
+        campos = [janela.equip[0][c] for c in ("local", "instalacao", "equipamento", "caracterizacao", "local_execucao", "tempo_retorno")]
+        assert all(travado(widget) for widget in campos)
+        assert all(estado(rad) == "disabled" for rad in janela.equip[0]["tempo_retorno"].master.winfo_children() if rad.winfo_class() == "Radiobutton")
+        janela.editar()
+        assert all(liberado(widget) for widget in campos)
+        janela.tempo_modo[0].set("indisponivel")
+        janela._ao_mudar_tempo(0)
+        assert travado(janela.equip[0]["tempo_retorno"]) and liberado(janela.equip[0]["caracterizacao"])
+
+
+class TestBloqueioDosItens6e7:
+    def test_aprovado_aceita_horarios_e_executantes_e_em_execucao_bloqueia(self, app, banco, janelas, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(sm_id))
+        assert not travado(janela.tab_lib.linhas[0]["data"]) and not travado(janela.ent_exec_lib_local) and not travado(janela.ent_exec_lib_remoto)
+        fluxo.executar(sm_id)
+        janela._carregar_documento(fluxo.doc(sm_id))
+        assert janela.status == EM_EXECUCAO
+        for linha in janela.tab_lib.linhas:
+            assert all(travado(linha[campo]) for campo in ("data", "hora", "icone", "numero", "local", "acao"))
+            assert all(estado(linha[botao]) == "disabled" for botao in ("btn_subir", "btn_descer", "btn_remover"))
+        assert travado(janela.ent_exec_lib_local) and travado(janela.ent_exec_lib_remoto) and estado(janela.tab_lib.btn_adicionar) == "disabled"
+        # o item 8 e os executantes da normalização continuam liberados até a conclusão
+        assert not travado(janela.tab_nor.linhas[0]["data"]) and not travado(janela.ent_exec_nor_local)
+
+    def test_tentativa_de_alterar_o_item_6_pela_janela_e_recusada_pelo_banco(self, app, banco, janelas, fluxo, mensagens):
+        sm_id = fluxo.ate(EM_EXECUCAO)
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(sm_id))
+        definir(app, janela.tab_lib.linhas[0]["hora"], "07:00")                     # (campo travado: só por um defeito da tela)
+        janela.salvar()
+        assert mensagens.avisos and "Data e hora das manobras de liberação" in mensagens.avisos[-1][1]
+        assert app.doc_lib_carregar_sm(sm_id)["liberacao"][0]["hora"] == "08:00"
+
+
+class TestRotulosDaConferencia:
+    def test_botoes_e_modalidades_manutencao_e_operacao(self, app, banco, janelas, fluxo):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(AGUARDA)))
+        conferencias = janela.conferencias
+        assert conferencias.btn_manual.cget("text") == "Conferência Manutenção" and conferencias.btn_sistema.cget("text") == "Conferência Operação"
+        assert app.DOC_LIB_MODALIDADES_SM == {"manual": "Manutenção", "sistema": "Operação"}
+        manutencao, operacao = conferencias.adicionar_nova("manual"), conferencias.adicionar_nova("sistema")
+        assert (manutencao["selo"].cget("text"), operacao["selo"].cget("text")) == ("Manutenção", "Operação")
+        assert "Manual" not in {linha["selo"].cget("text") for linha in conferencias.linhas}
+        definir(app, manutencao["nome"], "Joao da Manutencao")
+        janela.salvar()
+        assert janela.status == APROVADO
+        assert [linha["selo"].cget("text") for linha in conferencias.linhas] == ["Manutenção", "Operação"]
+        assert [c["modalidade"] for c in app.doc_lib_carregar_sm(janela.sm_id)["conferencias"]] == ["manual", "sistema"]    # valores gravados
+
+    def test_mensagem_ao_registrar_uma_so_conferencia(self, app, banco, janelas, fluxo, mensagens, dialogos):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(AGUARDA)))
+        linha = janela.conferencias.adicionar_nova("manual")
+        definir(app, linha["nome"], "Joao da Manutencao")
+        janela.salvar()
+        assert "Conferência Manutenção E uma Conferência Operação" in mensagens.infos[-1][1] and janela.status == AGUARDA
 
 
 class TestReprogramacoes:
@@ -263,7 +453,7 @@ class TestSalvarEValidacoes:
         janela = janelas()
         preencher(app, janela)
         definir(app, janela.equip[0]["tempo_retorno"], "25:99")
-        definir(app, janela.periodo["p0"]["hora_inicio"], "7")
+        definir(app, janela.periodo["p0"]["hora_inicio"], "7x")
         janela.salvar()
         texto = mensagens.avisos[-1][1]
         assert "tempo inválido" in texto and "hora inválida" in texto
@@ -271,10 +461,12 @@ class TestSalvarEValidacoes:
 
     def test_tempo_de_retorno_e_normalizado_ao_sair_do_campo(self, app, banco, janelas):
         janela = janelas()
+        janela.tempo_modo[0].set("tempo")
+        janela._ao_mudar_tempo(0, True)
         entrada = janela.equip[0]["tempo_retorno"]
         definir(app, entrada, "1h30")
-        janela._ao_sair_duracao(entrada)
-        assert entrada.get() == "01:30"
+        janela._ao_sair_campo(entrada, "hora", False)
+        assert entrada.get() == "01:30" and janela._equip_valor(0, "tempo_retorno") == "01:30"
 
     def test_motivo_mostra_o_contador_e_recusa_mais_de_seis_linhas(self, app, banco, janelas, mensagens):
         janela = janelas()
@@ -307,7 +499,10 @@ class TestSalvarEValidacoes:
         janela.salvar()
         outra = janelas()
         outra._carregar_documento(app.doc_lib_carregar_sm(janela.sm_id))
-        assert outra.equip[0]["tempo_retorno"].get() == "02:30" and outra.equip[0]["equipamento"].get() == "DJ 52-1"
+        assert outra._equip_valor(0, "tempo_retorno") == "02:30" and outra.tempo_modo[0].get() == "tempo"
+        assert outra.equip[0]["equipamento"].get() == "DJ 52-1" and outra.equip[0]["local"].get() == "SE MCP"
+        assert outra.equip[0]["instalacao"].get() == "PÁTIO 230 KV" and outra.equip[0]["local_execucao"].get() == "UHE MGP"
+        assert outra.equip[0]["caracterizacao"].get() == "Sem desligamento de UG/LT"
         assert [linha["letra"].cget("text") for linha in outra.tab_lib.linhas] == ["A", "B", "A"]
         assert [linha["acao"].get("1.0", "end-1c") for linha in outra.tab_nor.linhas][2] == "Fechar DJ 52-1"
         assert outra._texto(outra.txt_condicoes["cond_loto_com"]) == "Nenhuma"
@@ -340,6 +535,7 @@ class TestFluxoCompletoPelaInterface:
         conferencias = janela.conferencias
         linha = conferencias.adicionar_nova("manual")
         assert linha["area"].get() == "Manutenção" and linha["ass"].get() == "via fonia"
+        assert linha["selo"].cget("text") == "Manutenção"
         assert linha["data"].get() == datetime.now().strftime("%d/%m/%Y") and linha["modalidade"] == "manual"
         janela.salvar()
         assert mensagens.avisos and "Conferido por" in mensagens.avisos[-1][1]               # nome obrigatório
@@ -350,6 +546,7 @@ class TestFluxoCompletoPelaInterface:
         # --- conferência pelo sistema completa a aprovação
         linha = conferencias.adicionar_nova("sistema")
         assert linha["nome"].get() == "operador1" and linha["ass"].get() == "operador1" and linha["area"].get() == "COG"
+        assert linha["selo"].cget("text") == "Operação"
         assert travado(linha["nome"]) and travado(linha["ass"]) and not travado(linha["area"])
         janela.salvar()
         assert janela.status == APROVADO and len(app.doc_lib_carregar_sm(janela.sm_id)["conferencias"]) == 2
@@ -363,6 +560,10 @@ class TestFluxoCompletoPelaInterface:
         definir(app, janela.ent_exec_lib_local, "Fulano (campo)")
         janela.salvar()
         assert janela.status == EM_EXECUCAO
+        # itens 6 e 7 (horários e executantes da liberação) ficam desabilitados para qualquer lançamento
+        assert all(travado(linha_lib[campo]) for linha_lib in janela.tab_lib.linhas for campo in ("data", "hora", "icone"))
+        assert travado(janela.ent_exec_lib_local) and travado(janela.ent_exec_lib_remoto)
+        assert janela.tab_lib.linhas[0]["data"].get() == "25/10/2026" and janela.ent_exec_lib_local.get() == "Fulano (campo)"
         # --- Em Execução: normalização e conclusão
         assert not travado(janela.tab_nor.linhas[0]["data"]) and not travado(janela.ent_exec_nor_local)
         assert estado(janela.btn_cancelar) == "normal"
@@ -531,7 +732,8 @@ class TestReferenciaReservaGridEMenu:
         assert nova.referencia_numero == "0001/26" and "SM de referência: COG-0001/26" in nova.lbl_referencia.cget("text")
         assert nova.lbl_numero.cget("text") == "0002/26" and nova.status == "" and nova.sm_id is None
         assert nova._texto(nova.txt_motivo) == "Manutenção preventiva no disjuntor 52-1."
-        assert nova.equip[0]["equipamento"].get() == "DJ 52-1" and nova.equip[0]["tempo_retorno"].get() == "02:30"
+        assert nova.equip[0]["equipamento"].get() == "DJ 52-1" and nova._equip_valor(0, "tempo_retorno") == "02:30"
+        assert nova.equip[0]["caracterizacao"].get() == "Sem desligamento de UG/LT" and nova.equip[0]["local_execucao"].get() == "UHE MGP"
         assert nova._texto(nova.txt_condicoes["cond_chaves_abertas"]) == "89-1 e 89-2"
         assert [m["acao"] for m in nova.tab_lib.coletar()] == ["Abrir DJ 52-1", "Abrir seccionadora 89-1",
                                                                "Bloquear seccionadora 89-1"]

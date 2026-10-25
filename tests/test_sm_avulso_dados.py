@@ -226,23 +226,96 @@ class TestCamposObrigatorios:
         assert ("equip:2:instalacao",) in erros and ("equip:2:tempo_retorno",) in erros
         assert erros_de(app, fluxo, equipamentos=[primeira, {}, {}]) == []
 
+    def linha_equip(self, **valores):
+        return dict({"local": "SE MCP", "instalacao": "PÁTIO 230 KV", "equipamento": "DJ 52-1",
+                     "caracterizacao": "Sem desligamento de UG/LT", "local_execucao": "UHE MGP", "tempo_retorno": "02:30"},
+                    **valores)
+
     def test_tres_linhas_de_equipamento_sao_persistidas_na_ordem(self, app, fluxo):
-        linhas = [{"local": f"L{i}", "instalacao": f"I{i}", "equipamento": f"E{i}", "caracterizacao": f"C{i}",
-                   "local_execucao": f"X{i}", "tempo_retorno": f"0{i}:15"} for i in (1, 2, 3)]
+        linhas = [self.linha_equip(local=f"L{i}", instalacao=f"I{i}", equipamento=f"E{i}",
+                                   caracterizacao=app.DOC_LIB_CARACTERIZACOES_SM[i], local_execucao=app.DOC_LIB_LOCAIS_EXECUCAO_SM[i],
+                                   tempo_retorno=f"0{i}:15") for i in (1, 2, 3)]
         doc = fluxo.doc(fluxo.salvar(equipamentos=linhas))
-        assert [(item["local"], item["tempo_retorno"]) for item in doc["equipamentos"]] == \
-            [("L1", "01:15"), ("L2", "02:15"), ("L3", "03:15")]
+        assert [(item["local"], item["caracterizacao"], item["local_execucao"], item["tempo_retorno"])
+                for item in doc["equipamentos"]] == \
+            [("L1", "Sem desligamento de Aerogerador/RMT/LT", "COG-R", "01:15"), ("L2", "Com desligamento da UG-1", "UHE MGP", "02:15"),
+             ("L3", "Com desligamento da UG-2", "UHE SJO", "03:15")]
 
-    @pytest.mark.parametrize("texto,esperado", [("1:30", "01:30"), ("0130", "01:30"), ("1h30", "01:30"), ("00:45", "00:45"),
-                                                ("99:59", "99:59"), (" 2:05 ", "02:05")])
-    def test_tempo_de_retorno_valido_vira_hh_mm(self, app, texto, esperado):
-        assert app.doc_lib_normalizar_duracao_sm(texto) == esperado
+    def test_local_instalacao_e_equipamento_ficam_sempre_em_caixa_alta(self, app, fluxo):
+        doc = fluxo.doc(fluxo.salvar(equipamentos=[self.linha_equip(local="se mcp", instalacao="  pátio   230 kV ",
+                                                                    equipamento="Dj 52-1 (ação)")]))
+        item = doc["equipamentos"][0]
+        assert (item["local"], item["instalacao"], item["equipamento"]) == ("SE MCP", "PÁTIO 230 KV", "DJ 52-1 (AÇÃO)")
+        assert item["caracterizacao"] == "Sem desligamento de UG/LT"               # as listas mantêm o texto da lista
 
-    @pytest.mark.parametrize("texto", ["", "abc", "1:7", "130", "1:60", "100:00", "12:5", "-1:00", "1:30:00", "１２:30"])
+    def test_lista_de_caracterizacao_e_a_informada_pelo_cog(self, app):
+        lista = app.DOC_LIB_CARACTERIZACOES_SM
+        assert len(lista) == 44 and len(set(lista)) == 44
+        assert lista[:6] == ["Sem desligamento de UG/LT", "Sem desligamento de Aerogerador/RMT/LT", "Com desligamento da UG-1",
+                             "Com desligamento da UG-2", "Com desligamento da UG-3", "Com desligamento da UG-4"]
+        assert lista[6:11] == ["Com desligamento das UG-1 e 2", "Com desligamento das UG-1 e 3", "Com desligamento das UG-1 e 4",
+                               "Com desligamento das UG-2 e 3", "Com desligamento das UG-2 e 4"]
+        assert lista[11:16] == ["Com desligamento das UG-1, 2 e 3", "Com desligamento das UG-1, 2 e 4",
+                                "Com desligamento das UG-1, 3 e 4", "Com desligamento das UG-2, 3 e 4",
+                                "Com desligamento das UG-1, 2, 3 e 4"]
+        assert lista[16:23] == ["Com desligamento de Aerogerador", "Com desligamento da RMT", "Com desligamento da LT",
+                                "Com desligamento do TR-1", "Com desligamento do TR-2", "Com desligamento do TR-3",
+                                "Com desligamento do TR-4"]
+        assert lista[23] == "Com risco desligamento da UG-1" and lista[-1] == "Com risco desligamento do TR-4"
+        assert "Com risco desligamento das UG-1, 2, 3 e 4" in lista and "Com risco desligamento de Aerogerador" in lista
+        assert not any("UG-3 e 4" in texto for texto in lista)                          # a combinação não consta da lista do COG
+
+    def test_lista_do_local_da_execucao_e_a_informada_pelo_cog(self, app):
+        assert app.DOC_LIB_LOCAIS_EXECUCAO_SM == [
+            "COG-P", "COG-R", "UHE MGP", "UHE SJO", "UHE FGO", "PCH LAV", "PCH QUE", "PCH VIE", "CGE PTM", "CGE JDT", "UFV PTM",
+            "SE Macapá", "SE Itaguaçu", "SE Cerro Largo", "SE Santa Cabeça", "SE Russas-II", "EOL Ubatuba", "EOL Santa Catarina",
+            "EOL Goiabeira", "EOL Pitombeira", "EOL Ventos de Horizonte", "EOL Santa Régia", "EOL São João", "UFV Pitombeira-I",
+            "UFV Pitombeira-II", "UFV Pitombeira-III", "UFV Pitombeira-IV", "SE Jandaíra-II", "Ao longo da LT", "Ao longo da RMT"]
+
+    @pytest.mark.parametrize("caracterizacao", ["Sem desligamento de UG/LT", "Com risco desligamento da LT",
+                                                "Com desligamento das UG-1, 2, 3 e 4", "Com desligamento do TR-3"])
+    @pytest.mark.parametrize("local", ["COG-P", "SE Itaguaçu", "UFV Pitombeira-IV", "Ao longo da RMT"])
+    def test_opcoes_da_lista_sao_aceitas(self, app, fluxo, caracterizacao, local):
+        item = self.linha_equip(caracterizacao=caracterizacao, local_execucao=local)
+        assert erros_de(app, fluxo, equipamentos=[item]) == []
+
+    @pytest.mark.parametrize("campo,valor", [("caracterizacao", "Disjuntor"), ("caracterizacao", "Com desligamento das UG-3 e 4"),
+                                             ("caracterizacao", "Com risco de desligamento da UG-1"), ("caracterizacao", ""),
+                                             ("local_execucao", "Campo"), ("local_execucao", "SE Qualquer"), ("local_execucao", "")])
+    def test_texto_fora_da_lista_e_recusado(self, app, fluxo, campo, valor):
+        assert (f"equip:1:{campo}",) in erros_de(app, fluxo, equipamentos=[self.linha_equip(**{campo: valor})])
+        with pytest.raises(app.DocLibValidacaoSM):
+            fluxo.salvar(equipamentos=[self.linha_equip(**{campo: valor})])
+        assert numeros(app) == []
+
+    def test_opcao_da_lista_digitada_com_outra_caixa_vira_a_da_lista(self, app, fluxo):
+        doc = fluxo.doc(fluxo.salvar(equipamentos=[self.linha_equip(caracterizacao="COM DESLIGAMENTO DA UG-1",
+                                                                    local_execucao="  ao longo da lt ")]))
+        assert doc["equipamentos"][0]["caracterizacao"] == "Com desligamento da UG-1"
+        assert doc["equipamentos"][0]["local_execucao"] == "Ao longo da LT"
+
+    def test_opcao_fora_da_lista_nao_vale_nem_na_segunda_linha_parcial(self, app, fluxo):
+        erros = erros_de(app, fluxo, equipamentos=[self.linha_equip(), {"local": "SE IGU", "caracterizacao": "texto livre"}])
+        assert ("equip:2:caracterizacao",) in erros and ("equip:2:local_execucao",) in erros
+
+    @pytest.mark.parametrize("texto,esperado", [("Indisponível", "Indisponível"), ("indisponivel", "Indisponível"),
+                                                ("INDISPONÍVEL", "Indisponível"), ("1:30", "01:30"), ("0130", "01:30"),
+                                                ("1h30", "01:30"), ("00:45", "00:45"), ("23:59", "23:59"), (" 2:05 ", "02:05")])
+    def test_tempo_de_retorno_como_no_ai_indisponivel_ou_hh_mm(self, app, fluxo, texto, esperado):
+        assert app.doc_lib_normalizar_tempo_retorno_sm(texto) == esperado and app.doc_lib_tempo_retorno_valido_sm(texto)
+        doc = fluxo.doc(fluxo.salvar(equipamentos=[self.linha_equip(tempo_retorno=texto)]))
+        assert doc["equipamentos"][0]["tempo_retorno"] == esperado
+
+    @pytest.mark.parametrize("texto", ["", "abc", "1:7", "24:00", "99:59", "1:60", "12:5", "-1:00", "1:30:00", "Indisp", "sim"])
     def test_tempo_de_retorno_invalido(self, app, fluxo, texto):
-        assert app.doc_lib_normalizar_duracao_sm(texto) is None
-        item = dict(fluxo.dados()["equipamentos"][0], tempo_retorno=texto)
-        assert ("equip:1:tempo_retorno",) in erros_de(app, fluxo, equipamentos=[item])
+        assert not app.doc_lib_tempo_retorno_valido_sm(texto)
+        assert ("equip:1:tempo_retorno",) in erros_de(app, fluxo, equipamentos=[self.linha_equip(tempo_retorno=texto)])
+
+    def test_tempo_de_retorno_indisponivel_em_cada_linha(self, app, fluxo):
+        linhas = [self.linha_equip(tempo_retorno="Indisponível"), self.linha_equip(tempo_retorno="00:30"),
+                  self.linha_equip(tempo_retorno="Indisponível")]
+        doc = fluxo.doc(fluxo.salvar(equipamentos=linhas))
+        assert [item["tempo_retorno"] for item in doc["equipamentos"]] == ["Indisponível", "00:30", "Indisponível"]
 
     def test_motivo_obrigatorio_e_limitado_a_seis_linhas(self, app, fluxo):
         assert ("motivo",) in erros_de(app, fluxo, motivo="  ")
@@ -339,6 +412,15 @@ class TestManobras:
         linha = dict(fluxo.dados()["liberacao"][0], **{campo: valor})
         assert (f"lib:1:{chave}",) in erros_de(app, fluxo, liberacao=[linha])
 
+    def test_local_das_manobras_fica_em_caixa_alta_nas_duas_tabelas(self, app, fluxo):
+        doc = fluxo.doc(fluxo.salvar(liberacao=[{"numero": "1", "local": "se igu", "acao": "Abrir DJ"}],
+                                     normalizacao=[{"numero": "1", "local": "cog", "acao": "Fechar DJ"}]))
+        assert doc["liberacao"][0]["local"] == "SE IGU" and doc["normalizacao"][0]["local"] == "COG"
+
+    def test_local_em_caixa_alta_continua_limitado_a_seis_caracteres(self, app, fluxo):
+        linha = {"numero": "1", "local": "sem mcp1", "acao": "Abrir DJ"}                  # 8 caracteres
+        assert ("lib:1:local",) in erros_de(app, fluxo, liberacao=[linha])
+
     def test_local_aceita_exatamente_seis_caracteres(self, app, fluxo):
         linha = dict(fluxo.dados()["liberacao"][0], local="SE MCP")
         assert len(linha["local"]) == 6 and erros_de(app, fluxo, liberacao=[linha]) == []
@@ -385,16 +467,42 @@ class TestManobras:
         with pytest.raises(app.DocLibValidacaoSM, match="não podem ser anteriores"):
             fluxo.alterar(sm_id, liberacao=invertida)
 
-    def test_correcao_de_horario_e_permitida_e_apagar_nao(self, app, fluxo):
-        sm_id = fluxo.ate(EM_EXECUCAO)
+    def test_correcao_de_horario_antes_dos_executantes_e_apagar_nao(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
         base = fluxo.doc(sm_id)["liberacao"]
-        fluxo.alterar(sm_id, liberacao=[dict(base[0], hora="07:55")] + base[1:])
+        parcial = [dict(base[0], data="25/10/2026", hora="08:00")] + base[1:]
+        fluxo.alterar(sm_id, liberacao=parcial)
+        fluxo.alterar(sm_id, liberacao=[dict(parcial[0], hora="07:55")] + parcial[1:])           # correção (ainda Aprovado)
         assert fluxo.doc(sm_id)["liberacao"][0]["hora"] == "07:55"
         with pytest.raises(app.DocLibBloqueado, match="não apagadas"):
-            fluxo.alterar(sm_id, liberacao=[dict(base[0], data="", hora="")] + base[1:])
-        historico = app.doc_lib_conectar().execute(
-            "SELECT descricao FROM doclib_sm_historico WHERE evento = 'data_manobra'").fetchall()
+            fluxo.alterar(sm_id, liberacao=[dict(parcial[0], data="", hora="")] + parcial[1:])
+        conexao = app.doc_lib_conectar()
+        historico = conexao.execute("SELECT descricao FROM doclib_sm_historico WHERE evento = 'data_manobra'").fetchall()
+        conexao.close()
         assert any("corrigidas" in descricao for (descricao,) in historico)
+
+    def test_liberacao_registrada_fica_bloqueada_itens_6_e_7(self, app, fluxo):
+        sm_id = fluxo.ate(EM_EXECUCAO)                                   # horários e executantes da liberação já salvos
+        doc = fluxo.doc(sm_id)
+        with pytest.raises(app.DocLibBloqueado, match="Data e hora das manobras de liberação"):
+            fluxo.alterar(sm_id, liberacao=[dict(doc["liberacao"][0], hora="07:55")] + doc["liberacao"][1:])
+        with pytest.raises(app.DocLibBloqueado, match="Executantes da Liberação"):
+            fluxo.alterar(sm_id, exec_lib_local="Outro executante")
+        with pytest.raises(app.DocLibBloqueado, match="Executantes da Liberação"):
+            fluxo.alterar(sm_id, exec_lib_remoto="Acrescentado depois")
+        with pytest.raises(app.DocLibBloqueado):
+            fluxo.alterar(sm_id, exec_lib_local="")
+        gravado = fluxo.doc(sm_id)
+        assert [m["hora"] for m in gravado["liberacao"]] == [m["hora"] for m in doc["liberacao"]]
+        assert gravado["exec_lib_local"] == "Fulano (campo)" and gravado["exec_lib_remoto"] in (None, "")
+
+    def test_normalizacao_continua_editavel_ate_concluir(self, app, fluxo):
+        sm_id = fluxo.ate(EM_EXECUCAO)
+        parcial = fluxo.datar(fluxo.doc(sm_id), "normalizacao", 16)
+        parcial[2] = dict(parcial[2], data="", hora="")
+        fluxo.alterar(sm_id, normalizacao=parcial)                                   # horários aos poucos
+        fluxo.alterar(sm_id, normalizacao=[dict(parcial[0], hora="16:05")] + parcial[1:])      # correção
+        assert fluxo.doc(sm_id)["normalizacao"][0]["hora"] == "16:05" and fluxo.doc(sm_id)["status"] == EM_EXECUCAO
 
 
 # ======================================================================================================================

@@ -41,7 +41,7 @@ class TestConteudo:
                          "Programação:", "Reprogramação-1:", "Reprogramação-2:", "Reprogramação-3:",
                          "25/10/2026", "08:00 hs", "17:00 hs", "Equipamento(s) a impedir:", "3.1. Local", "3.2. Instalação",
                          "3.3. Equipamento", "3.4. Caracterização", "3.5. Local da Execução do(s) Serviço(s)",
-                         "3.6. Tempo Retorno à Operação", "SE MCP", "Pátio 230 kV", "DJ 52-1", "Disjuntor", "Campo", "02:30",
+                         "3.6. Tempo Retorno à Operação", "SE MCP", "PÁTIO 230 KV", "DJ 52-1", "Sem desligamento de UG/LT", "UHE MGP", "02:30",
                          "Motivo:", "Manutenção preventiva no disjuntor 52-1.", "Condições de Segurança:",
                          "Chaves abertas e bloqueadas:", "89-1 e 89-2", "Chaves fechadas e bloqueadas:",
                          "Disjuntores Extraídos:", "Outras condições:", "Com bloqueio por LOTO:", "Sem bloqueio por LOTO:",
@@ -50,8 +50,34 @@ class TestConteudo:
                          "Observações:", "Observação de teste", "Elaborado por:", "operador1", "Área:", "COG", "24/10/2026",
                          "Ass:", "Conferência:", "Nome:", "Aguardando a Conferência do documento"):
             assert esperado in plano, esperado
+        assert "Pátio 230 kV" not in plano                                                  # 3.1 a 3.3 saem sempre em caixa alta
         assert len(documento) <= 2                                                          # Elaborado por e Conferência ficam juntos
         assert f"Página 1 de {len(documento)}" in plano and plano.count("SM Nº COG-0001/26") == 2 * len(documento)
+
+    def test_caixa_alta_nos_itens_3_1_a_3_3_e_no_local_das_manobras(self, app, fluxo, pdf):
+        sm_id = fluxo.salvar(equipamentos=[{"local": "se igu", "instalacao": "pátio 69 kv", "equipamento": "dj 52-1",
+                                            "caracterizacao": "Com desligamento da LT", "local_execucao": "Ao longo da LT",
+                                            "tempo_retorno": "Indisponível"}],
+                             liberacao=[{"numero": "1", "local": "cog", "acao": "Abrir DJ 52-1"}],
+                             normalizacao=[{"numero": "1", "local": "se igu", "acao": "Fechar DJ 52-1"}])
+        _, documento, texto = pdf(sm_id)
+        plano = sem_quebras(texto)
+        for esperado in ("SE IGU", "PÁTIO 69 KV", "DJ 52-1", "Com desligamento da LT", "Ao longo da LT"):
+            assert esperado in plano, esperado
+        for minusculo in ("se igu", "pátio 69 kv", "dj 52-1"):
+            assert minusculo not in plano, minusculo
+        palavras = [p[4] for p in documento[0].get_text("words")]
+        assert "COG" in palavras and "cog" not in palavras                                    # Local das manobras também
+
+    def test_tempo_de_retorno_indisponivel_e_impresso_como_texto(self, app, fluxo, pdf):
+        sm_id = fluxo.salvar(equipamentos=[
+            {"local": "SE MCP", "instalacao": "PÁTIO", "equipamento": "DJ 1", "caracterizacao": "Sem desligamento de UG/LT",
+             "local_execucao": "COG-P", "tempo_retorno": "Indisponível"},
+            {"local": "SE MCP", "instalacao": "PÁTIO", "equipamento": "DJ 2", "caracterizacao": "Sem desligamento de UG/LT",
+             "local_execucao": "COG-R", "tempo_retorno": "9:05"}])
+        _, _, texto = pdf(sm_id)
+        plano = sem_quebras(texto)
+        assert "Indisponível" in plano and "09:05" in plano
 
     def test_numeracao_da_secao_e_sequencia_impressa(self, app, fluxo, pdf):
         _, documento, texto = pdf(fluxo.salvar())
@@ -253,10 +279,12 @@ class TestTextosSemEspacoOuExtremos:
         trinta = [{"numero": str(i), "local": "SE MCP", "acao": f"Abrir equipamento {i} " * 8} for i in range(1, 31)]
         sm_id = fluxo.salvar(liberacao=trinta, normalizacao=trinta, motivo="\n".join(f"linha {i}" for i in range(1, 7)),
                              cond_chaves_abertas="a\nb\nc", observacoes="o\n" * 30,
-                             equipamentos=[{"local": f"L{i}", "instalacao": "I" * 40, "equipamento": "E" * 60, "caracterizacao": "C" * 30,
-                                            "local_execucao": "X" * 50, "tempo_retorno": "99:59"} for i in (1, 2, 3)])
+                             equipamentos=[{"local": f"L{i}", "instalacao": "I" * 40, "equipamento": "E" * 60,
+                                            "caracterizacao": "Com risco desligamento das UG-1, 2, 3 e 4",
+                                            "local_execucao": "EOL Ventos de Horizonte", "tempo_retorno": "23:59"} for i in (1, 2, 3)])
         fluxo.gerar(sm_id)
         fluxo.conferir(sm_id, *[fluxo.conferencia_manual(nome=f"C{i}") for i in range(9)], fluxo.conferencia_sistema())
         assert fluxo.doc(sm_id)["status"] == APROVADO and len(fluxo.doc(sm_id)["conferencias"]) == 10
         _, documento, texto = pdf(sm_id)
-        assert len(documento) >= 4 and "99:59" in texto and sem_quebras(texto).count("Nome:") == 10
+        assert len(documento) >= 4 and "23:59" in texto and sem_quebras(texto).count("Nome:") == 10
+        assert "Com risco desligamento das UG-1, 2, 3 e 4" in sem_quebras(texto) and "EOL Ventos de Horizonte" in sem_quebras(texto)

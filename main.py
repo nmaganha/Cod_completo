@@ -1,4 +1,4 @@
-# Código atualizado em 24-10-26 - 2330 - Click_25: (SM_Avulso - Sequência de Manobras no Doc_Lib.)
+# Código atualizado em 25-10-26 - 0238 - Click_25: (SM_Avulso - listas, caixa alta, tempo de retorno, itens 6 e 7 bloqueados, conferência Manutenção/Operação)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -22404,9 +22404,9 @@ DOC_LIB_AREA_ELABORADOR_SM = "COG"                 # 11 Elaborado por, Área (va
 DOC_LIB_AREA_CONFERENCIA_MANUAL_SM = "Manutenção"  # 12.1 Conferência manual, Área (valor inicial)
 DOC_LIB_ASS_CONFERENCIA_MANUAL_SM = "via fonia"    # 12.1 Conferência manual, Ass. (valor inicial)
 DOC_LIB_AREA_CONFERENCIA_SISTEMA_SM = "COG"        # 12.2 Conferência pelo sistema, Área (valor inicial)
-DOC_LIB_MODALIDADE_MANUAL_SM = "manual"
-DOC_LIB_MODALIDADE_SISTEMA_SM = "sistema"
-DOC_LIB_MODALIDADES_SM = {DOC_LIB_MODALIDADE_MANUAL_SM: "Manual", DOC_LIB_MODALIDADE_SISTEMA_SM: "Pelo sistema"}
+DOC_LIB_MODALIDADE_MANUAL_SM = "manual"            # valor gravado: conferência da Manutenção (profissional da área, via fonia)
+DOC_LIB_MODALIDADE_SISTEMA_SM = "sistema"          # valor gravado: conferência da Operação (profissional autenticado no sistema)
+DOC_LIB_MODALIDADES_SM = {DOC_LIB_MODALIDADE_MANUAL_SM: "Manutenção", DOC_LIB_MODALIDADE_SISTEMA_SM: "Operação"}   # nomes exibidos
 
 # 2 Período programado: 2.1 Programação e 2.2 a 2.4 Reprogramações 1 a 3 (cada uma com Início e Término: data e hora)
 DOC_LIB_PERIODOS_SM = [("p0", "2.1", "Programação"), ("p1", "2.2", "Reprogramação-1"),
@@ -22427,6 +22427,23 @@ DOC_LIB_COLUNAS_EQUIPAMENTO_SM = [("local", "3.1", "Local"), ("instalacao", "3.2
                                   ("equipamento", "3.3", "Equipamento"), ("caracterizacao", "3.4", "Caracterização"),
                                   ("local_execucao", "3.5", "Local da Execução do(s) Serviço(s)"),
                                   ("tempo_retorno", "3.6", "Tempo Retorno à Operação")]
+# 3.4 Caracterização: lista de seleção, gravada exatamente como aparece aqui (a ordem é a da lista). Para incluir ou alterar uma
+# opção basta editar _DOC_LIB_DESLIGAMENTOS_SM. As combinações de UG da lista são as informadas pelo COG (não há "UG-3 e 4").
+_DOC_LIB_DESLIGAMENTOS_SM = [
+    "da UG-1", "da UG-2", "da UG-3", "da UG-4", "das UG-1 e 2", "das UG-1 e 3", "das UG-1 e 4", "das UG-2 e 3", "das UG-2 e 4",
+    "das UG-1, 2 e 3", "das UG-1, 2 e 4", "das UG-1, 3 e 4", "das UG-2, 3 e 4", "das UG-1, 2, 3 e 4", "de Aerogerador", "da RMT",
+    "da LT", "do TR-1", "do TR-2", "do TR-3", "do TR-4"]
+DOC_LIB_CARACTERIZACOES_SM = (["Sem desligamento de UG/LT", "Sem desligamento de Aerogerador/RMT/LT"]
+                              + [f"Com desligamento {texto}" for texto in _DOC_LIB_DESLIGAMENTOS_SM]
+                              + [f"Com risco desligamento {texto}" for texto in _DOC_LIB_DESLIGAMENTOS_SM])
+# 3.5 Local da Execução dos Serviços: lista de seleção, gravada exatamente como aparece aqui
+DOC_LIB_LOCAIS_EXECUCAO_SM = [
+    "COG-P", "COG-R", "UHE MGP", "UHE SJO", "UHE FGO", "PCH LAV", "PCH QUE", "PCH VIE", "CGE PTM", "CGE JDT", "UFV PTM",
+    "SE Macapá", "SE Itaguaçu", "SE Cerro Largo", "SE Santa Cabeça", "SE Russas-II", "EOL Ubatuba", "EOL Santa Catarina",
+    "EOL Goiabeira", "EOL Pitombeira", "EOL Ventos de Horizonte", "EOL Santa Régia", "EOL São João", "UFV Pitombeira-I",
+    "UFV Pitombeira-II", "UFV Pitombeira-III", "UFV Pitombeira-IV", "SE Jandaíra-II", "Ao longo da LT", "Ao longo da RMT"]
+# 3.1 Local, 3.2 Instalação e 3.3 Equipamento: sempre em caixa alta (tela, banco e PDF)
+DOC_LIB_CAMPOS_CAIXA_ALTA_EQUIPAMENTO_SM = ("local", "instalacao", "equipamento")
 # 5 Condições de Segurança: (campo, número do item, descrição). Os cinco são obrigatórios (escrever "Nenhuma" se não houver)
 DOC_LIB_CONDICOES_SM = [("cond_chaves_abertas", "5.1", "Chaves abertas e bloqueadas"),
                         ("cond_chaves_fechadas", "5.2", "Chaves fechadas e bloqueadas"),
@@ -22505,14 +22522,25 @@ def doc_lib_identificar_sequencias_sm(numeros):
     return resultado
 
 
-def doc_lib_normalizar_duracao_sm(texto):
-    """Tempo de Retorno à Operação (duração hh:mm): aceita 1:30, 01:30, 0130 e 1h30, devolve HH:MM. As horas vão de 0 a 99 e
-    os minutos de 00 a 59. Retorna None se o texto não for uma duração válida."""
-    texto = _doc_lib_txt(texto).lower()
-    achado = re.fullmatch(r"(\d{1,2})\s*[:h.]\s*(\d{2})", texto, re.ASCII) or re.fullmatch(r"(\d{2})(\d{2})", texto, re.ASCII)
-    if not achado or int(achado.group(2)) > 59:
-        return None
-    return f"{int(achado.group(1)):02d}:{achado.group(2)}"
+def doc_lib_normalizar_tempo_retorno_sm(texto):
+    """3.6 Tempo de Retorno à Operação, no padrão do AI: "Indisponível" (aceita sem acento e em qualquer caixa) ou o tempo em
+    HH:MM (1530, 9:05 e 15h30 viram HH:MM). Qualquer outro texto é devolvido como veio (a validação o recusa)."""
+    texto = " ".join(str(texto or "").split())
+    if _doc_lib_sem_acento(texto).lower() == _doc_lib_sem_acento(DOC_LIB_TEXTO_INDISPONIVEL).lower():
+        return DOC_LIB_TEXTO_INDISPONIVEL
+    return doc_lib_normalizar_hora(texto) or texto
+
+
+def doc_lib_tempo_retorno_valido_sm(texto):
+    """True se o 3.6 é "Indisponível" ou um tempo HH:MM válido (como no AI)."""
+    texto = doc_lib_normalizar_tempo_retorno_sm(texto)
+    return texto == DOC_LIB_TEXTO_INDISPONIVEL or bool(doc_lib_normalizar_hora(texto))
+
+
+def _doc_lib_opcao_da_lista_sm(texto, opcoes):
+    """A opção da lista igual ao texto (sem diferença de maiúsculas ou de espaços repetidos); se não houver, o texto como veio."""
+    texto = " ".join(str(texto or "").split())
+    return next((opcao for opcao in opcoes if opcao.lower() == texto.lower()), texto)
 
 
 # Pares de verbos de manobra com antônimo inequívoco. Cada verbo tem três formas (infinitivo, 3ª pessoa e subjuntivo/imperativo)
@@ -22905,7 +22933,11 @@ def doc_lib_normalizar_sm(dados):
     equipamentos = []
     for item in list(dados.get("equipamentos") or [])[:DOC_LIB_LINHAS_EQUIPAMENTOS_SM]:
         item = {campo: _doc_lib_txt(item.get(campo)) for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM}
-        item["tempo_retorno"] = doc_lib_normalizar_duracao_sm(item["tempo_retorno"]) or item["tempo_retorno"]
+        for campo in DOC_LIB_CAMPOS_CAIXA_ALTA_EQUIPAMENTO_SM:           # 3.1, 3.2 e 3.3: sempre em caixa alta
+            item[campo] = " ".join(item[campo].upper().split())
+        item["caracterizacao"] = _doc_lib_opcao_da_lista_sm(item["caracterizacao"], DOC_LIB_CARACTERIZACOES_SM)
+        item["local_execucao"] = _doc_lib_opcao_da_lista_sm(item["local_execucao"], DOC_LIB_LOCAIS_EXECUCAO_SM)
+        item["tempo_retorno"] = doc_lib_normalizar_tempo_retorno_sm(item["tempo_retorno"])
         equipamentos.append(item)
     while len(equipamentos) < DOC_LIB_LINHAS_EQUIPAMENTOS_SM:
         equipamentos.append({campo: "" for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM})
@@ -22916,6 +22948,7 @@ def doc_lib_normalizar_sm(dados):
             linha = {campo: _doc_lib_txt(item.get(campo)) for campo in _DOC_LIB_COLUNAS_MANOBRA_SM}
             linha["data"] = doc_lib_normalizar_data(linha["data"]) or linha["data"]
             linha["hora"] = doc_lib_normalizar_hora(linha["hora"]) or linha["hora"]
+            linha["local"] = linha["local"].upper()                      # Local das manobras: sempre em caixa alta
             linha["acao"] = _doc_lib_texto_multilinha_sm(item.get("acao"))
             linha["conferir"] = 1 if item.get("conferir") else 0
             if any(linha[campo] for campo in _DOC_LIB_COLUNAS_MANOBRA_SM):
@@ -22963,15 +22996,12 @@ def doc_lib_validar_sm(dados, atual=None):
         erros.append((tuple([chaves] if isinstance(chaves, str) else chaves), mensagem))
 
     def formato(chave, descricao, tipo):
-        """True se o campo preenchido tem o formato válido (data, hora ou duração); aponta o erro se não tiver."""
-        valor = dados.get(chave)
-        validador = {"data": doc_lib_normalizar_data, "hora": doc_lib_normalizar_hora,
-                     "duracao": doc_lib_normalizar_duracao_sm}[tipo]
-        if validador(valor):
+        """True se o campo preenchido tem o formato válido (data ou hora); aponta o erro se não tiver."""
+        validador = {"data": doc_lib_normalizar_data, "hora": doc_lib_normalizar_hora}[tipo]
+        if validador(dados.get(chave)):
             return True
-        padrao = {"data": "DD/MM/AAAA", "hora": "HH:MM", "duracao": "HH:MM, com minutos de 00 a 59"}[tipo]
-        invalido = {"data": "data inválida", "hora": "hora inválida", "duracao": "tempo inválido"}[tipo]
-        erro(chave, f"{descricao}: {invalido} (use {padrao}).")
+        erro(chave, f"{descricao}: {'data' if tipo == 'data' else 'hora'} inválida (use "
+                    f"{'DD/MM/AAAA' if tipo == 'data' else 'HH:MM'}).")
         return False
 
     # ---- 2 Período programado: a Programação é obrigatória; cada Reprogramação, se tiver dados, precisa estar completa
@@ -23012,9 +23042,16 @@ def doc_lib_validar_sm(dados, atual=None):
                 chave = f"equip:{linha}:{campo}"
                 descricao = f"Equipamento(s) a impedir, linha {linha}, {numero} {titulo}"
                 if vazio(item.get(campo)):
-                    erro(chave, f"{descricao}: preencha o campo.")
-                elif campo == "tempo_retorno" and not doc_lib_normalizar_duracao_sm(item[campo]):
-                    erro(chave, f"{descricao}: tempo inválido (use HH:MM, com minutos de 00 a 59).")
+                    erro(chave, f"{descricao}: " + ("selecione Indisponível ou informe o tempo (HH:MM)."
+                                                    if campo == "tempo_retorno" else
+                                                    "selecione uma opção da lista." if campo in ("caracterizacao", "local_execucao")
+                                                    else "preencha o campo."))
+                elif campo == "caracterizacao" and item[campo] not in DOC_LIB_CARACTERIZACOES_SM:
+                    erro(chave, f"{descricao}: selecione uma das opções da lista.")
+                elif campo == "local_execucao" and item[campo] not in DOC_LIB_LOCAIS_EXECUCAO_SM:
+                    erro(chave, f"{descricao}: selecione uma das opções da lista.")
+                elif campo == "tempo_retorno" and not doc_lib_tempo_retorno_valido_sm(item[campo]):
+                    erro(chave, f"{descricao}: tempo inválido (selecione Indisponível ou use HH:MM).")
         if vazio(dados.get("motivo")):
             erro("motivo", "Motivo: preencha o campo.")
         elif doc_lib_linhas_texto_sm(dados["motivo"]) > DOC_LIB_LINHAS_MOTIVO_SM:
@@ -23090,7 +23127,7 @@ def doc_lib_validar_sm(dados, atual=None):
     for posicao, conferencia in enumerate(conferencias, start=1):
         rotulo = f"Conferência {posicao} ({DOC_LIB_MODALIDADES_SM.get(conferencia['modalidade'], 'modalidade inválida')})"
         if conferencia["modalidade"] not in DOC_LIB_MODALIDADES_SM:
-            erro(f"conf:{posicao}:nome", f"{rotulo}: a modalidade (manual ou pelo sistema) precisa ser registrada.")
+            erro(f"conf:{posicao}:nome", f"{rotulo}: a modalidade (Manutenção ou Operação) precisa ser registrada.")
         for campo, titulo in (("nome", "Conferido por"), ("area", "Área"), ("data", "Data"), ("ass", "Ass.")):
             if vazio(conferencia[campo]):
                 erro(f"conf:{posicao}:{campo}", f"{rotulo}, {titulo}: preencha o campo.")
@@ -23110,16 +23147,17 @@ _DOC_LIB_GRUPOS_EDITAVEIS_SM = {
     STATUS_ATEIE_EM_ANALISE: ("geral", "reprogramacao"),
     STATUS_SM_AGUARDA_CONFERENCIA: ("reprogramacao", "conferencias"),
     STATUS_ATEIE_APROVADO_EXECUCAO: ("reprogramacao", "datas_lib", "exec_lib"),
-    STATUS_ATEIE_EM_EXECUCAO: ("reprogramacao", "datas_lib", "datas_nor", "exec_lib", "exec_nor"),
+    STATUS_ATEIE_EM_EXECUCAO: ("reprogramacao", "datas_nor", "exec_nor"),     # liberação (itens 6 e 7) já registrada: bloqueada
 }
 _DOC_LIB_NOMES_GRUPOS_SM = {
     "geral": "dados gerais do documento (só podem ser alterados com a SM Em análise)",
     "reprogramacao": "Reprogramações",
-    "datas_lib": "Data e hora das manobras de liberação (só depois que a SM for Aprovada para Execução)",
+    "datas_lib": "Data e hora das manobras de liberação (só com a SM Aprovada para Execução; depois de registrada a liberação "
+                 "elas ficam bloqueadas)",
     "datas_nor": "Data e hora das manobras de normalização (só com a SM Em Execução)",
-    "exec_lib": "Executantes da Liberação (só com a SM Aprovada para Execução)",
+    "exec_lib": "Executantes da Liberação (só com a SM Aprovada para Execução; depois de salvos ficam bloqueados)",
     "exec_nor": "Executantes da Normalização (só com a SM Em Execução)",
-    "conferencias": "Conferência (só com a SM Aguardando Conferência)"}
+    "conferencias": "Conferência (Manutenção e Operação: só com a SM Aguardando Conferência)"}
 
 
 def _doc_lib_grupos_sm(doc):
@@ -23165,9 +23203,11 @@ def doc_lib_diferencas_bloqueadas_sm(atual, dados):
     for grupo, nome in (("exec_lib", "Executantes da Liberação"), ("exec_nor", "Executantes da Normalização")):
         if grupo in editaveis and any(antes[grupo]) and not any(depois[grupo]):
             bloqueadas.append(f"{nome} já registrados (podem ser corrigidos, não apagados)")
-    for grupo, nome in (("datas_lib", "manobras de liberação"), ("datas_nor", "manobras de normalização")):
-        if grupo in editaveis and any(registrada != ("", "") and nova == ("", "")
-                                      for registrada, nova in zip(antes[grupo], depois[grupo])):
+    for grupo, chave, nome in (("datas_lib", "liberacao", "manobras de liberação"), ("datas_nor", "normalizacao", "manobras de normalização")):
+        if grupo in editaveis and any(
+                (_doc_lib_txt(antiga.get("data")) or _doc_lib_txt(antiga.get("hora")))
+                and not (_doc_lib_txt(nova.get("data")) or _doc_lib_txt(nova.get("hora")))
+                for antiga, nova in zip(atual.get(chave) or [], dados.get(chave) or [])):
             bloqueadas.append(f"Data e hora já registradas nas {nome} (podem ser corrigidas, não apagadas)")
     return bloqueadas
 
@@ -23757,7 +23797,7 @@ def doc_lib_gerar_pdf_sm(doc, caminho, gerado_por=""):
     estado["y"] += 0.6
     rotulo(X0 + 1.0, estado["y"] + 4.0, "3", "Equipamento(s) a impedir:", 10.0)
     estado["y"] += 5.4
-    proporcoes = (14.0, 16.2, 25.6, 14.3, 19.5, 10.4)
+    proporcoes = (11.0, 13.0, 19.0, 25.0, 18.0, 14.0)         # a Caracterização e o Tempo de Retorno ganharam as opções da lista
     larguras = [LARGURA * p / sum(proporcoes) for p in proporcoes]
     xs = [X0 + sum(larguras[:indice]) for indice in range(len(larguras))]
     ALTURA_CABECALHO = 10.2
@@ -23773,8 +23813,9 @@ def doc_lib_gerar_pdf_sm(doc, caminho, gerado_por=""):
     equipamentos = list(doc.get("equipamentos") or [])
     equipamentos += [{}] * (DOC_LIB_LINHAS_EQUIPAMENTOS_SM - len(equipamentos))
     for item in equipamentos:
-        celulas = [linhas_de(item.get(campo), largura - 2.0, 8.5) for (campo, _, _), largura in
-                   zip(DOC_LIB_COLUNAS_EQUIPAMENTO_SM, larguras)]
+        celulas = [linhas_de(str(item.get(campo) or "").upper() if campo in DOC_LIB_CAMPOS_CAIXA_ALTA_EQUIPAMENTO_SM
+                             else item.get(campo), largura - 2.0, 8.5)
+                   for (campo, _, _), largura in zip(DOC_LIB_COLUNAS_EQUIPAMENTO_SM, larguras)]
         altura = max(6.0, max(len(linhas) for linhas in celulas) * 3.9 + 2.4)
         garantir(altura)
         for x, largura, linhas in zip(xs, larguras, celulas):
@@ -23832,7 +23873,7 @@ def doc_lib_gerar_pdf_sm(doc, caminho, gerado_por=""):
             y = estado["y"]
             fonte("", 9.5)
             pdf.text(X0 + (LARGURA_SEQUENCIA - pdf.get_string_width(identificacao)) / 2.0, y + 4.3, identificacao)
-            local = _doc_lib_txt(manobra.get("local"))
+            local = _doc_lib_txt(manobra.get("local")).upper()
             pdf.text(X_LOCAL + (LARGURA_LOCAL - pdf.get_string_width(local)) / 2.0, y + 4.3, local)
             escrever(X_ACAO + 1.2, y + 4.3, linhas)
             pdf.set_line_width(0.2)
@@ -24109,7 +24150,8 @@ class LinhasManobrasSM:
         limite_local = (janela.janela.register(lambda p: len(p) <= DOC_LIB_LIMITE_LOCAL_MANOBRA_SM), "%P")
         linha["local"] = criar_entrada_sga(self.grade, width=9, validate="key", validatecommand=limite_local)
         janela.configurar_entrada(linha["local"], "texto")
-        ToolTipSGA(linha["local"], f"Local da manobra (até {DOC_LIB_LIMITE_LOCAL_MANOBRA_SM} caracteres)")
+        janela.forcar_maiusculas(linha["local"])                          # Local das manobras: sempre em caixa alta
+        ToolTipSGA(linha["local"], f"Local da manobra (até {DOC_LIB_LIMITE_LOCAL_MANOBRA_SM} caracteres, em maiúsculas)")
 
         linha["acao"] = criar_area_texto_sga(self.grade, wrap=WORD, height=1, width=30)
         linha["acao"].configure(padx=6, pady=4)
@@ -24138,7 +24180,7 @@ class LinhasManobrasSM:
         linha["celulas"] = [quadro_data, quadro_sequencia, linha["local"], linha["acao"], quadro_botoes]
         if valores:
             for chave in ("data", "hora", "numero", "local"):
-                doc_lib_definir_entrada(linha[chave], valores.get(chave) or "")
+                doc_lib_definir_entrada(linha[chave], (valores.get(chave) or "").upper() if chave == "local" else valores.get(chave) or "")
             janela._definir_texto(linha["acao"], valores.get("acao") or "")
             if valores.get("conferir"):
                 self._definir_conferir(linha, 1)
@@ -24291,10 +24333,10 @@ class LinhasManobrasSM:
 
 class LinhasConferenciaSM:
     """Conferência da SM (item 12): até 10 linhas, cada uma com a modalidade gravada de forma explícita.
-      - Conferência MANUAL: o profissional da Manutenção que conferiu a SM (via fonia). Conferido por e Ass. são digitados;
-        Área começa com "Manutenção", Ass. com "via fonia" e Data com a data de hoje.
-      - Conferência PELO SISTEMA: o profissional autenticado (Operação). Conferido por e Ass. são o nome completo e o login
-        dele, sem digitação; Área começa com "COG" e Data com a data de hoje.
+      - Conferência MANUTENÇÃO (modalidade "manual"): o profissional da Manutenção que conferiu a SM (via fonia). Conferido por
+        e Ass. são digitados; Área começa com "Manutenção", Ass. com "via fonia" e Data com a data de hoje.
+      - Conferência OPERAÇÃO (modalidade "sistema"): o profissional autenticado. Conferido por e Ass. são o nome completo e o
+        login dele, sem digitação; Área começa com "COG" e Data com a data de hoje.
     A SM só é aprovada com pelo menos uma de cada. A conferência salva não muda mais (linha travada, com o selo Registrada)."""
 
     COLUNAS = (("Modalidade", 116), ("Conferido por", 220), ("Área", 130), ("Data", 150), ("Ass.", 150), ("", 110))
@@ -24312,9 +24354,10 @@ class LinhasConferenciaSM:
                   ).grid(row=0, column=coluna, sticky="w", padx=4)
         barra = Frame(pai, bg=SGA_CARD)
         barra.pack(fill=X, padx=12, pady=(4, 10))
-        self.btn_manual = doc_lib_criar_botao(barra, "Conferência manual", lambda: self.adicionar_nova(DOC_LIB_MODALIDADE_MANUAL_SM),
+        self.btn_manual = doc_lib_criar_botao(barra, "Conferência Manutenção",
+                                              lambda: self.adicionar_nova(DOC_LIB_MODALIDADE_MANUAL_SM),
                                               "aviso", fonte=(SGA_FONTE, 9, "bold"))
-        self.btn_sistema = doc_lib_criar_botao(barra, "Conferência pelo sistema",
+        self.btn_sistema = doc_lib_criar_botao(barra, "Conferência Operação",
                                                lambda: self.adicionar_nova(DOC_LIB_MODALIDADE_SISTEMA_SM), "primario",
                                                fonte=(SGA_FONTE, 9, "bold"))
         self.btn_manual.pack(side=LEFT, padx=4, ipadx=6)
@@ -24432,7 +24475,7 @@ class JanelaSMAvulso:
     mesmo conceito da janela da MO (JanelaMO), com os campos da SM: 1 SM Nº (no alto e à direita, automático), 2 Período
     programado (programação e três reprogramações, habilitadas em ordem), 3 Equipamento(s) a impedir, 4 Motivo, 5 Condições
     de Segurança, 6 Manobras de Liberação, 7 Executantes, 8 Manobras de Normalização (com o botão Inverter Manobras),
-    9 Executantes, 10 Observações, 11 Elaborado por e 12 Conferência (manual e pelo sistema).
+    9 Executantes, 10 Observações, 11 Elaborado por e 12 Conferência (Manutenção e Operação).
 
     Reaproveita da JanelaMO, sem alterá-la, os utilitários genéricos de campos (marcas de erro, calendário, textos de várias
     linhas, rolagem), listados logo abaixo. Os botões são os da MO (Voltar, Salvar, Editar, Gerar, Cancelar, Reservado,
@@ -24499,7 +24542,8 @@ class JanelaSMAvulso:
         self._rotulos_marcados = {}   # rótulo -> cor original
         self._hora_da_data = {}       # entrada de data -> entrada da hora que recebe a hora atual
         self.periodo = {}             # "p0" a "p3" -> campos, ícones e botão do período
-        self.equip = []               # tabela 3: uma lista de {campo: Entry} por linha
+        self.equip = []               # tabela 3: uma lista de {campo: Entry ou Combobox} por linha
+        self.tempo_modo = []          # 3.6 de cada linha: StringVar "indisponivel", "tempo" ou ""
         self.txt_condicoes = {}       # campo de condição -> Text
 
         self.janela = Toplevel(root)
@@ -24509,6 +24553,9 @@ class JanelaSMAvulso:
         self.janela.resizable(True, True)
         self.janela['bg'] = SGA_FUNDO
         self.janela.protocol("WM_DELETE_WINDOW", self.voltar)
+        estilo = ttk.Style(self.janela)       # contorno vermelho do Combobox com pendência
+        estilo.configure("DocLibErro.TCombobox", bordercolor=SGA_VERMELHO, lightcolor=SGA_VERMELHO, darkcolor=SGA_VERMELHO)
+        estilo.map("DocLibErro.TCombobox", bordercolor=[("focus", SGA_VERMELHO), ("active", SGA_VERMELHO)])
 
         self._montar_cabecalho()
         self._montar_formulario()
@@ -24616,8 +24663,8 @@ class JanelaSMAvulso:
         self._separador()
 
         self._titulo_secao("3. Equipamento(s) a impedir:",
-                           "Três linhas de texto livre. A primeira é obrigatória; as outras, se usadas, devem ser preenchidas "
-                           "por inteiro. Tempo de Retorno à Operação em HH:MM.")
+                           "Três linhas. A primeira é obrigatória; as outras, se usadas, devem ser preenchidas por inteiro. "
+                           "3.1 a 3.3 em caixa alta; 3.4 e 3.5 por seleção na lista; 3.6 Indisponível ou Tempo de Retorno em HH:MM.")
         self._montar_equipamentos()
         self._separador()
 
@@ -24642,14 +24689,15 @@ class JanelaSMAvulso:
         card = self._novo_cartao()
         self._titulo_secao("6. Manobras de Liberação:",
                            "Até 30 manobras. A data e a hora de cada manobra são controle interno (só nesta tela, não vão para o\n"
-                           "documento impresso) e são preenchidas depois da conferência da SM.")
+                           "documento impresso) e são preenchidas depois da conferência da SM. Depois de salvos os horários e os\n"
+                           "executantes (item 7), este item fica bloqueado.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.tab_lib = LinhasManobrasSM(self, quadro, "lib", "Manobras de Liberação")
         self._separador()
         self._titulo_secao("7. Executantes da Liberação:",
                            "Preenchido depois da conferência da SM, ao lançar os horários das manobras e da liberação. "
-                           "Ao salvar, a SM passa a Em Execução.")
+                           "Ao salvar, a SM passa a Em Execução e os itens 6 e 7 ficam bloqueados.")
         self.ent_exec_lib_local = self._campo_entrada_sm("exec_lib_local", "7.1 No local", 70, geral=False)
         self.ent_exec_lib_remoto = self._campo_entrada_sm("exec_lib_remoto", "7.2 Remotamente", 70, geral=False)
 
@@ -24706,8 +24754,8 @@ class JanelaSMAvulso:
 
         self._titulo_secao("12. Conferência:",
                            "Feita depois de gerada a SM, com até 10 linhas. A SM só passa a Aprovado para Execução com pelo menos\n"
-                           "uma Conferência manual (profissional da Manutenção) E uma Conferência pelo sistema (profissional "
-                           "autenticado, Operação);\nsó uma delas não aprova. A conferência salva não muda mais.")
+                           "uma Conferência Manutenção (profissional da Manutenção, via fonia) E uma Conferência Operação (profissional "
+                           "autenticado no sistema);\nsó uma delas não aprova. A conferência salva não muda mais.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.conferencias = LinhasConferenciaSM(self, quadro)
@@ -24755,49 +24803,105 @@ class JanelaSMAvulso:
         self.periodo[prefixo] = dados
 
     def _montar_equipamentos(self):
-        """Tabela 3: 3 linhas x 6 colunas (Local, Instalação, Equipamento, Caracterização, Local da Execução dos Serviços e
-        Tempo de Retorno à Operação em HH:MM)."""
+        """Tabela 3: 3 linhas x 6 colunas. 3.1 Local, 3.2 Instalação e 3.3 Equipamento são texto livre sempre em caixa alta;
+        3.4 Caracterização e 3.5 Local da Execução dos Serviços são listas de seleção; 3.6 Tempo de Retorno à Operação segue o
+        AI: a opção Indisponível ou o tempo em HH:MM."""
         quadro = Frame(self.card, bg=SGA_CARD)
-        pesos = (2, 2, 3, 2, 3, 1)
-        quebras = (150, 150, 230, 150, 220, 96)           # largura (px) em que cada cabeçalho quebra de linha
-        for coluna, ((campo, numero, titulo), peso, quebra) in enumerate(zip(DOC_LIB_COLUNAS_EQUIPAMENTO_SM, pesos, quebras)):
-            quadro.grid_columnconfigure(coluna, weight=peso, uniform="equip", minsize=96)
+        minimos = (100, 120, 170, 290, 190, 150)         # largura mínima (px) de cada coluna
+        pesos = (1, 1, 2, 3, 2, 0)
+        quebras = (150, 150, 230, 280, 220, 140)           # largura (px) em que cada cabeçalho quebra de linha
+        for coluna, ((campo, numero, titulo), minimo, peso, quebra) in enumerate(
+                zip(DOC_LIB_COLUNAS_EQUIPAMENTO_SM, minimos, pesos, quebras)):
+            quadro.grid_columnconfigure(coluna, weight=peso, minsize=minimo)
             Label(quadro, text=f"{numero} {titulo}", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"),
                   anchor="w", justify="left", wraplength=quebra).grid(row=0, column=coluna, sticky="w", padx=4)
+        listas = {"caracterizacao": DOC_LIB_CARACTERIZACOES_SM, "local_execucao": DOC_LIB_LOCAIS_EXECUCAO_SM}
         for linha in range(1, DOC_LIB_LINHAS_EQUIPAMENTOS_SM + 1):
             campos = {}
+            self.tempo_modo.append(StringVar(value=""))          # "indisponivel", "tempo" ou "" (nada escolhido)
             for coluna, (campo, numero, titulo) in enumerate(DOC_LIB_COLUNAS_EQUIPAMENTO_SM):
-                entrada = criar_entrada_sga(quadro, width=8)
-                entrada.grid(row=linha, column=coluna, sticky="ew", padx=4, pady=3)
-                self.configurar_entrada(entrada, "texto")
-                if campo == "tempo_retorno":
-                    entrada.configure(justify="center")
-                    entrada.bind("<FocusOut>", lambda e, w=entrada: self._ao_sair_duracao(w), add="+")
-                    ToolTipSGA(entrada, "Tempo de retorno à operação, em horas e minutos (HH:MM)")
-                campos[campo] = entrada
-                self._controles.append(entrada)
-                self._alvos[f"equip:{linha}:{campo}"] = (entrada, None)
+                if campo in listas:
+                    widget = ttk.Combobox(quadro, values=listas[campo], state="readonly", width=10, font=(SGA_FONTE, 9))
+                    widget.grid(row=linha, column=coluna, sticky="ew", padx=4, pady=3)
+                    widget.bind("<<ComboboxSelected>>", lambda e, w=widget: self._limpar_marca(w))
+                    widget.bind("<MouseWheel>", lambda e: (_rolar_area_sga(e), "break")[1])
+                    self._controles.append(widget)
+                elif campo == "tempo_retorno":
+                    widget = self._montar_tempo_retorno(quadro, linha, coluna)
+                else:
+                    widget = criar_entrada_sga(quadro, width=8)
+                    widget.grid(row=linha, column=coluna, sticky="ew", padx=4, pady=3)
+                    self.configurar_entrada(widget, "texto")
+                    self.forcar_maiusculas(widget)                # 3.1, 3.2 e 3.3: sempre em caixa alta
+                    self._controles.append(widget)
+                campos[campo] = widget
+                self._alvos[f"equip:{linha}:{campo}"] = (widget, None)
             self.equip.append(campos)
         self._linha_larga(quadro)
 
-    def _ao_sair_duracao(self, entrada):
-        """Tempo de Retorno à Operação: ao sair do campo, aceita 1:30, 0130 ou 1h30 e mostra HH:MM; formato inválido marca o campo."""
-        try:
-            if str(entrada.cget("state")) != "normal":
-                return
-            texto = entrada.get().strip()
-            if not texto:
-                return
-            novo = doc_lib_normalizar_duracao_sm(texto)
-            if novo:
-                self._limpar_marca(entrada)
-                if novo != entrada.get():
-                    entrada.delete(0, END)
-                    entrada.insert(0, novo)
-            else:
-                self._marcar(entrada)
-        except TclError:
-            return
+    def _montar_tempo_retorno(self, quadro, linha, coluna):
+        """3.6 de uma linha, como o campo 6 do AI: a opção Indisponível ou a opção do tempo com o campo HH:MM. Devolve o campo do
+        tempo (só editável com a opção do tempo escolhida; clicar nele escolhe a opção)."""
+        indice = linha - 1
+        celula = Frame(quadro, bg=SGA_CARD)
+        celula.grid(row=linha, column=coluna, sticky="w", padx=4, pady=1)
+        rad_indisponivel = Radiobutton(celula, text=DOC_LIB_TEXTO_INDISPONIVEL, variable=self.tempo_modo[indice],
+                                       value="indisponivel", tristatevalue="-", font=(SGA_FONTE, 9), bg=SGA_CARD, anchor="w",
+                                       command=lambda i=indice: self._ao_mudar_tempo(i))
+        rad_indisponivel.grid(row=0, column=0, columnspan=2, sticky="w")
+        rad_tempo = Radiobutton(celula, text="hh:mm", variable=self.tempo_modo[indice], value="tempo", tristatevalue="-",
+                                font=(SGA_FONTE, 9), bg=SGA_CARD, anchor="w", command=lambda i=indice: self._ao_mudar_tempo(i, True))
+        rad_tempo.grid(row=1, column=0, sticky="w")
+        entrada = criar_entrada_sga(celula, width=6, justify="center")
+        entrada.grid(row=1, column=1, sticky="w", padx=(2, 0))
+        self.configurar_entrada(entrada, "hora")
+        entrada.bind("<Button-1>", lambda e, i=indice: self._ao_clicar_tempo(i), add="+")
+        self._controles += [rad_indisponivel, rad_tempo]            # o campo do tempo é tratado por _ajustar_tempo
+        return entrada
+
+    def _ao_mudar_tempo(self, indice, escolheu_tempo=False):
+        """3.6: o tempo só é digitado com a opção do tempo escolhida; com Indisponível o campo é limpo e travado."""
+        entrada = self.equip[indice]["tempo_retorno"]
+        self._limpar_marca(entrada)
+        if self.tempo_modo[indice].get() != "tempo":
+            doc_lib_definir_entrada(entrada, "")
+        self._ajustar_tempo(indice)
+        if escolheu_tempo and self.tempo_modo[indice].get() == "tempo":
+            entrada.focus_set()
+
+    def _ao_clicar_tempo(self, indice):
+        """Clicar no campo do tempo (3.6) escolhe a opção do tempo, se a edição geral estiver liberada."""
+        if "geral" in self._grupos_editaveis() and self.tempo_modo[indice].get() != "tempo":
+            self.tempo_modo[indice].set("tempo")
+            self._ajustar_tempo(indice)
+
+    def _ajustar_tempo(self, indice):
+        """O campo do tempo (3.6) só é editável com a edição geral liberada e a opção do tempo escolhida."""
+        travada = "geral" not in self._grupos_editaveis() or self.tempo_modo[indice].get() != "tempo"
+        doc_lib_bloquear_widget(self.equip[indice]["tempo_retorno"], travada)
+
+    def _equip_valor(self, indice, campo):
+        """Valor digitado ou escolhido em um campo da tabela 3 (3.6: Indisponível, o tempo digitado ou vazio)."""
+        if campo == "tempo_retorno":
+            modo = self.tempo_modo[indice].get()
+            return DOC_LIB_TEXTO_INDISPONIVEL if modo == "indisponivel" else (
+                self.equip[indice][campo].get().strip() if modo == "tempo" else "")
+        return self.equip[indice][campo].get().strip()
+
+    def _equip_definir(self, indice, campo, valor):
+        """Mostra um valor em um campo da tabela 3 (mesmo travado), com os mesmos limites de quando é digitado."""
+        widget, valor = self.equip[indice][campo], str(valor or "").strip()
+        if campo == "tempo_retorno":
+            self.tempo_modo[indice].set("indisponivel" if valor == DOC_LIB_TEXTO_INDISPONIVEL else ("tempo" if valor else ""))
+            doc_lib_definir_entrada(widget, "" if valor == DOC_LIB_TEXTO_INDISPONIVEL else valor)
+            self._ajustar_tempo(indice)
+        elif widget.winfo_class() == "TCombobox":
+            estado_combo = str(widget.cget("state"))
+            widget.configure(state="readonly")
+            widget.set(valor)
+            widget.configure(state=estado_combo)
+        else:
+            doc_lib_definir_entrada(widget, valor.upper() if campo in DOC_LIB_CAMPOS_CAIXA_ALTA_EQUIPAMENTO_SM else valor)
 
     def _atualizar_contador_motivo(self):
         """Mostra quantas das 6 linhas do Motivo estão ocupadas (medido como no PDF); vermelho quando passa do máximo."""
@@ -24881,6 +24985,8 @@ class JanelaSMAvulso:
         geral = "geral" in grupos
         for widget in self._controles:
             doc_lib_bloquear_widget(widget, not geral)
+        for indice in range(len(self.equip)):
+            self._ajustar_tempo(indice)
         self.tab_lib.travar(estrutura=not geral, datas="datas_lib" not in grupos)
         self.tab_nor.travar(estrutura=not geral, datas="datas_nor" not in grupos)
         for entrada in (self.ent_exec_lib_local, self.ent_exec_lib_remoto):
@@ -24943,7 +25049,8 @@ class JanelaSMAvulso:
                  "motivo": self._texto(self.txt_motivo), "observacoes": self._texto(self.txt_observacoes),
                  "elaborado_por": self.elaborador_nome or "", "elaborado_ass": self.usuario or "",
                  "elaborado_area": self.ent_elaborado_area.get().strip(), "elaborado_data": self.ent_elaborado_data.get().strip(),
-                 "equipamentos": [{campo: entrada.get().strip() for campo, entrada in linha.items()} for linha in self.equip],
+                 "equipamentos": [{campo: self._equip_valor(indice, campo) for campo in linha}
+                                  for indice, linha in enumerate(self.equip)],
                  "liberacao": self.tab_lib.coletar(), "normalizacao": self.tab_nor.coletar(),
                  "conferencias": self.conferencias.coletar(),
                  "exec_lib_local": self.ent_exec_lib_local.get().strip(), "exec_lib_remoto": self.ent_exec_lib_remoto.get().strip(),
@@ -24975,8 +25082,8 @@ class JanelaSMAvulso:
         self.reprogramacoes_habilitadas = int(doc.get("reprogramacoes") or 0)
         for indice, linha in enumerate(self.equip):
             item = (doc.get("equipamentos") or [])[indice] if indice < len(doc.get("equipamentos") or []) else {}
-            for campo, entrada in linha.items():
-                doc_lib_definir_entrada(entrada, item.get(campo) or "")
+            for campo in linha:
+                self._equip_definir(indice, campo, item.get(campo))
         self._definir_texto(self.txt_motivo, doc.get("motivo") or "")
         self._definir_texto(self.txt_observacoes, doc.get("observacoes") or "")
         for campo, texto in self.txt_condicoes.items():
@@ -25000,8 +25107,8 @@ class JanelaSMAvulso:
         self.referencia_id, self.referencia_numero = referencia["referencia_id"], referencia["referencia_numero"]
         for indice, linha in enumerate(self.equip):
             item = referencia["equipamentos"][indice] if indice < len(referencia["equipamentos"]) else {}
-            for campo, entrada in linha.items():
-                doc_lib_definir_entrada(entrada, item.get(campo) or "")
+            for campo in linha:
+                self._equip_definir(indice, campo, item.get(campo))
         self._definir_texto(self.txt_motivo, referencia["motivo"])
         self._definir_texto(self.txt_observacoes, referencia["observacoes"])
         for campo, texto in self.txt_condicoes.items():
@@ -25064,8 +25171,8 @@ class JanelaSMAvulso:
             if status_antes != doc["status"]:
                 mensagem += f"\n\nStatus atualizado: {status_antes} passou a {doc['status']}."
             if len(doc["conferencias"]) > conferencias_antes and doc["status"] == STATUS_SM_AGUARDA_CONFERENCIA:
-                mensagem += ("\n\nConferência registrada. A SM só passa a Aprovado para Execução com uma conferência manual "
-                             "E uma conferência pelo sistema; a SM continua em Aguarda Conferência.")
+                mensagem += ("\n\nConferência registrada. A SM só passa a Aprovado para Execução com uma Conferência "
+                             "Manutenção E uma Conferência Operação; a SM continua em Aguarda Conferência.")
             if doc["status"] != STATUS_ATEIE_CONCLUIDO and doc["status"] != STATUS_ATEIE_CANCELADO:
                 mensagem += "\n\nGere o documento novamente para que o PDF mostre as alterações."
         else:
@@ -25142,8 +25249,8 @@ class JanelaSMAvulso:
         elif doc["status"] == STATUS_ATEIE_CANCELADO:
             lembrete = "SM cancelada: o PDF traz o número riscado e as informações do cancelamento."
         elif doc["status"] == STATUS_SM_AGUARDA_CONFERENCIA:
-            lembrete = ("Status: Aguarda Conferência. Registre a conferência manual (Manutenção) e a conferência pelo "
-                        "sistema: a SM só é aprovada para execução com as duas.")
+            lembrete = ("Status: Aguarda Conferência. Registre a Conferência Manutenção e a Conferência Operação: a SM só é "
+                        "aprovada para execução com as duas.")
         doc_lib_dialogo_documento_gerado(self.janela, caminho, aviso, lembrete)
 
     def reservar(self):
