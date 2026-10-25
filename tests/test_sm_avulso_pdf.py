@@ -1,6 +1,7 @@
 """SM Avulso (Doc_Lib. - Click_25): documento impresso (PDF) - conteúdo, quebras, paginação, alinhamento e arquivamento."""
 import glob
 import os
+import re
 
 import pytest
 
@@ -98,7 +99,8 @@ class TestConteudo:
         fluxo.alterar(sm_id, normalizacao=normalizacao, exec_nor_local="Beltrano (campo)")
         assert fluxo.doc(sm_id)["status"] == CONCLUIDO
         _, _, texto = pdf(sm_id)
-        assert "13:" not in texto and "15:" not in texto                            # horários das manobras
+        sem_rodape = re.sub(r"Gerado pelo sistema COG-Alupar em \S+ às \d\d:\d\d por \S+", "", texto)   # a hora da geração não conta
+        assert "13:" not in sem_rodape and "15:" not in sem_rodape                  # horários das manobras
         assert "08:00 hs" in texto and "17:00 hs" in texto                          # período programado continua
         assert "Fulano (campo)" in texto and "Sicrano (COG)" in texto and "Beltrano (campo)" in texto   # executantes
         assert "Aguardando a Conferência" not in texto

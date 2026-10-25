@@ -1,4 +1,4 @@
-# Código atualizado em 25-10-26 - 1114 - Click_25: (SM_Avulso - ordem dos horários por número da sequência e Encaminhar SM por e-mail)
+# Código atualizado em 25-10-26 - 1258 - Click_25: (SM_Avulso - botão Prorrogar e antecedência máxima de 3 h das manobras de liberação)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -22781,6 +22781,20 @@ def _garantir_tabelas_doc_lib_sm(cursor):
                         metodo TEXT,
                         enviado_por TEXT,
                         enviado_em TEXT)''')
+    # Prorrogações: cada vez que o término do período em vigor é substituído (SM Em Execução). O número (P1, P2...) é contado por
+    # período; a SM guarda o término vigente e esta tabela guarda o caminho até ele (nunca é alterada nem apagada)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_sm_prorrogacoes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
+                        periodo TEXT NOT NULL CHECK (periodo IN ('p0', 'p1', 'p2', 'p3')),
+                        numero INTEGER NOT NULL CHECK (numero >= 1),
+                        termino_anterior_data TEXT NOT NULL,
+                        termino_anterior_hora TEXT NOT NULL,
+                        termino_data TEXT NOT NULL,
+                        termino_hora TEXT NOT NULL,
+                        prorrogado_por TEXT,
+                        prorrogado_em TEXT,
+                        UNIQUE (sm_id, periodo, numero))''')
     _adicionar_coluna_se_necessario(cursor, "doclib_sm", "email_enviado_em", "TEXT")
     _adicionar_coluna_se_necessario(cursor, "doclib_sm", "email_enviado_por", "TEXT")
     _adicionar_coluna_se_necessario(cursor, "doclib_sm", "email_enviado_origem", "TEXT")
@@ -22811,6 +22825,11 @@ def _garantir_tabelas_doc_lib_sm(cursor):
             BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser alterada'); END''',
         "trg_doclib_sm_conferencia_exclui": '''BEFORE DELETE ON doclib_sm_conferencias
             BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser excluída'); END''',
+        # o registro das prorrogações é só de inclusão
+        "trg_doclib_sm_prorrogacoes_altera": '''BEFORE UPDATE ON doclib_sm_prorrogacoes
+            BEGIN SELECT RAISE(ABORT, 'SM: a prorrogação registrada não pode ser alterada'); END''',
+        "trg_doclib_sm_prorrogacoes_exclui": '''BEFORE DELETE ON doclib_sm_prorrogacoes
+            BEGIN SELECT RAISE(ABORT, 'SM: a prorrogação registrada não pode ser excluída'); END''',
         # o registro dos e-mails enviados é só de inclusão
         "trg_doclib_sm_emails_altera": '''BEFORE UPDATE ON doclib_sm_emails
             BEGIN SELECT RAISE(ABORT, 'SM: o registro de e-mail enviado não pode ser alterado'); END''',
@@ -22859,6 +22878,10 @@ def _doc_lib_ler_sm(conexao, sm_id):
         doc[chave] = manobras
     cursor.execute("SELECT * FROM doclib_sm_conferencias WHERE sm_id = ? ORDER BY ordem", (sm_id,))
     doc["conferencias"] = [dict(item) for item in cursor.fetchall()]
+    cursor.execute("SELECT * FROM doclib_sm_prorrogacoes WHERE sm_id = ? ORDER BY id", (sm_id,))
+    doc["prorrogacoes"] = [dict(item) for item in cursor.fetchall()]
+    for prefixo, _, _ in DOC_LIB_PERIODOS_SM:          # p0_prorrogacoes ... p3_prorrogacoes: quantas vezes cada período foi prorrogado
+        doc[f"{prefixo}_prorrogacoes"] = sum(1 for item in doc["prorrogacoes"] if item["periodo"] == prefixo)
     return doc
 
 
@@ -22929,15 +22952,37 @@ def doc_lib_calcular_status_sm(doc, emitido):
     return STATUS_SM_AGUARDA_CONFERENCIA
 
 
+def doc_lib_prefixo_vigente_sm(doc):
+    """'p0' a 'p3': o período em vigor, isto é, a última reprogramação preenchida ou, se não houver, a Programação. None se
+    nenhum período está completo."""
+    for prefixo in ("p3", "p2", "p1", "p0"):
+        if all(_doc_lib_txt(doc.get(campo)) for campo in doc_lib_campos_periodo_sm(prefixo)):
+            return prefixo
+    return None
+
+
 def doc_lib_periodo_vigente_sm(doc):
     """(início, término) do período em vigor: a última reprogramação preenchida ou, se não houver, a Programação. Cada um no
     formato 'dd/mm/aaaa HH:MM' ('' se não informado)."""
-    for prefixo in ("p3", "p2", "p1", "p0"):
-        campos = doc_lib_campos_periodo_sm(prefixo)
-        if all(_doc_lib_txt(doc.get(campo)) for campo in campos):
-            return (_doc_lib_data_hora_texto(doc[campos[0]], doc[campos[1]]),
-                    _doc_lib_data_hora_texto(doc[campos[2]], doc[campos[3]]))
-    return "", ""
+    prefixo = doc_lib_prefixo_vigente_sm(doc)
+    if prefixo is None:
+        return "", ""
+    campos = doc_lib_campos_periodo_sm(prefixo)
+    return (_doc_lib_data_hora_texto(doc[campos[0]], doc[campos[1]]), _doc_lib_data_hora_texto(doc[campos[2]], doc[campos[3]]))
+
+
+# As manobras de liberação não podem ser lançadas com mais de 3 horas de antecedência em relação ao início programado
+# (o período em vigor): programado para 10/10/2026 14:00, a primeira manobra pode ser lançada a partir de 10/10/2026 11:00.
+DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM = timedelta(hours=3)
+
+
+def doc_lib_inicio_vigente_sm(doc):
+    """datetime do início do período em vigor (None se não houver período completo e válido)."""
+    prefixo = doc_lib_prefixo_vigente_sm(doc)
+    if prefixo is None:
+        return None
+    campos = doc_lib_campos_periodo_sm(prefixo)
+    return _doc_lib_data_hora(doc.get(campos[0]), doc.get(campos[1]))
 
 
 def doc_lib_linhas_texto_sm(texto, largura=None, tamanho=9.5, estilo=""):
@@ -23186,6 +23231,20 @@ def doc_lib_validar_sm(dados, atual=None):
                  f"{titulo}, linha {posicao} (sequência {identificacoes[posicao - 1]}): a data e a hora não podem ser "
                  f"anteriores às da sequência {identificacoes[referencia - 1]} (linha {referencia}), que tem número "
                  f"arábico menor.")
+    # liberação: no máximo 3 horas antes do início programado (período em vigor). Vale enquanto as datas da liberação podem ser
+    # lançadas (SM Aprovada para Execução); depois de registrada a liberação ela fica bloqueada e não é conferida de novo
+    inicio_vigente = doc_lib_inicio_vigente_sm(dados)
+    if status == STATUS_ATEIE_APROVADO_EXECUCAO and inicio_vigente is not None:
+        minimo = inicio_vigente - DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM
+        linhas = dados.get("liberacao") or []
+        identificacoes = doc_lib_identificar_sequencias_sm([linha["numero"] for linha in linhas])
+        for posicao, linha in enumerate(linhas, start=1):
+            momento = _doc_lib_data_hora_manobra_sm(linha)
+            if momento is not None and momento < minimo:
+                erro((f"lib:{posicao}:data", f"lib:{posicao}:hora"),
+                     f"Manobras de Liberação, linha {posicao} (sequência {identificacoes[posicao - 1]}): a data e a hora não "
+                     f"podem ser anteriores a 3 horas do início programado ({inicio_vigente.strftime('%d/%m/%Y %H:%M')}); "
+                     f"o primeiro horário permitido é {minimo.strftime('%d/%m/%Y %H:%M')}.")
     ultima_liberacao = max((m for m in map(_doc_lib_data_hora_manobra_sm, dados.get("liberacao") or []) if m), default=None)
     for posicao, linha in enumerate(dados.get("normalizacao") or [], start=1):
         momento = _doc_lib_data_hora_manobra_sm(linha)
@@ -23275,6 +23334,12 @@ def doc_lib_diferencas_bloqueadas_sm(atual, dados):
                   if grupo not in editaveis and antes[grupo] != depois[grupo]]
     if "conferencias" in editaveis and depois["conferencias"][:len(antes["conferencias"])] != antes["conferencias"]:
         bloqueadas.append("Conferência já registrada (não pode ser alterada nem removida)")
+    if status == STATUS_ATEIE_EM_EXECUCAO:        # com a execução em andamento, o período salvo só muda por Prorrogar (ou nova Reprogramação)
+        for prefixo, _, nome in DOC_LIB_PERIODOS_SM[1:]:
+            campos = doc_lib_campos_periodo_sm(prefixo)
+            if any(_doc_lib_txt(atual.get(campo)) for campo in campos) and any(
+                    _doc_lib_txt(atual.get(campo)) != _doc_lib_txt(dados.get(campo)) for campo in campos):
+                bloqueadas.append(f"{nome} já registrada (com a SM Em Execução o término muda pelo botão Prorrogar)")
     for grupo, nome in (("exec_lib", "Executantes da Liberação"), ("exec_nor", "Executantes da Normalização")):
         if grupo in editaveis and any(antes[grupo]) and not any(depois[grupo]):
             bloqueadas.append(f"{nome} já registrados (podem ser corrigidos, não apagados)")
@@ -23491,6 +23556,89 @@ def _doc_lib_gravar_acompanhamento_sm(cursor, atual, dados, usuario, agora_texto
             ja_tinha = any(antes[grupo][0]) if grupo == "reprogramacao" else any(antes[grupo])
             _doc_lib_historico_sm(cursor, sm_id, grupo, f"{descricao}: {'alterados' if ja_tinha else 'informados'}",
                                   usuario, agora_texto)
+
+
+# ---------------------------------------------------
+# PRORROGAÇÃO DO PERÍODO EM VIGOR
+# ---------------------------------------------------
+# Com a SM Em Execução (manobras de liberação feitas e executantes registrados), o botão Prorrogar substitui o término do período
+# em vigor por uma data e hora posteriores. O período em vigor é a última reprogramação preenchida ou, se não houver, a Programação.
+# Cada prorrogação recebe um número por período (P1, P2, P3...), impresso ao lado do novo término, e fica registrada em
+# doclib_sm_prorrogacoes (término anterior, novo término, usuário e momento) e no histórico da SM. Com a execução em andamento o
+# período salvo não é mais editado direto: o término só muda por aqui (doc_lib_diferencas_bloqueadas_sm).
+def doc_lib_validar_prorrogacao_sm(doc):
+    """Confere se a SM pode ser prorrogada e devolve o prefixo ('p0' a 'p3') do período em vigor. Lança DocLibRegra com a
+    orientação: só com a SM Em Execução, e a última reprogramação habilitada precisa estar preenchida e salva."""
+    if doc is None:
+        raise DocLibRegra("Esta SM não existe mais.")
+    if doc["status"] != STATUS_ATEIE_EM_EXECUCAO:
+        raise DocLibRegra(f"A prorrogação só é permitida com a SM Em Execução (liberação já realizada e executantes registrados).\n\n"
+                          f"Situação atual: {doc['status']}")
+    prefixo = doc_lib_prefixo_vigente_sm(doc)
+    if prefixo is None:
+        raise DocLibRegra("A SM não tem período programado completo.")
+    habilitadas = int(doc.get("reprogramacoes") or 0)
+    if habilitadas > int(prefixo[1]):
+        raise DocLibRegra(f"Preencha e salve a {_DOC_LIB_NOMES_PERIODO_SM['p' + str(habilitadas)]}, que já está habilitada, antes de "
+                          f"prorrogar: a prorrogação vale para o período em vigor.")
+    return prefixo
+
+
+def doc_lib_dados_prorrogacao_sm(doc):
+    """Dados do período em vigor para a janela Prorrogar: {prefixo, item, nome, termino ('dd/mm/aaaa HH:MM'), numero (da próxima
+    prorrogação, P1, P2...)}. Lança DocLibRegra se a SM não pode ser prorrogada (doc_lib_validar_prorrogacao_sm)."""
+    prefixo = doc_lib_validar_prorrogacao_sm(doc)
+    campos = doc_lib_campos_periodo_sm(prefixo)
+    item = next(numero for pref, numero, _ in DOC_LIB_PERIODOS_SM if pref == prefixo)
+    return {"prefixo": prefixo, "item": item, "nome": _DOC_LIB_NOMES_PERIODO_SM[prefixo],
+            "termino": _doc_lib_data_hora_texto(doc[campos[2]], doc[campos[3]]),
+            "numero": int(doc.get(f"{prefixo}_prorrogacoes") or 0) + 1}
+
+
+def doc_lib_prorrogar_sm(sm_id, data, hora, usuario, revisao_esperada):
+    """Prorroga o período em vigor: substitui o término por 'data' e 'hora' (qualquer formato aceito), que precisam ser POSTERIORES
+    ao término em vigor (DocLibRegra; para antecipar o término use uma nova Reprogramação). Grava, numa única transação, o novo
+    término, o registro da prorrogação (P1, P2... do período), o histórico e a nova revisão do documento. Lança DocLibConflito se
+    a SM foi alterada por outro usuário depois de lida. Devolve {periodo, numero, termino, revisao}."""
+    data_normal, hora_normal = doc_lib_normalizar_data(data), doc_lib_normalizar_hora(hora)
+    if not data_normal:
+        raise DocLibRegra("Informe a nova data de término (use DD/MM/AAAA).")
+    if not hora_normal:
+        raise DocLibRegra("Informe a nova hora de término (use HH:MM).")
+    novo = datetime.strptime(f"{data_normal} {hora_normal}", "%d/%m/%Y %H:%M")
+    agora_texto = datetime.now().strftime("%d/%m/%Y - %H:%Mh")
+    conexao = doc_lib_conectar(manual=True)
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        atual = _doc_lib_ler_sm(conexao, sm_id)
+        if atual is None or atual["revisao"] != revisao_esperada:
+            raise DocLibConflito(_DOC_LIB_MSG_CONFLITO_SM)
+        dados = doc_lib_dados_prorrogacao_sm(atual)
+        prefixo = dados["prefixo"]
+        campos = doc_lib_campos_periodo_sm(prefixo)
+        termino_atual = _doc_lib_data_hora(atual[campos[2]], atual[campos[3]])
+        if termino_atual is not None and novo <= termino_atual:
+            raise DocLibRegra(f"O novo término ({data_normal} {hora_normal}) precisa ser posterior ao término em vigor "
+                              f"({dados['termino']}). Para antecipar o término use uma nova Reprogramação.")
+        cursor.execute(f"UPDATE doclib_sm SET {campos[2]} = ?, {campos[3]} = ?, revisao = revisao + 1, atualizado_por = ?, "
+                       f"atualizado_em = ? WHERE id = ?", (data_normal, hora_normal, usuario, agora_texto, sm_id))
+        cursor.execute("INSERT INTO doclib_sm_prorrogacoes (sm_id, periodo, numero, termino_anterior_data, termino_anterior_hora, "
+                       "termino_data, termino_hora, prorrogado_por, prorrogado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       (sm_id, prefixo, dados["numero"], atual[campos[2]], atual[campos[3]], data_normal, hora_normal, usuario,
+                        agora_texto))
+        _doc_lib_historico_sm(cursor, sm_id, "prorrogacao",
+                              f"{dados['nome']} prorrogada (P{dados['numero']}): término de {dados['termino']} para "
+                              f"{data_normal} {hora_normal}", usuario, agora_texto)
+        cursor.execute("COMMIT")
+        return {"periodo": prefixo, "numero": dados["numero"], "termino": f"{data_normal} {hora_normal}",
+                "revisao": atual["revisao"] + 1}
+    except Exception:
+        if conexao.in_transaction:
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conexao.close()
 
 
 # ---------------------------------------------------
@@ -23861,7 +24009,13 @@ def doc_lib_gerar_pdf_sm(doc, caminho, gerado_por=""):
             data, hora = _doc_lib_txt(doc.get(f"{prefixo}_{campo_data}")), _doc_lib_txt(doc.get(f"{prefixo}_{campo_hora}"))
             fonte("", 9.0)
             pdf.text(x + LARGURA_ROTULO + 8.0, y_linha + 3.5, data or "_____/_____/________")
-            pdf.text(x + largura - 26.0, y_linha + 3.5, f"{hora} hs" if hora else "____:____ hs")
+            texto_hora = f"{hora} hs" if hora else "____:____ hs"
+            pdf.text(x + largura - 26.0, y_linha + 3.5, texto_hora)
+            prorrogacoes = int(doc.get(f"{prefixo}_prorrogacoes") or 0)
+            if campo_data == "data_termino" and prorrogacoes:          # término prorrogado: P1, P2... em fonte menor, ao lado
+                largura_hora = pdf.get_string_width(texto_hora)
+                fonte("B", 6.5)
+                pdf.text(x + largura - 26.0 + largura_hora + 1.4, y_linha + 3.5, f"P{prorrogacoes}")
 
     for esquerda, direita in ((DOC_LIB_PERIODOS_SM[0], DOC_LIB_PERIODOS_SM[1]), (DOC_LIB_PERIODOS_SM[2], DOC_LIB_PERIODOS_SM[3])):
         periodo(X0, X_MEIO - X0, estado["y"], *esquerda)
@@ -24668,6 +24822,102 @@ def doc_lib_dialogo_encaminhar_sm(parent, doc, usuario, caminho_pdf=None, caminh
     return dialogo.resultado
 
 
+class DialogoProrrogarSM:
+    """Janela do botão Prorrogar: mostra o período em vigor, o término atual e o número da prorrogação (P1, P2...) e pede a nova data
+    e hora de término, que passam a valer como o término do período. O novo término precisa ser posterior ao atual. 'resultado'
+    fica com {"data", "hora"} (já normalizadas) depois de Confirmar prorrogação, ou None se o usuário cancelar."""
+
+    def __init__(self, parent, dados):
+        self.dados = dados
+        self.resultado = None
+        self.termino_atual = datetime.strptime(dados["termino"], "%d/%m/%Y %H:%M")
+        self.janela = janela = Toplevel(parent)
+        janela.title("Prorrogar SM")
+        janela.geometry("620x420")
+        janela.resizable(False, False)
+        janela.transient(parent)
+        ui_dialogo(janela, "Prorrogar SM", "Substitui o término do período em vigor pela nova data e hora")
+        cartao = ui_cartao(janela, 84, 240)
+        cartao.grid_columnconfigure(1, weight=1)
+
+        def linha(numero, titulo, texto, negrito=False):
+            Label(cartao, text=titulo, bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
+                  ).grid(row=numero, column=0, sticky="nw", padx=(20, 12), pady=(14, 0))
+            Label(cartao, text=texto, bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 11, "bold" if negrito else ""), anchor="w"
+                  ).grid(row=numero, column=1, sticky="w", pady=(13, 0))
+
+        linha(0, "Período em vigor:", f"{dados['item']}  {dados['nome']}")
+        linha(1, "Término atual:", f"{dados['termino']} hs")
+        linha(2, "Prorrogação:", f"P{dados['numero']}", negrito=True)
+        Label(cartao, text="Novo término:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"), anchor="nw"
+              ).grid(row=3, column=0, sticky="nw", padx=(20, 12), pady=(20, 0))
+        quadro = Frame(cartao, bg=SGA_CARD)
+        quadro.grid(row=3, column=1, sticky="w", pady=(14, 0))
+        Label(quadro, text="Data:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(0, 4))
+        self.ent_data = criar_entrada_sga(quadro, width=11)
+        self.ent_data.pack(side=LEFT)
+        self.icone = IconeCalendarioDocLib(quadro, lambda: doc_lib_selecionar_data(self.janela, self.ent_data, False))
+        self.icone.pack(side=LEFT, padx=(4, 0))
+        Label(quadro, text="Hora:", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 10, "bold")).pack(side=LEFT, padx=(14, 4))
+        self.ent_hora = criar_entrada_sga(quadro, width=7)
+        self.ent_hora.pack(side=LEFT)
+        Label(quadro, text="hs", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).pack(side=LEFT, padx=(4, 0))
+        Label(cartao, text="O novo término substitui o atual e é a data e hora válidas para o fim da atividade. Ele precisa ser "
+                           "posterior ao término atual; a prorrogação fica registrada e impressa ao lado do término (P1, P2...).",
+              bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), wraplength=500, justify="left", anchor="w"
+              ).grid(row=4, column=0, columnspan=2, sticky="w", padx=20, pady=(16, 0))
+        doc_lib_definir_entrada(self.ent_data, self.termino_atual.strftime("%d/%m/%Y"))
+        self.ent_data.bind("<FocusOut>", lambda e: self._normalizar(self.ent_data, doc_lib_normalizar_data))
+        self.ent_hora.bind("<FocusOut>", lambda e: self._normalizar(self.ent_hora, doc_lib_normalizar_hora))
+        self.ent_hora.bind("<Return>", lambda e: self.confirmar())
+        self.ent_data.bind("<Return>", lambda e: self.confirmar())
+        doc_lib_criar_botao(janela, "Confirmar prorrogação", self.confirmar, "sucesso"
+                            ).place(relx=0.5, x=-215, rely=1.0, y=-22, anchor="sw", width=220, height=42)
+        doc_lib_criar_botao(janela, "Cancelar", janela.destroy, "neutro"
+                            ).place(relx=0.5, x=15, rely=1.0, y=-22, anchor="sw", width=190, height=42)
+        janela.bind("<Escape>", lambda evento: janela.destroy())
+        self.ent_hora.focus_set()
+
+    @staticmethod
+    def _normalizar(entrada, normalizar):
+        """Ao sair do campo, mostra a data (ou a hora) no formato padrão se for válida; senão deixa como foi digitada."""
+        valor = normalizar(entrada.get())
+        if valor:
+            doc_lib_definir_entrada(entrada, valor)
+
+    def confirmar(self):
+        """Valida a nova data e hora (formato e posterior ao término atual) e fecha a janela com o resultado."""
+        titulo = "Prorrogar SM"
+        data, hora = doc_lib_normalizar_data(self.ent_data.get()), doc_lib_normalizar_hora(self.ent_hora.get())
+        if not data:
+            messagebox.showwarning(titulo, "Informe a nova data de término (use DD/MM/AAAA).", parent=self.janela)
+            self.ent_data.focus_set()
+            return
+        if not hora:
+            messagebox.showwarning(titulo, "Informe a nova hora de término (use HH:MM).", parent=self.janela)
+            self.ent_hora.focus_set()
+            return
+        if datetime.strptime(f"{data} {hora}", "%d/%m/%Y %H:%M") <= self.termino_atual:
+            messagebox.showwarning(
+                titulo, f"O novo término ({data} {hora}) precisa ser posterior ao término atual ({self.dados['termino']}).\n\n"
+                        f"Para antecipar o término use uma nova Reprogramação.", parent=self.janela)
+            self.ent_hora.focus_set()
+            return
+        self.resultado = {"data": data, "hora": hora}
+        self.janela.destroy()
+
+
+def doc_lib_dialogo_prorrogar_sm(parent, dados):
+    """Abre a janela do Prorrogar (DialogoProrrogarSM) e espera o usuário. Devolve {"data", "hora"} ou None se cancelar."""
+    dialogo = DialogoProrrogarSM(parent, dados)
+    try:
+        dialogo.janela.grab_set()
+    except TclError:
+        pass
+    dialogo.janela.wait_window()
+    return dialogo.resultado
+
+
 # ---------------------------------------------------
 # GRID SM, TABELAS DA JANELA E JANELA DA SM
 # ---------------------------------------------------
@@ -25349,6 +25599,7 @@ class JanelaSMAvulso:
                            "Até 30 manobras. A data e a hora de cada manobra são controle interno (só nesta tela, não vão para o\n"
                            "documento impresso) e são preenchidas depois da conferência da SM. A sequência de número maior não pode\n"
                            "ter data e hora anteriores às de número menor (2A não antes de 1A); com o mesmo número a letra não conta.\n"
+                           "As manobras não podem ser lançadas com mais de 3 horas de antecedência do início programado.\n"
                            "Depois de salvos os horários e os executantes (item 7), este item fica bloqueado.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
@@ -25430,12 +25681,19 @@ class JanelaSMAvulso:
         cabecalho.pack(fill=X)
         rotulo = Label(cabecalho, text=f"{numero}  {nome}", bg="#DCE8F8", fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"), anchor="w")
         rotulo.pack(side=LEFT, padx=8, pady=5)
-        dados = {"widgets": [], "botao": None}
+        dados = {"widgets": [], "botao": None, "botao_prorrogar": None, "lbl_prorrogacao": None}
         if prefixo != "p0":
             dados["botao"] = doc_lib_criar_botao(cabecalho, "Habilitar", lambda p=prefixo: self.habilitar_reprogramacao(p),
                                                  "aviso", fonte=(SGA_FONTE, 8, "bold"))
             dados["botao"].pack(side=RIGHT, padx=6, pady=3, ipadx=6)
             DicaBotaoSM(dados["botao"], "Habilita o preenchimento desta reprogramação (as reprogramações seguem a ordem)")
+        # Prorrogar: fica no quadro do período em vigor, no lugar do Habilitar (a Programação não tem Habilitar); _aplicar_periodos
+        # mostra um ou outro e _atualizar_prorrogar diz quando pode ser usado
+        dados["botao_prorrogar"] = doc_lib_criar_botao(cabecalho, "Prorrogar", self.prorrogar, "agendar",
+                                                       fonte=(SGA_FONTE, 8, "bold"))
+        if prefixo == "p0":
+            dados["botao_prorrogar"].pack(side=RIGHT, padx=6, pady=3, ipadx=6)
+        DicaBotaoSM(dados["botao_prorrogar"], "Prorroga o término do período em vigor (só com a SM Em Execução)")
         corpo = Frame(bloco, bg=SGA_CARD)
         corpo.pack(fill=X, padx=8, pady=6)
         for linha, (titulo, campo_data, campo_hora) in enumerate((("Início", "data_inicio", "hora_inicio"),
@@ -25451,6 +25709,9 @@ class JanelaSMAvulso:
             entrada_hora.pack(side=LEFT)
             self.configurar_entrada(entrada_hora, "hora", atualiza_estado=prefixo != "p0")
             Label(linha_campos, text="hs", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).pack(side=LEFT, padx=(4, 0))
+            if campo_data == "data_termino":          # P1, P2...: quantas vezes o término foi prorrogado (fonte menor)
+                dados["lbl_prorrogacao"] = Label(linha_campos, text="", bg=SGA_CARD, fg=SGA_AZUL, font=(SGA_FONTE, 8, "bold"))
+                dados["lbl_prorrogacao"].pack(side=LEFT, padx=(6, 0))
             for campo, widget in ((campo_data, entrada_data), (campo_hora, entrada_hora)):
                 dados[campo] = widget
                 self._alvos[f"{prefixo}_{campo}"] = (widget, rotulo)
@@ -25599,17 +25860,95 @@ class JanelaSMAvulso:
         self.periodo[prefixo]["data_inicio"].focus_set()
         self.rolar_ate(self.periodo[prefixo]["data_inicio"])
 
+    def _periodo_salvo(self, prefixo):
+        """True se o período já tem dados gravados no banco."""
+        return any(_doc_lib_txt((self._doc_gravado or {}).get(campo)) for campo in doc_lib_campos_periodo_sm(prefixo))
+
     def _aplicar_periodos(self):
-        """Libera os campos das reprogramações habilitadas (se o status permite) e o botão da próxima, na ordem."""
+        """Libera os campos das reprogramações habilitadas (se o status permite) e o botão da próxima, na ordem. O botão Prorrogar
+        ocupa o quadro do período em vigor (a última reprogramação habilitada ou, se não houver, a Programação), no lugar do
+        Habilitar. Com a SM Em Execução, o período já salvo só muda pelo Prorrogar."""
         editavel = "reprogramacao" in self._grupos_editaveis()
+        habilitadas = self.reprogramacoes_habilitadas
+        self._mostrar_prorrogar("p0", habilitadas == 0)
         for numero in (1, 2, 3):
-            dados = self.periodo[f"p{numero}"]
-            habilitada = numero <= self.reprogramacoes_habilitadas
+            prefixo = f"p{numero}"
+            dados = self.periodo[prefixo]
+            habilitada = numero <= habilitadas
+            protegida = self.status == STATUS_ATEIE_EM_EXECUCAO and self._periodo_salvo(prefixo)
             for widget in dados["widgets"]:
-                doc_lib_bloquear_widget(widget, not (habilitada and editavel))
+                doc_lib_bloquear_widget(widget, not (habilitada and editavel and not protegida))
             botao = dados["botao"]
             botao.configure(text="Habilitada" if habilitada else "Habilitar")
-            doc_lib_estado_botao(botao, editavel and numero == self.reprogramacoes_habilitadas + 1)
+            doc_lib_estado_botao(botao, editavel and numero == habilitadas + 1)
+            self._mostrar_prorrogar(prefixo, numero == habilitadas)
+        self._atualizar_prorrogar()
+
+    def _mostrar_prorrogar(self, prefixo, mostrar):
+        """Mostra o Prorrogar no quadro do período em vigor (no lugar do Habilitar) e o esconde nos demais."""
+        dados = self.periodo[prefixo]
+        if mostrar:
+            if dados["botao"] is not None:
+                dados["botao"].pack_forget()
+            if not dados["botao_prorrogar"].winfo_manager():
+                dados["botao_prorrogar"].pack(side=RIGHT, padx=6, pady=3, ipadx=6)
+        else:
+            dados["botao_prorrogar"].pack_forget()
+            if dados["botao"] is not None and not dados["botao"].winfo_manager():
+                dados["botao"].pack(side=RIGHT, padx=6, pady=3, ipadx=6)
+
+    def _atualizar_prorrogar(self, pendente=None):
+        """O Prorrogar só fica ativo com a SM Em Execução, sem alterações pendentes e com o período em vigor preenchido e salvo."""
+        if pendente is None:
+            pendente = self._pendente()
+        possivel = False
+        if self.sm_id is not None and not pendente and not self.cancelada and self._doc_gravado:
+            try:
+                possivel = doc_lib_validar_prorrogacao_sm(self._doc_gravado) == f"p{self.reprogramacoes_habilitadas}"
+            except DocLibRegra:
+                possivel = False
+        for prefixo, dados in self.periodo.items():
+            doc_lib_estado_botao(dados["botao_prorrogar"], possivel and prefixo == f"p{self.reprogramacoes_habilitadas}")
+
+    def prorrogar(self):
+        """Botão Prorrogar: abre a janela da nova data e hora de término do período em vigor e grava a prorrogação (P1, P2...).
+        Só com a SM Em Execução e sem alterações pendentes. A SM é lida de novo antes, para a janela mostrar o término atual."""
+        titulo = "Prorrogar SM"
+        if self.sm_id is None or self._pendente():
+            messagebox.showwarning(titulo, "Salve as alterações da SM antes de prorrogar.", parent=self.janela)
+            return
+        try:
+            doc = doc_lib_carregar_sm(self.sm_id)
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível ler a SM salva: {erro}", parent=self.janela)
+            return
+        if doc is None or doc["revisao"] != self.revisao:
+            messagebox.showwarning("Documento alterado", _DOC_LIB_MSG_CONFLITO_SM, parent=self.janela)
+            return
+        try:
+            dados = doc_lib_dados_prorrogacao_sm(doc)
+        except DocLibRegra as erro:
+            messagebox.showwarning(titulo, str(erro), parent=self.janela)
+            return
+        resposta = doc_lib_dialogo_prorrogar_sm(self.janela, dados)
+        if not resposta:
+            return
+        try:
+            resultado = doc_lib_prorrogar_sm(self.sm_id, resposta["data"], resposta["hora"], obter_nome_usuario_logado(),
+                                             self.revisao)
+        except DocLibConflito as erro:
+            messagebox.showwarning("Documento alterado", str(erro), parent=self.janela)
+            return
+        except DocLibRegra as erro:
+            messagebox.showwarning(titulo, str(erro), parent=self.janela)
+            return
+        except sqlite3.Error as erro:
+            messagebox.showerror("Erro", f"Não foi possível gravar a prorrogação: {erro}", parent=self.janela)
+            return
+        self._carregar_documento(doc_lib_carregar_sm(self.sm_id))
+        messagebox.showinfo(titulo, f"{dados['nome']} prorrogada (P{resultado['numero']}).\n\nNovo término: "
+                                    f"{resultado['termino']} hs.\n\nGere o documento novamente para que o PDF mostre a "
+                                    f"prorrogação.", parent=self.janela)
 
     # ------------------------------------------------------------------ número, estados e bloqueios
 
@@ -25681,6 +26020,7 @@ class JanelaSMAvulso:
         doc_lib_estado_botao(self.btn_referencia, self.sm_id is not None and self.status not in DOC_LIB_STATUS_SEM_REFERENCIA_SM)
         doc_lib_estado_botao(self.btn_encaminhar, self.sm_id is not None and not pendente and not self.cancelada
                              and self.status == STATUS_SM_AGUARDA_CONFERENCIA)
+        self._atualizar_prorrogar(pendente)
         doc_lib_estado_botao(self.btn_inverter, "geral" in self._grupos_editaveis())
         if self.sm_id is None:
             texto = "Nova SM (não salva)"
@@ -25743,6 +26083,9 @@ class JanelaSMAvulso:
             for campo in DOC_LIB_CAMPOS_PERIODO_SM:
                 doc_lib_definir_entrada(campos[campo], doc.get(f"{prefixo}_{campo}") or "")
         self.reprogramacoes_habilitadas = int(doc.get("reprogramacoes") or 0)
+        for prefixo, campos in self.periodo.items():
+            quantas = int(doc.get(f"{prefixo}_prorrogacoes") or 0)
+            campos["lbl_prorrogacao"].configure(text=f"P{quantas}" if quantas else "")
         for indice, linha in enumerate(self.equip):
             item = (doc.get("equipamentos") or [])[indice] if indice < len(doc.get("equipamentos") or []) else {}
             for campo in linha:
