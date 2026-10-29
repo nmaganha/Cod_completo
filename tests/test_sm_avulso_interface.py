@@ -341,7 +341,7 @@ def _todos_os_widgets(raiz):
 
 
 class TestConferenciaComASmAprovada:
-    def test_aprovada_libera_novas_conferencias_e_trava_as_registradas(self, app, banco, janelas, fluxo, mensagens, dialogos):
+    def test_aprovada_libera_novas_conferencias_e_trava_as_registradas(self, app, banco, janelas, fluxo, mensagens, dialogos, monkeypatch):
         janela = janelas()
         janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
         conferencias = janela.conferencias
@@ -354,12 +354,15 @@ class TestConferenciaComASmAprovada:
         nova = conferencias.adicionar_nova("manual")
         assert nova is not None and not nova["registrada"] and not travado(nova["nome"])
         definir(app, nova["nome"], "Maria da Manutencao")
+        assert conferencias.adicionar_nova("sistema") is None                              # operador1 já fez a Conferência Operação
+        assert "já efetuou a conferência deste documento" in mensagens.avisos[-1][1]
+        monkeypatch.setattr(app, "current_user", "operador2 em 29/10/2026 - 10:00h")         # outra pessoa logada
         operacao = conferencias.adicionar_nova("sistema")
-        assert operacao["nome"].get() == "operador1" and travado(operacao["nome"])
+        assert operacao["nome"].get() == "operador2" and travado(operacao["nome"])
         assert conferencias.lbl_contador.cget("text") == "4 de 10 conferências"
         assert estado(janela.btn_salvar) == "normal" and estado(janela.btn_gerar) == "disabled"
         janela.salvar()
-        assert not mensagens.avisos and janela.status == APROVADO
+        assert len(mensagens.avisos) == 1 and janela.status == APROVADO                    # só o aviso de operador1 já ter conferido
         texto = mensagens.infos[-1][1]
         assert "Conferência registrada (4 de 10)" in texto and "outras pessoas ainda podem registrar a conferência" in texto
         assert "Gere o documento novamente" in texto

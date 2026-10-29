@@ -237,6 +237,14 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
       Inverter Manobras);
     - o banco só aceita conferência nova com a SM em Em análise, Aguarda Conferência ou Aprovada (trigger) e a transição Em análise -> Aprovado
       existe na tabela de transições.
+24. **A mesma pessoa não faz a Conferência Operação duas vezes**: a Conferência Operação grava o login de quem está logado (campo Ass.). Se a
+    pessoa logada já registrou essa conferência na SM (qualquer status em que a conferência é aceita), o botão **Conferência Operação** não
+    acrescenta a linha e mostra o aviso "Você (login) já efetuou a conferência deste documento (Conferência Operação). A mesma pessoa não
+    pode conferir a SM novamente." O mesmo vale se ela já tiver uma linha da Operação na tela, ainda não salva. A regra também está na
+    gravação (`doc_lib_salvar_sm` recusa a segunda, inclusive duas na mesma gravação) e no banco (trigger `trg_doclib_sm_conferencia_repetida`,
+    comparação do login sem diferenciar maiúsculas nem espaços). Outra pessoa pode conferir pela Operação, e quem fez a Operação pode fazer a
+    Conferência Manutenção da mesma SM. A Conferência Manutenção, que é digitada, não tem essa trava. Usou-se trigger, e não índice único, para
+    o banco de quem já tem conferências repetidas gravadas continuar abrindo normalmente (as antigas ficam como estão).
 
 ## Banco de dados
 

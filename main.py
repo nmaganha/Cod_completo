@@ -1,4 +1,4 @@
-# Código atualizado em 29-10-26 - 1435 - Click_25: (SM_Avulso - conferências já com a SM salva, antes de gerar o documento)
+# Código atualizado em 29-10-26 - 1458 - Click_25: (SM_Avulso - a mesma pessoa não confere a SM duas vezes pela Operação)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -22839,6 +22839,12 @@ def _garantir_tabelas_doc_lib_sm(cursor):
             WHEN (SELECT status FROM doclib_sm WHERE id = NEW.sm_id) NOT IN ('{STATUS_ATEIE_EM_ANALISE}',
                 '{STATUS_SM_AGUARDA_CONFERENCIA}', '{STATUS_ATEIE_APROVADO_EXECUCAO}')
             BEGIN SELECT RAISE(ABORT, 'SM: a conferência só é registrada com a SM Em análise, Aguarda Conferência ou Aprovada para Execução'); END''',
+        # a mesma pessoa (login em Ass.) não registra duas Conferências Operação da mesma SM (trigger, e não índice único, para não
+        # recusar o banco de quem já tem conferências repetidas gravadas antes desta regra)
+        "trg_doclib_sm_conferencia_repetida": '''BEFORE INSERT ON doclib_sm_conferencias
+            WHEN NEW.modalidade = 'sistema' AND EXISTS (SELECT 1 FROM doclib_sm_conferencias WHERE sm_id = NEW.sm_id
+                AND modalidade = 'sistema' AND LOWER(TRIM(ass)) = LOWER(TRIM(NEW.ass)))
+            BEGIN SELECT RAISE(ABORT, 'SM: esta pessoa já efetuou a Conferência Operação do documento'); END''',
         # conferência registrada não muda nem é apagada
         "trg_doclib_sm_conferencia_altera": '''BEFORE UPDATE ON doclib_sm_conferencias
             BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser alterada'); END''',
@@ -22947,6 +22953,20 @@ def doc_lib_conferencia_aprovada_sm(conferencias):
     sistema não aprova. A modalidade vem do campo gravado em cada conferência (nunca da aparência dos campos)."""
     validas = {conferencia.get("modalidade") for conferencia in conferencias or [] if doc_lib_conferencia_valida_sm(conferencia)}
     return {DOC_LIB_MODALIDADE_MANUAL_SM, DOC_LIB_MODALIDADE_SISTEMA_SM} <= validas
+
+
+def doc_lib_ja_conferiu_operacao_sm(conferencias, usuario):
+    """True se o usuário (login) já registrou a Conferência Operação (modalidade "sistema") desta SM: a conferência pelo sistema
+    leva o login de quem a faz em 'Ass.', e a mesma pessoa não confere a SM duas vezes."""
+    usuario = str(usuario or "").strip().lower()
+    return bool(usuario) and any(
+        conferencia.get("modalidade") == DOC_LIB_MODALIDADE_SISTEMA_SM
+        and str(conferencia.get("ass") or "").strip().lower() == usuario for conferencia in conferencias or [])
+
+
+def doc_lib_mensagem_ja_conferiu_sm(usuario):
+    return (f"Você ({usuario}) já efetuou a conferência deste documento (Conferência Operação).\n\n"
+            f"A mesma pessoa não pode conferir a SM novamente.")
 
 
 def doc_lib_executantes_informados_sm(doc, etapa):
@@ -23542,6 +23562,14 @@ def doc_lib_salvar_sm(dados, usuario):
         for conferencia in dados["conferencias"][registradas:]:
             if conferencia["modalidade"] == DOC_LIB_MODALIDADE_SISTEMA_SM:    # conferência pelo sistema: dados do usuário logado
                 conferencia["nome"], conferencia["ass"] = obter_nome_completo_usuario(usuario), usuario
+
+        # a mesma pessoa não faz a Conferência Operação duas vezes (nem duas na mesma gravação)
+        conferiu = list((atual or {}).get("conferencias") or [])
+        for conferencia in dados["conferencias"][registradas:]:
+            if conferencia["modalidade"] == DOC_LIB_MODALIDADE_SISTEMA_SM:
+                if doc_lib_ja_conferiu_operacao_sm(conferiu, usuario):
+                    raise DocLibRegra(doc_lib_mensagem_ja_conferiu_sm(usuario))
+                conferiu.append(conferencia)
 
         bloqueadas = doc_lib_diferencas_bloqueadas_sm(atual, dados)
         if bloqueadas:
@@ -25413,6 +25441,10 @@ class LinhasConferenciaSM:
         hoje = datetime.now().strftime("%d/%m/%Y")
         if modalidade == DOC_LIB_MODALIDADE_SISTEMA_SM:
             usuario = obter_nome_usuario_logado()
+            if doc_lib_ja_conferiu_operacao_sm(self.coletar(), usuario):       # registrada ou ainda na tela, por salvar
+                messagebox.showwarning("Conferência Operação", doc_lib_mensagem_ja_conferiu_sm(usuario),
+                                       parent=self.janela.janela)
+                return None
             valores = {"nome": obter_nome_completo_usuario(usuario), "area": DOC_LIB_AREA_CONFERENCIA_SISTEMA_SM,
                        "data": hoje, "ass": usuario or ""}
         else:

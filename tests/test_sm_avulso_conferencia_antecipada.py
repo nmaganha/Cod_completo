@@ -35,7 +35,7 @@ class TestConferenciaAntesDeGerar:
             sm_id = fluxo.salvar()
             fluxo.conferir(sm_id, primeira)
             assert fluxo.doc(sm_id)["status"] == EM_ANALISE and not fluxo.doc(sm_id)["emitido"]
-            fluxo.conferir(sm_id, repetida)                                                          # duas da mesma área: ainda não
+            fluxo.conferir(sm_id, repetida, usuario="operador2")                                     # duas da mesma área: ainda não
             assert fluxo.doc(sm_id)["status"] == EM_ANALISE
 
     def test_primeira_conferencia_protege_os_dados_gerais(self, app, fluxo):
@@ -261,3 +261,111 @@ class TestJanelaComConferenciaEmAnalise:
         from test_sm_avulso_interface import _todos_os_widgets
         textos = [w.cget("text") for w in _todos_os_widgets(janelas().janela) if w.winfo_class() == "Label"]
         assert any("Pode ser registrada já com a SM salva (Em análise), antes de gerar o documento" in t for t in textos)
+
+
+# ======================================================================================================================
+# a mesma pessoa não confere a SM duas vezes (Conferência Operação)
+# ======================================================================================================================
+MENSAGEM = "já efetuou a conferência deste documento"
+
+
+class TestMesmaPessoaNaoConfereDuasVezes:
+    @pytest.mark.parametrize("status", [EM_ANALISE, AGUARDA, APROVADO])
+    def test_segunda_conferencia_operacao_da_mesma_pessoa_e_recusada_em_qualquer_status(self, app, fluxo, status):
+        sm_id = fluxo.salvar() if status == EM_ANALISE else fluxo.ate(status)
+        if status != APROVADO:
+            fluxo.conferir(sm_id, fluxo.conferencia_sistema())                                       # operador1 confere pela Operação
+        quantas = len(fluxo.doc(sm_id)["conferencias"])
+        with pytest.raises(app.DocLibRegra, match=MENSAGEM) as erro:
+            fluxo.conferir(sm_id, fluxo.conferencia_sistema(nome="Outro nome digitado"))             # a mesma pessoa de novo
+        assert "Você (operador1)" in str(erro.value) and "não pode conferir a SM novamente" in str(erro.value)
+        assert len(fluxo.doc(sm_id)["conferencias"]) == quantas
+
+    def test_outra_pessoa_pode_conferir_pela_operacao(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)                                                                  # operador1 já conferiu
+        fluxo.conferir(sm_id, fluxo.conferencia_sistema(), usuario="operador2")
+        fluxo.conferir(sm_id, fluxo.conferencia_sistema(), usuario="Operador3")
+        assert [c["ass"] for c in fluxo.doc(sm_id)["conferencias"] if c["modalidade"] == "sistema"] == ["operador1", "operador2", "Operador3"]
+
+    def test_comparacao_ignora_maiusculas_e_espacos_do_login(self, app, fluxo):
+        sm_id = fluxo.salvar()
+        fluxo.conferir(sm_id, fluxo.conferencia_sistema(), usuario="Operador1")
+        with pytest.raises(app.DocLibRegra, match=MENSAGEM):
+            fluxo.conferir(sm_id, fluxo.conferencia_sistema(), usuario="OPERADOR1")
+
+    def test_duas_conferencias_operacao_da_mesma_pessoa_na_mesma_gravacao_sao_recusadas(self, app, fluxo):
+        sm_id = fluxo.salvar()
+        with pytest.raises(app.DocLibRegra, match=MENSAGEM):
+            fluxo.conferir(sm_id, fluxo.conferencia_sistema(), fluxo.conferencia_sistema())
+        assert fluxo.doc(sm_id)["conferencias"] == []
+
+    def test_a_conferencia_manutencao_pode_repetir_o_nome(self, app, fluxo):
+        sm_id = fluxo.salvar()
+        fluxo.conferir(sm_id, fluxo.conferencia_manual(), fluxo.conferencia_manual())
+        assert len(fluxo.doc(sm_id)["conferencias"]) == 2
+
+    def test_quem_fez_a_operacao_pode_fazer_a_manutencao_da_mesma_sm(self, app, fluxo):
+        sm_id = fluxo.salvar()
+        fluxo.conferir(sm_id, fluxo.conferencia_sistema(), fluxo.conferencia_manual())
+        assert fluxo.doc(sm_id)["status"] == APROVADO
+
+    def test_banco_recusa_a_repeticao_mas_aceita_banco_antigo_com_repeticoes(self, app, fluxo):
+        sm_id = fluxo.salvar()
+        fluxo.conferir(sm_id, fluxo.conferencia_sistema())
+        sql = ("INSERT INTO doclib_sm_conferencias (sm_id, ordem, modalidade, nome, area, data, ass, registrado_por, registrado_em) "
+               "VALUES (?, 5, 'sistema', 'x', 'y', '25/10/2026', ?, 'op', 'agora')")
+        conexao = app.doc_lib_conectar(manual=True)
+        with pytest.raises(sqlite3.DatabaseError, match="já efetuou a Conferência Operação"):
+            conexao.execute(sql, (sm_id, " OPERADOR1 "))
+        conexao.execute(sql, (sm_id, "operador9"))                                                   # outra pessoa: aceita
+        # banco de quem já tinha repetições gravadas antes da regra: o gatilho some, as repetições entram e a preparação do banco passa
+        conexao.execute("DROP TRIGGER trg_doclib_sm_conferencia_repetida")
+        conexao.execute(sql.replace(", 5,", ", 6,"), (sm_id, "operador1"))
+        conexao.close()
+        app.garantir_banco_doc_lib()                                                                 # não falha com repetições antigas
+        conexao = app.doc_lib_conectar()
+        assert conexao.execute("SELECT COUNT(*) FROM doclib_sm_conferencias WHERE sm_id = ? AND ass = 'operador1'", (sm_id,)).fetchone()[0] == 2
+        conexao.close()
+
+
+class TestJanelaMesmaPessoaNaoConfereDuasVezes:
+    def test_botao_operacao_avisa_quando_a_pessoa_logada_ja_conferiu(self, app, banco, janelas, fluxo, mensagens, monkeypatch):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))                                   # operador1 (logado) já conferiu
+        conferencias = janela.conferencias
+        antes = len(conferencias.linhas)
+        assert conferencias.adicionar_nova("sistema") is None
+        titulo, texto = mensagens.avisos[-1]
+        assert titulo == "Conferência Operação" and "Você (operador1) já efetuou a conferência deste documento" in texto
+        assert len(conferencias.linhas) == antes and not janela._pendente()
+        assert conferencias.adicionar_nova("manual") is not None                                    # a Manutenção segue liberada
+        monkeypatch.setattr(app, "current_user", "operador2 em 29/10/2026 - 10:00h")
+        assert conferencias.adicionar_nova("sistema") is not None
+
+    def test_clicar_duas_vezes_antes_de_salvar_tambem_avisa(self, app, banco, janelas, mensagens, dialogos):
+        from test_sm_avulso_interface import preencher
+        janela = janelas()
+        preencher(app, janela)
+        janela.salvar()
+        assert janela.conferencias.adicionar_nova("sistema") is not None                             # linha ainda não salva
+        assert janela.conferencias.adicionar_nova("sistema") is None
+        assert MENSAGEM in mensagens.avisos[-1][1] and len(janela.conferencias.linhas) == 1
+
+    def test_o_botao_tambem_avisa_com_a_sm_em_aguarda_conferencia(self, app, banco, janelas, fluxo, mensagens):
+        sm_id = fluxo.ate(AGUARDA)
+        fluxo.conferir(sm_id, fluxo.conferencia_sistema())
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(sm_id))
+        assert janela.conferencias.adicionar_nova("sistema") is None and MENSAGEM in mensagens.avisos[-1][1]
+
+    def test_gravacao_com_a_mesma_pessoa_mostra_a_regra(self, app, banco, janelas, fluxo, mensagens):
+        sm_id = fluxo.ate(APROVADO)
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(sm_id))
+        doc = fluxo.doc(sm_id)
+        # (força a linha, como um defeito da tela faria, para provar que a gravação também recusa)
+        janela.conferencias.adicionar_linha("sistema", {"nome": "operador1", "area": "COG", "data": "29/10/2026", "ass": "operador1"},
+                                            registrada=False)
+        janela._atualizar_estado()
+        janela.salvar()
+        assert MENSAGEM in mensagens.avisos[-1][1] and len(fluxo.doc(sm_id)["conferencias"]) == len(doc["conferencias"])
