@@ -120,8 +120,7 @@ class TestConteudo:
         assert all(f"Conferente {i:02d}" in texto for i in range(1, 11)) and sem_quebras(texto).count("Nome:") == 10
 
     def test_reprogramacoes_impressas_e_campos_vazios_com_o_traco_do_formulario(self, app, fluxo, pdf):
-        sm_id = fluxo.salvar()
-        fluxo.gerar(sm_id)
+        sm_id = fluxo.ate(APROVADO)
         fluxo.alterar(sm_id, p1_data_inicio="26/10/2026", p1_hora_inicio="09:00", p1_data_termino="26/10/2026",
                       p1_hora_termino="18:30", reprogramacoes=1)
         _, _, texto = pdf(sm_id)
@@ -130,9 +129,11 @@ class TestConteudo:
 
     def test_o_pdf_reflete_o_que_esta_gravado(self, app, fluxo, pdf):
         sm_id = fluxo.salvar(motivo="Motivo original")
+        fluxo.gerar(sm_id)
+        fluxo.aprovar(sm_id)
         _, _, primeiro = pdf(sm_id)
         fluxo.alterar(sm_id, p1_data_inicio="26/10/2026", p1_hora_inicio="09:00", p1_data_termino="26/10/2026",
-                      p1_hora_termino="18:30", reprogramacoes=1)                    # depois de gerada, só os campos de acompanhamento
+                      p1_hora_termino="18:30", reprogramacoes=1)                    # aprovada: só os campos de acompanhamento
         _, _, segundo = pdf(sm_id)
         assert "18:30 hs" not in primeiro and "26/10/2026" not in primeiro
         assert "18:30 hs" in segundo and "26/10/2026" in segundo and "Motivo original" in segundo

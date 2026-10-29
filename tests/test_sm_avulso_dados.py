@@ -157,8 +157,7 @@ class TestProgramacao:
         assert any("p2_data_inicio" in chaves for chaves in erros)           # a 2 exige a 1 completa
 
     def test_habilitacao_sequencial_persiste_e_preserva_as_anteriores(self, app, fluxo):
-        sm_id = fluxo.salvar()
-        fluxo.gerar(sm_id)
+        sm_id = fluxo.ate(APROVADO)
         fluxo.alterar(sm_id, p1_data_inicio="26/10/2026", p1_hora_inicio="08:00", p1_data_termino="26/10/2026",
                       p1_hora_termino="17:00", reprogramacoes=1)
         fluxo.alterar(sm_id, p2_data_inicio="27/10/2026", p2_hora_inicio="09:00", p2_data_termino="27/10/2026",
@@ -169,8 +168,47 @@ class TestProgramacao:
             ("25/10/2026", "26/10/2026", "27/10/2026", "")
 
     def test_reprogramacao_habilitada_e_vazia_e_lembrada(self, app, fluxo):
-        sm_id = fluxo.salvar(reprogramacoes=1)
+        sm_id = fluxo.ate(APROVADO)
+        fluxo.alterar(sm_id, reprogramacoes=1)
         assert fluxo.doc(sm_id)["reprogramacoes"] == 1
+
+    # ---- reprogramação (botão Habilitar) só com a SM Aprovada para Execução; depois de salva, o período não é mais editado ----
+    REPROGRAMACAO = dict(p1_data_inicio="26/10/2026", p1_hora_inicio="08:00", p1_data_termino="26/10/2026", p1_hora_termino="17:00",
+                         reprogramacoes=1)
+
+    @pytest.mark.parametrize("status", [AGUARDA, EM_EXECUCAO, CONCLUIDO])
+    def test_reprogramacao_so_com_a_sm_aprovada(self, app, fluxo, status):
+        sm_id = fluxo.ate(status)
+        antes = fluxo.doc(sm_id)
+        with pytest.raises(app.DocLibBloqueado, match="Reprogramações|não pode mais ser alterada"):    # Concluído: nada muda
+            fluxo.alterar(sm_id, **self.REPROGRAMACAO)
+        with pytest.raises(app.DocLibBloqueado, match="Reprogramações|não pode mais ser alterada"):
+            fluxo.alterar(sm_id, reprogramacoes=1)                                      # nem só habilitar
+        assert fluxo.doc(sm_id)["reprogramacoes"] == 0 and fluxo.doc(sm_id)["revisao"] == antes["revisao"]
+
+    def test_reprogramacao_nao_cabe_em_sm_nova_nem_em_analise(self, app, fluxo):
+        with pytest.raises(app.DocLibBloqueado, match="Reprogramações"):
+            fluxo.salvar(**self.REPROGRAMACAO)
+        sm_id = fluxo.salvar()
+        with pytest.raises(app.DocLibBloqueado, match="Reprogramações"):
+            fluxo.alterar(sm_id, **self.REPROGRAMACAO)
+
+    def test_reprogramacao_salva_nao_e_mais_editada_e_a_proxima_precisa_ser_habilitada(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        fluxo.alterar(sm_id, **self.REPROGRAMACAO)
+        for mudanca in (dict(p1_hora_termino="23:00"), dict(p1_data_inicio="27/10/2026"), dict(p1_data_termino="", p1_hora_termino="")):
+            with pytest.raises(app.DocLibBloqueado, match="Reprogramação-1 já registrada.*habilite uma nova reprogramação"):
+                fluxo.alterar(sm_id, **mudanca)
+        assert fluxo.doc(sm_id)["p1_hora_termino"] == "17:00"
+        fluxo.alterar(sm_id, p2_data_inicio="27/10/2026", p2_hora_inicio="08:00", p2_data_termino="27/10/2026",
+                      p2_hora_termino="12:00", reprogramacoes=2)                       # nova reprogramação: permitido
+        assert fluxo.doc(sm_id)["p2_hora_termino"] == "12:00" and fluxo.doc(sm_id)["p1_hora_termino"] == "17:00"
+
+    def test_reprogramacao_habilitada_e_vazia_continua_editavel_ate_ser_salva_com_dados(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        fluxo.alterar(sm_id, reprogramacoes=1)
+        fluxo.alterar(sm_id, **self.REPROGRAMACAO)
+        assert fluxo.doc(sm_id)["p1_hora_termino"] == "17:00"
 
     def test_programacao_original_fica_protegida_depois_da_emissao(self, app, fluxo):
         sm_id = fluxo.salvar()
@@ -178,14 +216,11 @@ class TestProgramacao:
         with pytest.raises(app.DocLibBloqueado, match="edição geral"):
             fluxo.alterar(sm_id, p0_data_inicio="30/10/2026", p0_data_termino="30/10/2026")
 
-    def test_reprogramacao_vale_ate_a_conclusao(self, app, fluxo):
-        sm_id = fluxo.ate(EM_EXECUCAO)
+    def test_reprogramacao_nao_muda_o_status_da_sm_aprovada(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
         fluxo.alterar(sm_id, p1_data_inicio="26/10/2026", p1_hora_inicio="08:00", p1_data_termino="26/10/2026",
                       p1_hora_termino="19:00", reprogramacoes=1)
-        assert fluxo.doc(sm_id)["status"] == EM_EXECUCAO
-        fluxo.concluir(sm_id)
-        with pytest.raises(app.DocLibBloqueado):
-            fluxo.alterar(sm_id, p1_hora_termino="20:00")
+        assert fluxo.doc(sm_id)["status"] == APROVADO
 
 
 # ======================================================================================================================
@@ -590,9 +625,8 @@ class TestManobras:
         assert fluxo.doc(sm_id)["p1_data_inicio"] == "27/10/2026"
 
     def test_regra_nao_vale_para_a_normalizacao_nem_depois_de_registrada_a_liberacao(self, app, fluxo):
+        """Depois de registrada a liberação (SM Em Execução) a SM não é mais reprogramada: a regra só vale em Aprovado."""
         sm_id = fluxo.ate(EM_EXECUCAO)                                                   # liberação 25/10 08:00 a 08:20
-        fluxo.alterar(sm_id, p1_data_inicio="30/10/2026", p1_hora_inicio="08:00", p1_data_termino="30/10/2026",
-                      p1_hora_termino="17:00", reprogramacoes=1)                          # a liberação já registrada não é conferida
         normalizacao = [dict(m, data="25/10/2026", hora=f"09:{indice * 10:02d}") for indice, m in enumerate(fluxo.doc(sm_id)["normalizacao"])]
         fluxo.alterar(sm_id, normalizacao=normalizacao)                                   # normalização sem limite de antecedência
         assert fluxo.doc(sm_id)["normalizacao"][0]["hora"] == "09:00"
@@ -955,7 +989,7 @@ class TestBanco:
             conexao.close()
 
     @pytest.mark.parametrize("origem,destino", [(EM_ANALISE, CONCLUIDO), (EM_ANALISE, APROVADO), (EM_ANALISE, EM_EXECUCAO),
-                                                (AGUARDA, EM_EXECUCAO), (AGUARDA, CONCLUIDO), (APROVADO, CONCLUIDO),
+                                                (AGUARDA, EM_EXECUCAO), (AGUARDA, CONCLUIDO), (APROVADO, EM_ANALISE),
                                                 (AGUARDA, EM_ANALISE), (APROVADO, AGUARDA), (EM_EXECUCAO, APROVADO)])
     def test_transicao_invalida_e_recusada_pelo_banco(self, app, fluxo, origem, destino):
         sm_id = fluxo.ate(origem)
@@ -1092,6 +1126,7 @@ class TestListagem:
         fluxo.salvar()
         sm_id = fluxo.salvar(p0_data_inicio="26/10/2026", p0_data_termino="26/10/2026")
         fluxo.gerar(sm_id)
+        fluxo.aprovar(sm_id)
         fluxo.alterar(sm_id, p1_data_inicio="27/10/2026", p1_hora_inicio="09:00", p1_data_termino="27/10/2026",
                       p1_hora_termino="18:00", reprogramacoes=1)
         app.doc_lib_reservar_sm(1, "operador1")
@@ -1100,7 +1135,7 @@ class TestListagem:
         reservada, vigente = lista[0], lista[1]
         assert (reservada["status"], reservada["motivo"], reservada["prog_inicio"]) == (RESERVADO, "SM RESERVADA", "")
         assert (vigente["prog_inicio"], vigente["prog_termino"]) == ("27/10/2026 09:00", "27/10/2026 18:00")   # reprogramação em vigor
-        assert (vigente["local"], vigente["equipamento"], vigente["status"]) == ("SE MCP", "DJ 52-1", AGUARDA)
+        assert (vigente["local"], vigente["equipamento"], vigente["status"]) == ("SE MCP", "DJ 52-1", APROVADO)
 
 
 # ======================================================================================================================

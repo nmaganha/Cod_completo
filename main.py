@@ -1,4 +1,4 @@
-# Código atualizado em 25-10-26 - 1258 - Click_25: (SM_Avulso - botão Prorrogar e antecedência máxima de 3 h das manobras de liberação)
+# Código atualizado em 29-10-26 - 1303 - Click_25: (SM_Avulso - opções sem manobras nos itens 6 e 8, Habilitar só com a SM Aprovada, reprogramação salva travada)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -22381,7 +22381,8 @@ DOC_LIB_TRANSICOES_SM = {
     STATUS_ATEIE_RESERVADO: (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_CANCELADO),
     STATUS_ATEIE_EM_ANALISE: (STATUS_SM_AGUARDA_CONFERENCIA, STATUS_ATEIE_CANCELADO),
     STATUS_SM_AGUARDA_CONFERENCIA: (STATUS_ATEIE_APROVADO_EXECUCAO, STATUS_ATEIE_CANCELADO),
-    STATUS_ATEIE_APROVADO_EXECUCAO: (STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CANCELADO),
+    # Aprovado vai direto a Concluído quando uma das duas etapas dispensa manobras (checkbuttons do item 6 ou do item 8)
+    STATUS_ATEIE_APROVADO_EXECUCAO: (STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO),
     STATUS_ATEIE_EM_EXECUCAO: (STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO),
     STATUS_ATEIE_CONCLUIDO: (),
     STATUS_ATEIE_CANCELADO: (),
@@ -22393,6 +22394,14 @@ DOC_LIB_STATUS_DEFINITIVOS_SM = (STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO)
 # o botão SM-Referência vale para qualquer SM, menos a que ainda está Reservada (só tem o número)
 DOC_LIB_STATUS_SEM_REFERENCIA_SM = (STATUS_ATEIE_RESERVADO,)
 DOC_LIB_TEXTO_SM_RESERVADA = "SM RESERVADA"        # exibido no GRID SM, em Motivo, enquanto a SM está reservada
+# Checkbuttons do item 6 e do item 8: a etapa dispensa as manobras e o dizer passa a ser a única linha da tabela (coluna Ação).
+# Não existe SM sem manobras de liberação e de normalização: as duas opções nunca ficam marcadas ao mesmo tempo.
+DOC_LIB_TEXTO_LIB_EMERGENCIA_SM = "Manobras executadas em emergência ou manutenção da configuração vigente"
+DOC_LIB_TEXTO_NOR_SEM_MANOBRAS_SM = "Sem necessidade de manobras de normalização, pois a configuração será mantida como se encontra"
+DOC_LIB_CAMPOS_FLAGS_SM = ("lib_emergencia", "nor_sem_manobras")
+# tabela de manobras -> (campo da opção, dizer)
+DOC_LIB_OPCAO_SEM_MANOBRAS_SM = {"liberacao": ("lib_emergencia", DOC_LIB_TEXTO_LIB_EMERGENCIA_SM),
+                                 "normalizacao": ("nor_sem_manobras", DOC_LIB_TEXTO_NOR_SEM_MANOBRAS_SM)}
 # Encaminhar SM por e-mail: só com a SM emitida e no status Aguarda Conferência. O assunto segue o padrão de teste dos demais
 # documentos (ATEIE, AI e MO); troque aqui quando o texto definitivo for escolhido.
 EMAIL_SM_ASSUNTO = "TESTE DE ENVIO DE E-MAIL - SM - Para Conferência"
@@ -22799,6 +22808,9 @@ def _garantir_tabelas_doc_lib_sm(cursor):
     _adicionar_coluna_se_necessario(cursor, "doclib_sm", "email_enviado_por", "TEXT")
     _adicionar_coluna_se_necessario(cursor, "doclib_sm", "email_enviado_origem", "TEXT")
     _adicionar_coluna_se_necessario(cursor, "doclib_sm_pdfs", "tipo", "TEXT")          # 'envio' = PDF anexado ao e-mail
+    # opções do item 6 (manobras executadas em emergência) e do item 8 (sem necessidade de manobras de normalização)
+    _adicionar_coluna_se_necessario(cursor, "doclib_sm", "lib_emergencia", "INTEGER NOT NULL DEFAULT 0 CHECK (lib_emergencia IN (0, 1))")
+    _adicionar_coluna_se_necessario(cursor, "doclib_sm", "nor_sem_manobras", "INTEGER NOT NULL DEFAULT 0 CHECK (nor_sem_manobras IN (0, 1))")
     transicoes = {(origem, destino) for origem, destinos in DOC_LIB_TRANSICOES_SM.items() for destino in destinos}
     if set(cursor.execute("SELECT origem, destino FROM doclib_sm_transicoes").fetchall()) != transicoes:
         cursor.execute("DELETE FROM doclib_sm_transicoes")
@@ -22825,6 +22837,15 @@ def _garantir_tabelas_doc_lib_sm(cursor):
             BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser alterada'); END''',
         "trg_doclib_sm_conferencia_exclui": '''BEFORE DELETE ON doclib_sm_conferencias
             BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser excluída'); END''',
+        # não existe SM sem manobras de liberação e de normalização: as duas opções nunca ficam marcadas juntas
+        "trg_doclib_sm_opcoes_nova": '''BEFORE INSERT ON doclib_sm WHEN NEW.lib_emergencia = 1 AND NEW.nor_sem_manobras = 1
+            BEGIN SELECT RAISE(ABORT, 'SM: a SM precisa de manobras de liberação ou de normalização (as duas opções sem manobras não podem ser marcadas juntas)'); END''',
+        "trg_doclib_sm_opcoes_altera": '''BEFORE UPDATE ON doclib_sm WHEN NEW.lib_emergencia = 1 AND NEW.nor_sem_manobras = 1
+            BEGIN SELECT RAISE(ABORT, 'SM: a SM precisa de manobras de liberação ou de normalização (as duas opções sem manobras não podem ser marcadas juntas)'); END''',
+        # documento gerado: as opções fazem parte do impresso e não mudam mais
+        "trg_doclib_sm_opcoes_emitida": '''BEFORE UPDATE OF lib_emergencia, nor_sem_manobras ON doclib_sm
+            WHEN OLD.emitido = 1 AND (OLD.lib_emergencia <> NEW.lib_emergencia OR OLD.nor_sem_manobras <> NEW.nor_sem_manobras)
+            BEGIN SELECT RAISE(ABORT, 'SM: depois de gerado o documento a opção sem manobras não pode ser alterada'); END''',
         # o registro das prorrogações é só de inclusão
         "trg_doclib_sm_prorrogacoes_altera": '''BEFORE UPDATE ON doclib_sm_prorrogacoes
             BEGIN SELECT RAISE(ABORT, 'SM: a prorrogação registrada não pode ser alterada'); END''',
@@ -22933,7 +22954,9 @@ def doc_lib_calcular_status_sm(doc, emitido):
       Cancelado ................ foi cancelada (nunca volta atrás)
       Reservado ................ número reservado e ainda sem o preenchimento
       Em análise ............... salva, mas o documento ainda não foi gerado
-      Concluído ................ documento gerado e Executantes da Normalização informados
+      Concluído ................ documento gerado e Executantes da Normalização informados (com a opção "manobras executadas em
+                                 emergência" do item 6, só estes; com a opção "sem necessidade de manobras de normalização" do
+                                 item 8, os Executantes da Liberação: nos dois casos a SM vai direto de Aprovado a Concluído)
       Em Execução .............. documento gerado e Executantes da Liberação informados
       Aprovado para Execução ... documento gerado com conferência manual E conferência pelo sistema válidas
       Aguarda Conferência ...... documento gerado, ainda sem as duas conferências"""
@@ -22943,10 +22966,17 @@ def doc_lib_calcular_status_sm(doc, emitido):
         return STATUS_ATEIE_RESERVADO
     if not emitido:
         return STATUS_ATEIE_EM_ANALISE
-    if doc_lib_executantes_informados_sm(doc, "nor"):
-        return STATUS_ATEIE_CONCLUIDO
-    if doc_lib_executantes_informados_sm(doc, "lib"):
-        return STATUS_ATEIE_EM_EXECUCAO
+    if doc.get("lib_emergencia"):           # sem liberação: conclui com os executantes da normalização (nunca fica Em Execução)
+        if doc_lib_executantes_informados_sm(doc, "nor"):
+            return STATUS_ATEIE_CONCLUIDO
+    elif doc.get("nor_sem_manobras"):       # sem normalização: conclui com os executantes da liberação (nunca fica Em Execução)
+        if doc_lib_executantes_informados_sm(doc, "lib"):
+            return STATUS_ATEIE_CONCLUIDO
+    else:
+        if doc_lib_executantes_informados_sm(doc, "nor"):
+            return STATUS_ATEIE_CONCLUIDO
+        if doc_lib_executantes_informados_sm(doc, "lib"):
+            return STATUS_ATEIE_EM_EXECUCAO
     if doc_lib_conferencia_aprovada_sm(doc.get("conferencias")):
         return STATUS_ATEIE_APROVADO_EXECUCAO
     return STATUS_SM_AGUARDA_CONFERENCIA
@@ -23017,7 +23047,8 @@ def doc_lib_normalizar_sm(dados):
     """Devolve uma cópia dos dados no padrão que é validado e gravado: datas dd/mm/aaaa, horas HH:MM, Tempo de Retorno HH:MM,
     textos sem espaços nas pontas, tabelas de manobras sem as linhas totalmente vazias, listas completas de equipamentos
     (3 linhas) e as reprogramações habilitadas (as que têm dados e a anterior a elas). Valores inválidos ficam como foram
-    digitados (a validação os aponta)."""
+    digitados (a validação os aponta). As opções do item 6 e do item 8 (etapa sem manobras) prevalecem sobre o que estiver digitado
+    na tabela: ela vira uma só linha com o dizer da opção e os executantes da etapa saem."""
     novo = {chave: valor for chave, valor in dados.items()}
     for chave in DOC_LIB_CAMPOS_GERAIS_SM + DOC_LIB_CAMPOS_REPROGRAMACAO_SM + DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM \
             + DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM + ("elaborado_por", "elaborado_ass"):
@@ -23060,6 +23091,13 @@ def doc_lib_normalizar_sm(dados):
         if any(conferencia[campo] for campo in ("nome", "area", "data", "ass")):
             conferencias.append(conferencia)
     novo["conferencias"] = conferencias
+    for campo in DOC_LIB_CAMPOS_FLAGS_SM:
+        novo[campo] = 1 if dados.get(campo) else 0
+    for chave, (campo, texto) in DOC_LIB_OPCAO_SEM_MANOBRAS_SM.items():
+        if novo[campo]:           # a opção prevalece: o dizer é a única linha da tabela e a etapa não tem executantes
+            novo[chave] = [{"data": "", "hora": "", "numero": "", "local": "", "acao": texto, "conferir": 0}]
+            for executante in (DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM if chave == "liberacao" else DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM):
+                novo[executante] = ""
     try:
         habilitadas = max(0, min(3, int(dados.get("reprogramacoes") or 0)))
     except (TypeError, ValueError):
@@ -23195,7 +23233,13 @@ def doc_lib_validar_sm(dados, atual=None):
             erro("elaborado_ass", "Elaborado por, Ass.: usuário não identificado (faça login novamente).")
 
     # ---- 6 e 8: manobras de liberação e de normalização
+    if dados.get("lib_emergencia") and dados.get("nor_sem_manobras"):
+        erro(("lib_emergencia", "nor_sem_manobras"),
+             "Itens 6 e 8: não existe SM sem manobras de liberação e de normalização. Marque apenas uma das opções "
+             "(\"Manobras executadas em emergência...\" ou \"Sem necessidade de manobras de normalização...\").")
     for _, chave, titulo, prefixo in _DOC_LIB_TABELAS_MANOBRAS_SM:
+        if dados.get(DOC_LIB_OPCAO_SEM_MANOBRAS_SM[chave][0]):
+            continue                         # a opção da etapa substitui a tabela: só o dizer, sem número, local nem horários
         linhas = dados.get(chave) or []
         if len(linhas) > DOC_LIB_LIMITE_MANOBRAS_SM:
             erro(f"{prefixo}:{DOC_LIB_LIMITE_MANOBRAS_SM + 1}:acao",
@@ -23234,7 +23278,7 @@ def doc_lib_validar_sm(dados, atual=None):
     # liberação: no máximo 3 horas antes do início programado (período em vigor). Vale enquanto as datas da liberação podem ser
     # lançadas (SM Aprovada para Execução); depois de registrada a liberação ela fica bloqueada e não é conferida de novo
     inicio_vigente = doc_lib_inicio_vigente_sm(dados)
-    if status == STATUS_ATEIE_APROVADO_EXECUCAO and inicio_vigente is not None:
+    if status == STATUS_ATEIE_APROVADO_EXECUCAO and inicio_vigente is not None and not dados.get("lib_emergencia"):
         minimo = inicio_vigente - DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM
         linhas = dados.get("liberacao") or []
         identificacoes = doc_lib_identificar_sequencias_sm([linha["numero"] for linha in linhas])
@@ -23276,16 +23320,27 @@ def doc_lib_validar_sm(dados, atual=None):
 # Em análise é o ÚNICO status com edição geral ("geral"). Depois que o documento é gerado, só mudam os grupos abaixo, cada um
 # no seu momento (as reprogramações valem até a SM ser concluída ou cancelada, porque o prazo pode mudar até o fim).
 _DOC_LIB_GRUPOS_EDITAVEIS_SM = {
-    None: ("geral", "reprogramacao"),
-    STATUS_ATEIE_RESERVADO: ("geral", "reprogramacao"),
-    STATUS_ATEIE_EM_ANALISE: ("geral", "reprogramacao"),
-    STATUS_SM_AGUARDA_CONFERENCIA: ("reprogramacao", "conferencias"),
+    None: ("geral",),
+    STATUS_ATEIE_RESERVADO: ("geral",),
+    STATUS_ATEIE_EM_ANALISE: ("geral",),
+    STATUS_SM_AGUARDA_CONFERENCIA: ("conferencias",),
+    # a reprogramação (botão Habilitar) só existe com a SM Aprovada para Execução; com a SM Em Execução só há a prorrogação
     STATUS_ATEIE_APROVADO_EXECUCAO: ("reprogramacao", "datas_lib", "exec_lib"),
-    STATUS_ATEIE_EM_EXECUCAO: ("reprogramacao", "datas_nor", "exec_nor"),     # liberação (itens 6 e 7) já registrada: bloqueada
+    STATUS_ATEIE_EM_EXECUCAO: ("datas_nor", "exec_nor"),     # liberação (itens 6 e 7) já registrada: bloqueada
 }
+
+
+def doc_lib_grupos_editaveis_sm(status, doc=None):
+    """Grupos de campos que o status deixa alterar, considerando as opções do item 6 e do item 8. Com a opção de emergência
+    (liberação dispensada) a SM Aprovada para Execução recebe os horários e os executantes da NORMALIZAÇÃO, no lugar dos da
+    liberação, e conclui por aí; com a opção sem normalização ela recebe os da liberação e conclui por aí."""
+    grupos = _DOC_LIB_GRUPOS_EDITAVEIS_SM.get(status, ())
+    if status == STATUS_ATEIE_APROVADO_EXECUCAO and (doc or {}).get("lib_emergencia"):
+        grupos = tuple(grupo for grupo in grupos if grupo not in ("datas_lib", "exec_lib")) + ("datas_nor", "exec_nor")
+    return grupos
 _DOC_LIB_NOMES_GRUPOS_SM = {
     "geral": "dados gerais do documento (só podem ser alterados com a SM Em análise)",
-    "reprogramacao": "Reprogramações",
+    "reprogramacao": "Reprogramações (só com a SM Aprovada para Execução)",
     "datas_lib": "Data e hora das manobras de liberação (só com a SM Aprovada para Execução; depois de registrada a liberação "
                  "elas ficam bloqueadas)",
     "datas_nor": "Data e hora das manobras de normalização (só com a SM Em Execução)",
@@ -23311,7 +23366,8 @@ def _doc_lib_grupos_sm(doc):
                     for item in doc.get("equipamentos") or []]
     equipamentos += [("",) * len(DOC_LIB_COLUNAS_EQUIPAMENTO_SM)] * (DOC_LIB_LINHAS_EQUIPAMENTOS_SM - len(equipamentos))
     return {"geral": (tuple(txt(campo) for campo in DOC_LIB_CAMPOS_GERAIS_SM), tuple(equipamentos),
-                      estrutura("liberacao"), estrutura("normalizacao")),
+                      estrutura("liberacao"), estrutura("normalizacao"),
+                      tuple(1 if doc.get(campo) else 0 for campo in DOC_LIB_CAMPOS_FLAGS_SM)),
             "reprogramacao": (tuple(txt(campo) for campo in DOC_LIB_CAMPOS_REPROGRAMACAO_SM),
                               int(doc.get("reprogramacoes") or 0)),
             "datas_lib": datas("liberacao"), "datas_nor": datas("normalizacao"),
@@ -23324,22 +23380,24 @@ def _doc_lib_grupos_sm(doc):
 def doc_lib_diferencas_bloqueadas_sm(atual, dados):
     """Lista o que, nos dados recebidos, difere do gravado e NÃO pode ser alterado no status atual da SM (lista vazia = nada
     protegido foi alterado). 'atual' é a SM gravada (None ou {} na SM nova). Além de cada status só liberar os seus grupos
-    (_DOC_LIB_GRUPOS_EDITAVEIS_SM): a conferência registrada não muda nem sai; Executantes e data e hora já registrados podem ser
-    corrigidos, mas não apagados (apagá-los desfaria o que levou a SM ao status atual)."""
+    (doc_lib_grupos_editaveis_sm): a conferência registrada não muda nem sai; Executantes e data e hora já registrados podem ser
+    corrigidos, mas não apagados (apagá-los desfaria o que levou a SM ao status atual). Uma reprogramação salva não é mais
+    editada (para mudar o período, habilita-se uma nova reprogramação)."""
     atual = atual or {}
     status = atual.get("status")
-    editaveis = _DOC_LIB_GRUPOS_EDITAVEIS_SM.get(status, ())
+    editaveis = doc_lib_grupos_editaveis_sm(status, atual)
     antes, depois = _doc_lib_grupos_sm(atual), _doc_lib_grupos_sm(dados)
     bloqueadas = [nome for grupo, nome in _DOC_LIB_NOMES_GRUPOS_SM.items()
                   if grupo not in editaveis and antes[grupo] != depois[grupo]]
     if "conferencias" in editaveis and depois["conferencias"][:len(antes["conferencias"])] != antes["conferencias"]:
         bloqueadas.append("Conferência já registrada (não pode ser alterada nem removida)")
-    if status == STATUS_ATEIE_EM_EXECUCAO:        # com a execução em andamento, o período salvo só muda por Prorrogar (ou nova Reprogramação)
-        for prefixo, _, nome in DOC_LIB_PERIODOS_SM[1:]:
-            campos = doc_lib_campos_periodo_sm(prefixo)
-            if any(_doc_lib_txt(atual.get(campo)) for campo in campos) and any(
-                    _doc_lib_txt(atual.get(campo)) != _doc_lib_txt(dados.get(campo)) for campo in campos):
-                bloqueadas.append(f"{nome} já registrada (com a SM Em Execução o término muda pelo botão Prorrogar)")
+    for prefixo, _, nome in DOC_LIB_PERIODOS_SM[1:]:    # reprogramação já salva: não é mais editada (nova mudança = nova reprogramação)
+        campos = doc_lib_campos_periodo_sm(prefixo)
+        if any(_doc_lib_txt(atual.get(campo)) for campo in campos) and any(
+                _doc_lib_txt(atual.get(campo)) != _doc_lib_txt(dados.get(campo)) for campo in campos):
+            bloqueadas.append(f"{nome} já registrada (depois de salva a reprogramação não é editada: para mudar o período, "
+                              f"habilite uma nova reprogramação" + ("; com a SM Em Execução o término muda pelo botão Prorrogar"
+                                                                    if status == STATUS_ATEIE_EM_EXECUCAO else "") + ")")
     for grupo, nome in (("exec_lib", "Executantes da Liberação"), ("exec_nor", "Executantes da Normalização")):
         if grupo in editaveis and any(antes[grupo]) and not any(depois[grupo]):
             bloqueadas.append(f"{nome} já registrados (podem ser corrigidos, não apagados)")
@@ -23356,16 +23414,18 @@ def doc_lib_pendencias_transicao_sm(doc, destino):
     """Pendências obrigatórias de execução que impedem a SM de passar ao status 'destino' (Em Execução ou Concluído):
       Em Execução ... Executantes da Liberação e data e hora de TODAS as manobras de liberação;
       Concluído ..... tudo isso e, ainda, os Executantes da Normalização e data e hora de TODAS as manobras de normalização.
-    Assim o campo dos executantes não conclui uma SM com a execução pela metade. Retorna a lista de mensagens."""
+    Assim o campo dos executantes não conclui uma SM com a execução pela metade. A etapa dispensada por uma das opções do item 6
+    (emergência) ou do item 8 (sem normalização) não tem pendências. Retorna a lista de mensagens."""
     pendencias = []
-    if destino in (STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CONCLUIDO):
+    sem_liberacao, sem_normalizacao = bool(doc.get("lib_emergencia")), bool(doc.get("nor_sem_manobras"))
+    if destino in (STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CONCLUIDO) and not sem_liberacao:
         if not doc_lib_executantes_informados_sm(doc, "lib"):
             pendencias.append("Executantes da Liberação: informe quem executou no local ou remotamente.")
         for manobra in doc.get("liberacao") or []:
             if not (manobra.get("data") and manobra.get("hora")):
                 pendencias.append(f"Manobra de liberação {manobra.get('identificacao') or manobra.get('numero')}: "
                                   f"informe a data e a hora da execução.")
-    if destino == STATUS_ATEIE_CONCLUIDO:
+    if destino == STATUS_ATEIE_CONCLUIDO and not sem_normalizacao:
         if not doc_lib_executantes_informados_sm(doc, "nor"):
             pendencias.append("Executantes da Normalização: informe quem executou no local ou remotamente.")
         for manobra in doc.get("normalizacao") or []:
@@ -23475,7 +23535,7 @@ def doc_lib_salvar_sm(dados, usuario):
                     raise DocLibRegra("A SM de referência não existe ou ainda está reservada (só tem o número).")
             sequencia = _doc_lib_consumir_numero(cursor, "SM", agora.year)
             numero = doc_lib_formatar_numero(sequencia, agora.year)
-            colunas = list(DOC_LIB_CAMPOS_GERAIS_SM + DOC_LIB_CAMPOS_REPROGRAMACAO_SM) \
+            colunas = list(DOC_LIB_CAMPOS_GERAIS_SM + DOC_LIB_CAMPOS_REPROGRAMACAO_SM + DOC_LIB_CAMPOS_FLAGS_SM) \
                 + ["reprogramacoes", "elaborado_por", "elaborado_ass"]
             cursor.execute(
                 f"INSERT INTO doclib_sm (numero, ano, sequencia, {', '.join(colunas)}, referencia_id, status, revisao, "
@@ -23488,13 +23548,13 @@ def doc_lib_salvar_sm(dados, usuario):
         else:
             colunas = []
             if geral:
-                colunas += list(DOC_LIB_CAMPOS_GERAIS_SM)
+                colunas += list(DOC_LIB_CAMPOS_GERAIS_SM + DOC_LIB_CAMPOS_FLAGS_SM)
                 if status == STATUS_ATEIE_RESERVADO:
                     colunas += ["elaborado_por", "elaborado_ass"]
             colunas += list(DOC_LIB_CAMPOS_REPROGRAMACAO_SM) + ["reprogramacoes"]
-            if "exec_lib" in _DOC_LIB_GRUPOS_EDITAVEIS_SM[status]:
+            if "exec_lib" in doc_lib_grupos_editaveis_sm(status, atual):
                 colunas += list(DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM)
-            if "exec_nor" in _DOC_LIB_GRUPOS_EDITAVEIS_SM[status]:
+            if "exec_nor" in doc_lib_grupos_editaveis_sm(status, atual):
                 colunas += list(DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM)
             cursor.execute(
                 f"UPDATE doclib_sm SET {', '.join(f'{campo} = ?' for campo in colunas)}, revisao = revisao + 1, "
@@ -23568,7 +23628,8 @@ def _doc_lib_gravar_acompanhamento_sm(cursor, atual, dados, usuario, agora_texto
 # período salvo não é mais editado direto: o término só muda por aqui (doc_lib_diferencas_bloqueadas_sm).
 def doc_lib_validar_prorrogacao_sm(doc):
     """Confere se a SM pode ser prorrogada e devolve o prefixo ('p0' a 'p3') do período em vigor. Lança DocLibRegra com a
-    orientação: só com a SM Em Execução, e a última reprogramação habilitada precisa estar preenchida e salva."""
+    orientação: só com a SM Em Execução. O período em vigor é a última reprogramação preenchida (uma reprogramação habilitada e
+    vazia não conta: com a SM Em Execução ela não pode mais ser preenchida)."""
     if doc is None:
         raise DocLibRegra("Esta SM não existe mais.")
     if doc["status"] != STATUS_ATEIE_EM_EXECUCAO:
@@ -23577,10 +23638,6 @@ def doc_lib_validar_prorrogacao_sm(doc):
     prefixo = doc_lib_prefixo_vigente_sm(doc)
     if prefixo is None:
         raise DocLibRegra("A SM não tem período programado completo.")
-    habilitadas = int(doc.get("reprogramacoes") or 0)
-    if habilitadas > int(prefixo[1]):
-        raise DocLibRegra(f"Preencha e salve a {_DOC_LIB_NOMES_PERIODO_SM['p' + str(habilitadas)]}, que já está habilitada, antes de "
-                          f"prorrogar: a prorrogação vale para o período em vigor.")
     return prefixo
 
 
@@ -23749,7 +23806,8 @@ def doc_lib_listar_sm():
 
 def doc_lib_dados_referencia_sm(doc):
     """Dados que a SM aberta pelo botão SM-Referência herda da SM de origem: Equipamento(s) a impedir, Motivo, Condições de
-    Segurança, Manobras de Liberação e de Normalização (número, local e ação), Observações e o vínculo com a SM de origem.
+    Segurança, Manobras de Liberação e de Normalização (número, local e ação), as opções "sem manobras" dos itens 6 e 8,
+    Observações e o vínculo com a SM de origem.
     NÃO herda: número, status, período programado e reprogramações, data e hora das manobras, executantes da liberação e da
     normalização, conferências (manual e pelo sistema), elaborador e qualquer identificador interno."""
     def manobras(chave):
@@ -23762,6 +23820,7 @@ def doc_lib_dados_referencia_sm(doc):
              "motivo": doc.get("motivo") or "", "observacoes": doc.get("observacoes") or "",
              "liberacao": manobras("liberacao"), "normalizacao": manobras("normalizacao")}
     dados.update({campo: doc.get(campo) or "" for campo in DOC_LIB_CAMPOS_CONDICOES_SM})
+    dados.update({campo: 1 if doc.get(campo) else 0 for campo in DOC_LIB_CAMPOS_FLAGS_SM})      # opções sem manobras (itens 6 e 8)
     return dados
 
 
@@ -25008,6 +25067,8 @@ class LinhasManobrasSM:
         self.linhas = []
         self.estrutura_travada = False    # número, local, ação, ordem e inclusão/exclusão de linhas
         self.datas_travadas = True        # data e hora das manobras
+        self.texto_fixo = None            # dizer da opção "sem manobras" marcada: a tabela vira uma linha travada com esse texto
+        self._guardadas = None            # manobras digitadas antes de a opção ser marcada (voltam se ela for desmarcada)
         self.grade = Frame(pai, bg=SGA_CARD)
         self.grade.pack(fill=X, padx=12, pady=(4, 0))
         for coluna, (titulo, minimo) in enumerate(self.COLUNAS):
@@ -25177,7 +25238,9 @@ class LinhasManobrasSM:
 
     def _ajustar_altura(self, linha):
         try:
-            resultado = linha["acao"].count("1.0", "end-1c", "displaylines")
+            # até "end" (e não "end-1c"): o count devolve as quebras entre os dois pontos, então o fim precisa estar depois da última
+            # linha exibida, senão um texto que quebra em 2 linhas contaria 1 e a última linha ficaria escondida
+            resultado = linha["acao"].count("1.0", "end", "displaylines")
             linhas = resultado[0] if isinstance(resultado, (tuple, list)) and resultado else resultado
             linha["acao"].configure(height=max(1, min(int(linhas or 1), 8)))
         except (TclError, ValueError, TypeError):
@@ -25225,18 +25288,42 @@ class LinhasManobrasSM:
         self.estrutura_travada, self.datas_travadas = estrutura, datas
         self._aplicar_travas()
 
+    def tem_manobras_digitadas(self):
+        """True se alguma linha tem número, local ou ação digitados (data e hora não contam: só entram depois da conferência)."""
+        return any(valor for linha in self.coletar() for valor in (linha["numero"], linha["local"], linha["acao"]))
+
+    def definir_texto_fixo(self, texto, preencher=True):
+        """Opção "sem manobras" marcada (texto) ou desmarcada (None). Marcada: as manobras digitadas são guardadas e a tabela passa a
+        ter uma só linha, com o dizer da opção na coluna Ação, e todos os campos e botões ficam desabilitados (data e hora também:
+        a etapa não tem manobras a datar). Desmarcada: as manobras digitadas voltam (ou uma linha em branco). Com preencher=False só
+        registra o dizer (a tabela está sendo carregada de uma SM gravada, que já traz a linha com o dizer)."""
+        if not preencher:
+            self.texto_fixo, self._guardadas = texto or None, None
+            self._aplicar_travas()
+            return
+        if texto:
+            if not self.texto_fixo:
+                self._guardadas = self.coletar() if self.tem_manobras_digitadas() else None
+            self.texto_fixo = texto
+            self.preencher([{"acao": texto}])
+        elif self.texto_fixo:
+            guardadas, self._guardadas, self.texto_fixo = self._guardadas, None, None
+            self.preencher(guardadas)
+
     def _aplicar_travas(self):
         total = len(self.linhas)
+        estrutura = self.estrutura_travada or bool(self.texto_fixo)
+        datas = self.datas_travadas or bool(self.texto_fixo)
         for posicao, linha in enumerate(self.linhas):
             for chave in ("numero", "local", "acao"):
-                doc_lib_bloquear_widget(linha[chave], self.estrutura_travada)
+                doc_lib_bloquear_widget(linha[chave], estrutura)
             for chave in ("data", "hora", "icone"):
-                doc_lib_bloquear_widget(linha[chave], self.datas_travadas)
-            doc_lib_estado_botao(linha["btn_subir"], not self.estrutura_travada and posicao > 0)
-            doc_lib_estado_botao(linha["btn_descer"], not self.estrutura_travada and posicao < total - 1)
-            doc_lib_estado_botao(linha["btn_remover"], not self.estrutura_travada)
-            doc_lib_estado_botao(linha["btn_conferir"], not self.estrutura_travada)
-        doc_lib_estado_botao(self.btn_adicionar, not self.estrutura_travada and total < self.limite)
+                doc_lib_bloquear_widget(linha[chave], datas)
+            doc_lib_estado_botao(linha["btn_subir"], not estrutura and posicao > 0)
+            doc_lib_estado_botao(linha["btn_descer"], not estrutura and posicao < total - 1)
+            doc_lib_estado_botao(linha["btn_remover"], not estrutura)
+            doc_lib_estado_botao(linha["btn_conferir"], not estrutura)
+        doc_lib_estado_botao(self.btn_adicionar, not estrutura and total < self.limite)
 
 
 class LinhasConferenciaSM:
@@ -25465,6 +25552,7 @@ class JanelaSMAvulso:
         estilo.configure("DocLibErro.TCombobox", bordercolor=SGA_VERMELHO, lightcolor=SGA_VERMELHO, darkcolor=SGA_VERMELHO)
         estilo.map("DocLibErro.TCombobox", bordercolor=[("focus", SGA_VERMELHO), ("active", SGA_VERMELHO)])
 
+        self._opcoes = {}             # "liberacao"/"normalizacao" -> BooleanVar do checkbutton "sem manobras" do item 6/8
         self._montar_cabecalho()
         self._montar_formulario()
         self._montar_rodape()
@@ -25519,6 +25607,46 @@ class JanelaSMAvulso:
         """Coloca o widget na linha seguinte do quadro, ocupando as duas colunas."""
         widget.grid(row=self._linha, column=0, columnspan=2, sticky="ew", padx=16, pady=pady)
         self._linha += 1
+
+    def _opcao_sem_manobras(self, chave, item):
+        """Checkbutton logo abaixo da tabela de manobras (item 6: emergência; item 8: sem necessidade de normalização). Marcado, o
+        dizer passa a ser a única linha da tabela, o resto da tabela e os executantes da etapa ficam desabilitados e a outra opção
+        fica bloqueada (não existe SM sem manobras de liberação e de normalização)."""
+        campo, texto = DOC_LIB_OPCAO_SEM_MANOBRAS_SM[chave]
+        variavel = BooleanVar(value=False)
+        self._opcoes[chave] = variavel
+        botao = Checkbutton(self.card, text=texto, variable=variavel, command=lambda: self._ao_marcar_opcao(chave),
+                            bg=SGA_CARD, activebackground=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"), anchor="w",
+                            disabledforeground=DOC_LIB_TEXTO_DESABILITADO, cursor="hand2")
+        self._linha_larga(botao, pady=(0, 10))
+        DicaBotaoSM(botao, f"Marque para dispensar as manobras do item {item}: o dizer vira a única linha da tabela e o documento "
+                           f"não leva manobras nesta etapa")
+        return botao
+
+    def _ao_marcar_opcao(self, chave):
+        """Marcar ou desmarcar uma das opções "sem manobras". Marcar: se já havia manobras digitadas na tabela, avisa que prevalecem
+        os dizeres da opção (as digitadas voltam se a opção for desmarcada antes de salvar); a tabela vira a linha com o dizer e os
+        executantes da etapa são limpos e travados."""
+        campo, texto = DOC_LIB_OPCAO_SEM_MANOBRAS_SM[chave]
+        tabela, item = (self.tab_lib, "6") if chave == "liberacao" else (self.tab_nor, "8")
+        if self._opcoes[chave].get():
+            outra = next(c for c in DOC_LIB_OPCAO_SEM_MANOBRAS_SM if c != chave)
+            if self._opcoes[outra].get():          # o outro botão fica desabilitado; isto só protege contra um clique simultâneo
+                self._opcoes[chave].set(False)
+                return
+            if tabela.tem_manobras_digitadas():
+                messagebox.showwarning(
+                    f"Item {item}", f"Há manobras digitadas no item {item} e a opção foi marcada: serão mantidos os dizeres da opção.\n\n"
+                                    f"\"{texto}\"\n\nAs manobras digitadas não serão gravadas. Se desmarcar a opção antes de salvar, "
+                                    f"elas voltam.", parent=self.janela)
+            tabela.definir_texto_fixo(texto)
+            for entrada in ((self.ent_exec_lib_local, self.ent_exec_lib_remoto) if chave == "liberacao"
+                            else (self.ent_exec_nor_local, self.ent_exec_nor_remoto)):
+                doc_lib_definir_entrada(entrada, "")
+        else:
+            tabela.definir_texto_fixo(None)
+        self._aplicar_bloqueios()
+        self._atualizar_estado()
 
     def _campo_entrada_sm(self, chave, rotulo_texto, largura=46, geral=True):
         """Linha com rótulo + campo de texto livre de uma linha (geral=True: trava e libera com a edição geral)."""
@@ -25604,10 +25732,13 @@ class JanelaSMAvulso:
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.tab_lib = LinhasManobrasSM(self, quadro, "lib", "Manobras de Liberação")
+        self.chk_lib_emergencia = self._opcao_sem_manobras("liberacao", "6")
         self._separador()
         self._titulo_secao("7. Executantes da Liberação:",
                            "Preenchido depois da conferência da SM, ao lançar os horários das manobras e da liberação. "
-                           "Ao salvar, a SM passa a Em Execução e os itens 6 e 7 ficam bloqueados.")
+                           "Ao salvar, a SM passa a Em Execução\ne os itens 6 e 7 ficam bloqueados. Com a opção \"Sem necessidade "
+                           "de manobras de normalização\" (item 8), a SM passa direto a Concluído.\n"
+                           "Com a opção \"Manobras executadas em emergência...\" (item 6), este item não é preenchido.")
         self.ent_exec_lib_local = self._campo_entrada_sm("exec_lib_local", "7.1 No local", 70, geral=False)
         self.ent_exec_lib_remoto = self._campo_entrada_sm("exec_lib_remoto", "7.2 Remotamente", 70, geral=False)
 
@@ -25631,10 +25762,13 @@ class JanelaSMAvulso:
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.tab_nor = LinhasManobrasSM(self, quadro, "nor", "Manobras de Normalização")
+        self.chk_nor_sem_manobras = self._opcao_sem_manobras("normalizacao", "8")
         self._separador()
         self._titulo_secao("9. Executantes da Normalização:",
                            "Preenchido ao lançar os horários das manobras e da normalização. Ao salvar, a SM passa a Concluído "
-                           "(só com todas as manobras de liberação e de normalização datadas).")
+                           "(só com todas as manobras\nde liberação e de normalização datadas). Com a opção \"Manobras executadas em "
+                           "emergência...\" (item 6), a SM conclui por aqui, direto de Aprovado para Execução.\n"
+                           "Com a opção \"Sem necessidade de manobras de normalização\" (item 8), este item não é preenchido.")
         self.ent_exec_nor_local = self._campo_entrada_sm("exec_nor_local", "9.1 No local", 70, geral=False)
         self.ent_exec_nor_remoto = self._campo_entrada_sm("exec_nor_remoto", "9.2 Remotamente", 70, geral=False)
 
@@ -25864,38 +25998,44 @@ class JanelaSMAvulso:
         """True se o período já tem dados gravados no banco."""
         return any(_doc_lib_txt((self._doc_gravado or {}).get(campo)) for campo in doc_lib_campos_periodo_sm(prefixo))
 
+    def _prefixo_prorrogar(self):
+        """Quadro que mostra o botão Prorrogar: o do período em vigor. Com a SM Aprovada para Execução, onde as reprogramações são
+        habilitadas, é o da última reprogramação habilitada (o botão vai ocupando o lugar do Habilitar); nos demais status é o da
+        última reprogramação já preenchida e salva ou, se não houver, o da Programação."""
+        if self.status == STATUS_ATEIE_APROVADO_EXECUCAO:
+            return f"p{self.reprogramacoes_habilitadas}"
+        return doc_lib_prefixo_vigente_sm(self._doc_gravado or {}) or "p0"
+
     def _aplicar_periodos(self):
-        """Libera os campos das reprogramações habilitadas (se o status permite) e o botão da próxima, na ordem. O botão Prorrogar
-        ocupa o quadro do período em vigor (a última reprogramação habilitada ou, se não houver, a Programação), no lugar do
-        Habilitar. Com a SM Em Execução, o período já salvo só muda pelo Prorrogar."""
+        """Mostra e libera os botões e os campos dos períodos.
+          - Habilitar: visível só com a SM Aprovada para Execução (depois de iniciada a execução não há mais reprogramação, só
+            prorrogação); em cada quadro de reprogramação ainda não habilitada, ativo apenas no da próxima, na ordem;
+          - Prorrogar: no quadro do período em vigor, no lugar do Habilitar (ver _prefixo_prorrogar);
+          - campos de uma reprogramação: editáveis só enquanto ela está habilitada e ainda não foi salva com dados; depois de
+            salva, o período fica desabilitado (para mudar, habilita-se uma nova reprogramação)."""
         editavel = "reprogramacao" in self._grupos_editaveis()
         habilitadas = self.reprogramacoes_habilitadas
-        self._mostrar_prorrogar("p0", habilitadas == 0)
-        for numero in (1, 2, 3):
-            prefixo = f"p{numero}"
-            dados = self.periodo[prefixo]
+        alvo = self._prefixo_prorrogar()
+        aprovada = self.status == STATUS_ATEIE_APROVADO_EXECUCAO and not self.cancelada
+        for prefixo, dados in self.periodo.items():
+            mostrar_prorrogar = prefixo == alvo
+            mostrar_habilitar = dados["botao"] is not None and aprovada and not mostrar_prorrogar
+            for botao, mostrar in ((dados["botao_prorrogar"], mostrar_prorrogar), (dados["botao"], mostrar_habilitar)):
+                if botao is None:
+                    continue
+                if mostrar and not botao.winfo_manager():
+                    botao.pack(side=RIGHT, padx=6, pady=3, ipadx=6)
+                elif not mostrar and botao.winfo_manager():
+                    botao.pack_forget()
+            if prefixo == "p0":
+                continue
+            numero = int(prefixo[1])
             habilitada = numero <= habilitadas
-            protegida = self.status == STATUS_ATEIE_EM_EXECUCAO and self._periodo_salvo(prefixo)
             for widget in dados["widgets"]:
-                doc_lib_bloquear_widget(widget, not (habilitada and editavel and not protegida))
-            botao = dados["botao"]
-            botao.configure(text="Habilitada" if habilitada else "Habilitar")
-            doc_lib_estado_botao(botao, editavel and numero == habilitadas + 1)
-            self._mostrar_prorrogar(prefixo, numero == habilitadas)
+                doc_lib_bloquear_widget(widget, not (habilitada and editavel and not self._periodo_salvo(prefixo)))
+            dados["botao"].configure(text="Habilitada" if habilitada else "Habilitar")
+            doc_lib_estado_botao(dados["botao"], editavel and numero == habilitadas + 1)
         self._atualizar_prorrogar()
-
-    def _mostrar_prorrogar(self, prefixo, mostrar):
-        """Mostra o Prorrogar no quadro do período em vigor (no lugar do Habilitar) e o esconde nos demais."""
-        dados = self.periodo[prefixo]
-        if mostrar:
-            if dados["botao"] is not None:
-                dados["botao"].pack_forget()
-            if not dados["botao_prorrogar"].winfo_manager():
-                dados["botao_prorrogar"].pack(side=RIGHT, padx=6, pady=3, ipadx=6)
-        else:
-            dados["botao_prorrogar"].pack_forget()
-            if dados["botao"] is not None and not dados["botao"].winfo_manager():
-                dados["botao"].pack(side=RIGHT, padx=6, pady=3, ipadx=6)
 
     def _atualizar_prorrogar(self, pendente=None):
         """O Prorrogar só fica ativo com a SM Em Execução, sem alterações pendentes e com o período em vigor preenchido e salvo."""
@@ -25904,11 +26044,12 @@ class JanelaSMAvulso:
         possivel = False
         if self.sm_id is not None and not pendente and not self.cancelada and self._doc_gravado:
             try:
-                possivel = doc_lib_validar_prorrogacao_sm(self._doc_gravado) == f"p{self.reprogramacoes_habilitadas}"
+                doc_lib_validar_prorrogacao_sm(self._doc_gravado)
+                possivel = True
             except DocLibRegra:
                 possivel = False
-        for prefixo, dados in self.periodo.items():
-            doc_lib_estado_botao(dados["botao_prorrogar"], possivel and prefixo == f"p{self.reprogramacoes_habilitadas}")
+        for dados in self.periodo.values():
+            doc_lib_estado_botao(dados["botao_prorrogar"], possivel)
 
     def prorrogar(self):
         """Botão Prorrogar: abre a janela da nova data e hora de término do período em vigor e grava a prorrogação (P1, P2...).
@@ -25977,7 +26118,7 @@ class JanelaSMAvulso:
             return _DOC_LIB_GRUPOS_EDITAVEIS_SM[None]
         if self.status in (STATUS_ATEIE_RESERVADO, STATUS_ATEIE_EM_ANALISE) and not self.emitido:
             return () if self.salvo and self.status == STATUS_ATEIE_EM_ANALISE else _DOC_LIB_GRUPOS_EDITAVEIS_SM[self.status]
-        return _DOC_LIB_GRUPOS_EDITAVEIS_SM.get(self.status, ())
+        return doc_lib_grupos_editaveis_sm(self.status, self._doc_gravado)
 
     def _aplicar_bloqueios(self):
         """Libera ou trava cada grupo de campos conforme o status (ver _grupos_editaveis)."""
@@ -25989,10 +26130,14 @@ class JanelaSMAvulso:
             self._ajustar_tempo(indice)
         self.tab_lib.travar(estrutura=not geral, datas="datas_lib" not in grupos)
         self.tab_nor.travar(estrutura=not geral, datas="datas_nor" not in grupos)
-        for entrada in (self.ent_exec_lib_local, self.ent_exec_lib_remoto):
-            doc_lib_bloquear_widget(entrada, "exec_lib" not in grupos)
+        sem_lib, sem_nor = self._opcoes["liberacao"].get(), self._opcoes["normalizacao"].get()
+        # cada opção só pode ser mexida na edição geral e enquanto a outra não estiver marcada
+        doc_lib_bloquear_widget(self.chk_lib_emergencia, not geral or sem_nor)
+        doc_lib_bloquear_widget(self.chk_nor_sem_manobras, not geral or sem_lib)
+        for entrada in (self.ent_exec_lib_local, self.ent_exec_lib_remoto):          # etapa dispensada: executantes não se aplicam
+            doc_lib_bloquear_widget(entrada, "exec_lib" not in grupos or sem_lib)
         for entrada in (self.ent_exec_nor_local, self.ent_exec_nor_remoto):
-            doc_lib_bloquear_widget(entrada, "exec_nor" not in grupos)
+            doc_lib_bloquear_widget(entrada, "exec_nor" not in grupos or sem_nor)
         self.conferencias.travar("conferencias" in grupos)
         self._aplicar_periodos()
 
@@ -26021,7 +26166,7 @@ class JanelaSMAvulso:
         doc_lib_estado_botao(self.btn_encaminhar, self.sm_id is not None and not pendente and not self.cancelada
                              and self.status == STATUS_SM_AGUARDA_CONFERENCIA)
         self._atualizar_prorrogar(pendente)
-        doc_lib_estado_botao(self.btn_inverter, "geral" in self._grupos_editaveis())
+        doc_lib_estado_botao(self.btn_inverter, "geral" in self._grupos_editaveis() and not any(v.get() for v in self._opcoes.values()))
         if self.sm_id is None:
             texto = "Nova SM (não salva)"
         else:
@@ -26058,6 +26203,8 @@ class JanelaSMAvulso:
                  "conferencias": self.conferencias.coletar(),
                  "exec_lib_local": self.ent_exec_lib_local.get().strip(), "exec_lib_remoto": self.ent_exec_lib_remoto.get().strip(),
                  "exec_nor_local": self.ent_exec_nor_local.get().strip(), "exec_nor_remoto": self.ent_exec_nor_remoto.get().strip()}
+        for chave, (campo, _) in DOC_LIB_OPCAO_SEM_MANOBRAS_SM.items():
+            dados[campo] = 1 if self._opcoes[chave].get() else 0
         for campo, texto in self.txt_condicoes.items():
             dados[campo] = self._texto(texto)
         for prefixo, campos in self.periodo.items():
@@ -26098,6 +26245,7 @@ class JanelaSMAvulso:
         doc_lib_definir_entrada(self.ent_elaborado_area, doc.get("elaborado_area") or (DOC_LIB_AREA_ELABORADOR_SM if reservada else ""))
         doc_lib_definir_entrada(self.ent_elaborado_data, doc.get("elaborado_data") or
                                 (datetime.now().strftime("%d/%m/%Y") if reservada else ""))
+        self._mostrar_opcoes(doc)
         self.tab_lib.preencher(doc.get("liberacao"))
         self.tab_nor.preencher(doc.get("normalizacao"))
         for campo, entrada in (("exec_lib_local", self.ent_exec_lib_local), ("exec_lib_remoto", self.ent_exec_lib_remoto),
@@ -26106,6 +26254,14 @@ class JanelaSMAvulso:
         self.conferencias.preencher(doc.get("conferencias"))
         self._atualizar_contador_motivo()
         self._atualizar_numero_provisorio()
+
+    def _mostrar_opcoes(self, dados):
+        """Mostra as opções "sem manobras" dos itens 6 e 8 de uma SM gravada (ou da SM de referência). A tabela é preenchida em
+        seguida com a linha do dizer, que já vem nos dados."""
+        for chave, (campo, texto) in DOC_LIB_OPCAO_SEM_MANOBRAS_SM.items():
+            marcada = bool(dados.get(campo))
+            self._opcoes[chave].set(marcada)
+            (self.tab_lib if chave == "liberacao" else self.tab_nor).definir_texto_fixo(texto if marcada else None, preencher=False)
 
     def _aplicar_referencia(self, referencia):
         """SM-Referência: preenche a SM nova com os dados herdados da SM de origem (doc_lib_dados_referencia_sm). Período,
@@ -26119,6 +26275,7 @@ class JanelaSMAvulso:
         self._definir_texto(self.txt_observacoes, referencia["observacoes"])
         for campo, texto in self.txt_condicoes.items():
             self._definir_texto(texto, referencia[campo])
+        self._mostrar_opcoes(referencia)
         self.tab_lib.preencher(referencia["liberacao"])
         self.tab_nor.preencher(referencia["normalizacao"])
         self._atualizar_contador_motivo()
@@ -26412,7 +26569,7 @@ class JanelaSMAvulso:
         editável e, se já houver manobras de normalização preenchidas, pede confirmação antes de substituí-las. Ação sem
         inversão inequívoca é mantida e marcada para conferência manual."""
         titulo = "Inverter Manobras"
-        if "geral" not in self._grupos_editaveis():
+        if "geral" not in self._grupos_editaveis() or any(variavel.get() for variavel in self._opcoes.values()):
             return
         liberacao = self.tab_lib.coletar()
         if not any(manobra[campo] for manobra in liberacao for campo in ("numero", "local", "acao")):

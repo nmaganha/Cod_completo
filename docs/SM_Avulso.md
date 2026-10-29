@@ -43,11 +43,13 @@ O e-mail da SM sai no status **Aguarda Conferência** (ver "Encaminhar SM por e-
 | Aguarda -> Aprovado | salvar ao menos **uma Conferência Manutenção E uma Conferência Operação** válidas |
 | Aprovado -> Em Execução | salvar os Executantes da Liberação, com **todas** as manobras de liberação datadas (a partir daí os itens 6 e 7 ficam bloqueados) |
 | Em Execução -> Concluído | salvar os Executantes da Normalização, com **todas** as manobras de normalização datadas |
+| Aprovado -> Concluído (direto) | só com uma das opções "sem manobras" (itens 6 e 8, ver decisão 21): a SM **não passa por Em Execução** |
 
 O que cada status deixa alterar (`_DOC_LIB_GRUPOS_EDITAVEIS_SM`, vale na tela e no `doc_lib_salvar_sm`):
-Em análise = edição geral; Aguarda = reprogramações e conferências; Aprovado = reprogramações, data/hora e executantes da
-liberação (itens 6 e 7); Em Execução = nova reprogramação, **Prorrogar**, data/hora e executantes da normalização (itens 8 e 9). Os itens 6 e 7
-**ficam inativos para qualquer lançamento depois de salvos** (a SM passa a Em Execução ao salvar os executantes); Concluído/Cancelado = nada.
+Em análise = edição geral (inclusive as opções "sem manobras"); Aguarda = conferências; Aprovado = **reprogramações (botão Habilitar)**,
+data/hora e executantes da liberação (itens 6 e 7); Em Execução = **Prorrogar**, data/hora e executantes da normalização (itens 8 e 9);
+Concluído/Cancelado = nada. Os itens 6 e 7 **ficam inativos para qualquer lançamento depois de salvos** (a SM passa a Em Execução ao salvar
+os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam (decisão 21).
 
 ## Decisões sobre pontos ambíguos do enunciado
 
@@ -66,10 +68,12 @@ liberação (itens 6 e 7); Em Execução = nova reprogramação, **Prorrogar**, 
    os da Normalização só Em Execução; assim a SM nunca pula de estado e não conclui com a execução pela metade.
 6. **Cancelamento**: o enunciado manda permitir em qualquer status menos Concluído (a MO só cancela antes da execução). Foi seguido o
    enunciado; em **Em Execução** a janela avisa que cancelar não normaliza o equipamento. Justificativa obrigatória; número nunca reaproveitado.
-7. **Reprogramações** são o único grupo de período editável depois de gerado o documento (até Concluído/Cancelado): prazo pode mudar
-   até o fim. A programação original fica protegida. Cada reprogramação só é habilitada na ordem 1, 2, 3; a habilitação é gravada.
-   Com a SM **Em Execução**, uma reprogramação já salva também fica protegida (só o botão Prorrogar muda o término dela); preencher uma
-   reprogramação nova, ainda vazia, continua possível (ver item 19).
+7. **Reprogramações** (botão **Habilitar**) existem **só com a SM Aprovada para Execução**: o botão fica visível apenas nesse status (em
+   Em análise, Aguarda Conferência, Em Execução, Concluído e Cancelado ele some, e o banco recusa a alteração). Com a SM em execução não se
+   reprograma mais: só há a prorrogação (decisão 19). A programação original fica protegida. Cada reprogramação só é habilitada na ordem 1, 2,
+   3; a habilitação é gravada. **Reprogramação salva fica desabilitada para edição** (tela e banco): para mudar o período é preciso habilitar
+   uma nova reprogramação (no máximo três; a terceira, depois de salva, não tem mais correção). Uma reprogramação habilitada e ainda não
+   preenchida continua editável.
 8. **Data e hora das manobras**: podem ser **corrigidas, não apagadas**; cada alteração vai para `doclib_sm_historico` (usuário e
    momento). A ordem segue o **número arábico da Sequência**, e a **letra não conta** (valem as duas tabelas, Liberação e
    Normalização):
@@ -148,27 +152,28 @@ liberação (itens 6 e 7); Em Execução = nova reprogramação, **Prorrogar**, 
     instrução específica (igual ao AI). Se a intenção era outra, informar.
 18. **PDF**: fiel ao formulário (12 itens, número no alto à direita, rodapé com página e número). O aviso vermelho
     "Aguardando a Conferência do documento" fica no cabeçalho enquanto a SM aguarda; o primeiro PDF gerado já o traz.
-19. **Prorrogar** (SM em andamento): botão no quadro do **período em vigor** (a última reprogramação habilitada ou, se não houver, a
-    Programação), no lugar do Habilitar: ao habilitar a Reprogramação-1, o Prorrogar sai do quadro 2.1 e passa para o 2.2, e assim por
-    diante; o Habilitar segue para o quadro seguinte. O botão aparece sempre e só fica ativo quando:
+19. **Prorrogar** (SM em andamento): botão no quadro do **período em vigor**, no lugar do Habilitar. Com a SM Aprovada (onde o Habilitar
+    aparece) é o quadro da última reprogramação habilitada: ao habilitar a Reprogramação-1, o Prorrogar sai do quadro 2.1 e passa para o 2.2, e
+    assim por diante, e o Habilitar segue para o quadro seguinte. Nos demais status é o quadro da última reprogramação preenchida e salva ou,
+    se não houver, o da Programação. O botão aparece sempre e só fica ativo quando:
     - a SM está **Em Execução** (liberação feita e executantes registrados; antes disso o instrumento é a Reprogramação);
     - não há alterações pendentes na janela (salvar antes, como em Gerar e Cancelar);
-    - o período em vigor está preenchido e salvo (uma reprogramação habilitada e ainda vazia aponta o Prorrogar para o quadro dela,
-      onde ele fica desativado até ela ser preenchida e salva).
+    - o período em vigor está preenchido e salvo. Uma reprogramação que ficou habilitada e vazia não impede a prorrogação do período
+      em vigor (com a SM Em Execução ela não pode mais ser preenchida).
     Ao clicar abre a janela **Prorrogar SM** com o período em vigor, o término atual, o número da prorrogação (P1, P2...) e os campos
     de data (com calendário) e hora do **novo término**, que **substitui** o término do período e passa a ser a data e hora válidas para
     o fim da atividade. Regras:
     - o novo término precisa ser **posterior** ao atual (igual ou anterior é recusado; para antecipar, use uma nova Reprogramação);
-    - não há limite de prorrogações: P1, P2, P3, P4... A contagem é **por período**: a Programação prorrogada duas vezes mostra P2, e a
-      Reprogramação-1, quando entra em vigor, começa de novo em P1 (cada término impresso leva o seu P);
+    - não há limite de prorrogações: P1, P2, P3, P4... A contagem é por período. Como a reprogramação só existe antes da execução, na prática
+      só o período em vigor quando a SM entra em execução recebe prorrogações (a Programação, se não houve reprogramação, ou a última
+      reprogramação);
     - **impresso**: ao lado do término prorrogado aparece o termo (P1, P2...) em fonte menor (6,5 pt, contra 9 pt da data e da hora);
       na tela o mesmo termo aparece ao lado da hora do término. Período sem prorrogação não mostra nada;
     - cada prorrogação fica em `doclib_sm_prorrogacoes` (período, número, término anterior, novo término, usuário e momento; o banco
       não deixa alterar nem excluir) e no histórico da SM, a revisão do documento avança e o status não muda. Gere o documento de
       novo para o PDF mostrar a prorrogação;
-    - com a SM Em Execução o período **já salvo** não é mais editado direto (nem a Programação, que já era protegida, nem uma
-      reprogramação salva): o término só muda pelo Prorrogar. Antes da execução (Aguarda, Aprovado) as reprogramações continuam
-      editáveis como antes. O GRID SM mostra o término vigente.
+    - o período **já salvo** não é editado direto (nem a Programação, que já era protegida, nem uma reprogramação salva): com a SM Em
+      Execução o término só muda pelo Prorrogar. O GRID SM mostra o término vigente.
 20. **Antecedência das manobras de liberação**: a data e hora de cada manobra de liberação não pode ser **anterior a 3 horas do início
     programado**. O "programado" é o início do período em vigor (se houve reprogramação preenchida, vale o início dela). Exemplo: programado
     para 10/10/2026 14:00, a primeira manobra pode ser lançada a partir de 10/10/2026 11:00 (exatamente 3 horas antes é aceito; 10:59
@@ -177,15 +182,40 @@ liberação (itens 6 e 7); Em Execução = nova reprogramação, **Prorrogar**, 
       não é conferida de novo: uma reprogramação posterior não invalida manobras já executadas;
     - se uma reprogramação for salva com a liberação já lançada em Aprovado e as manobras ficarem a mais de 3 horas do novo início, a
       gravação é recusada até as datas serem corrigidas **na mesma gravação**;
-    - não há limite do outro lado (manobra depois do início) nem regra equivalente para a normalização;
+    - não há limite do outro lado (manobra depois do início) nem regra equivalente para a normalização; também não vale com a opção "Manobras
+      executadas em emergência..." do item 6 (não há manobras de liberação a datar);
     - a mensagem aponta a linha ("linha 1 (sequência 1A)"), o início programado e o primeiro horário permitido, e as caixas de data e
       hora ficam em vermelho. A dica do item 6 informa a regra.
+21. **Opções "sem manobras" (itens 6 e 8)**: dois checkbuttons, um logo abaixo de cada tabela, antes dos executantes:
+    - item 6: **"Manobras executadas em emergência ou manutenção da configuração vigente"** (liberação dispensada);
+    - item 8: **"Sem necessidade de manobras de normalização, pois a configuração será mantida como se encontra"** (normalização dispensada).
+    Ao marcar uma opção:
+    - o dizer entra na **primeira linha da coluna Ação** da tabela e todo o resto da tabela fica desabilitado (número da sequência, Local,
+      data e hora, ícone do calendário, subir, descer, remover, adicionar). A linha impressa leva só o dizer, sem sequência nem local;
+    - os campos do executante da etapa (7.1 e 7.2, ou 9.1 e 9.2) ficam desabilitados e vazios: a etapa não tem manobras nem executantes;
+    - o botão Inverter Manobras fica desabilitado;
+    - se já havia manobras digitadas na tabela, aparece um **aviso** informando que serão mantidos os dizeres da opção e que as manobras
+      digitadas não serão gravadas. Elas ficam guardadas na janela: se a opção for desmarcada antes de salvar, voltam;
+    - **as duas opções não podem ficar marcadas juntas** (não existe SM sem manobras de liberação e de normalização): marcada uma, a outra
+      fica bloqueada. A exclusão vale também na validação dos dados e no banco (trigger);
+    - a escolha é parte do documento impresso: vale na edição geral (Em análise, inclusive SM reservada) e **não muda depois de gerado o
+      documento** (tela, camada de dados e banco). A SM-Referência herda a opção marcada.
+    Status:
+    - com **"Sem necessidade de manobras de normalização"**, ao lançar os horários da liberação (item 6) e os dados do item 7 a SM vai direto de
+      Aprovado para Execução a **Concluído** (sem passar por Em Execução); os itens 8 e 9 não são preenchidos;
+    - com **"Manobras executadas em emergência..."**, a SM Aprovada para Execução recebe os horários da normalização (item 8) e os dados do item 9
+      e vai direto a **Concluído**; os itens 6 e 7 não são preenchidos. Como a liberação não é datada, a SM fica Aprovada até a normalização;
+      nesse tempo ela pode ser reprogramada e cancelada, mas não prorrogada (a prorrogação é só de SM Em Execução);
+    - a regra de ordem dos horários e a pendência de "todas as manobras datadas e executantes" valem apenas para a etapa que tem manobras.
+    Se os dados trouxerem manobras ou executantes da etapa dispensada junto com a opção, a opção prevalece e o resto é descartado.
+
 
 ## Banco de dados
 
 Tabelas novas, criadas por `garantir_banco_doc_lib` sem tocar nos dados existentes: `doclib_sm`, `doclib_sm_equipamentos`,
 `doclib_sm_manobras`, `doclib_sm_conferencias`, `doclib_sm_historico`, `doclib_sm_transicoes`, `doclib_sm_pdfs`,
-`doclib_sm_prorrogacoes`, `doclib_sm_contatos` e `doclib_sm_emails`.
+`doclib_sm_prorrogacoes`, `doclib_sm_contatos` e `doclib_sm_emails`. Colunas `lib_emergencia` e `nor_sem_manobras` em `doclib_sm` (0 ou 1,
+com trigger contra as duas juntas e contra a mudança depois de gerado o documento).
 
 Proteções no banco (valem mesmo para quem alterar o `dados_turno.db` direto): `UNIQUE(numero)` e `UNIQUE(ano, sequencia)`;
 `CHECK` do status, das condições, de 1 a 30 manobras, do Local (6 caracteres) e da modalidade; triggers que recusam transição de
@@ -211,6 +241,7 @@ xvfb-run -a python -m pytest tests  # Linux sem tela (o conftest também inicia 
 | `test_sm_avulso_interface.py` | janela real (Tk): número no alto à direita, padrões, listas de seleção, opção Indisponível/hh:mm, caixa alta ao digitar, reprogramações em ordem, tabelas de manobras, bloqueio dos itens 6 e 7, rótulos Manutenção/Operação, validações, fluxo completo até Concluído, inversão, referência, reserva, GRID, menu |
 | `test_sm_avulso_email.py` | lista de contatos (incluir, repetido, inválido, ordem, última escolha), regras de status do envio, PDF para envio (arquivo, aviso, reaproveitamento, revisão), registro dos envios e imutabilidade, banco antigo, marcação manual no GRID, janela de envio (Para/Cc, novo e-mail, excluir, confirmar), botão da janela da SM, fluxo de envio com falha, reenvio e SM alterada durante o envio |
 | `test_sm_avulso_prorrogacao.py` | Prorrogar: regras no banco (só Em Execução, novo término posterior, P1 a P5, conflito de revisão, imutabilidade), período em vigor e reprogramação, trava do período salvo, botão no quadro certo e alternando com o Habilitar, janela do Prorrogar, P no PDF (fonte menor, ao lado do término, margens) |
+| `test_sm_avulso_sem_manobras.py` | opções dos itens 6 e 8: dados, exclusão mútua (validação e banco), imutabilidade depois de gerado, status direto a Concluído, 3 h, referência, PDF, janela (checkbuttons, aviso, restauração, bloqueios, itens 7 e 9, altura da célula Ação) |
 | `test_sm_avulso_pdf.py` | conteúdo, caixa alta, Indisponível, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
 | `test_regressao_doc_lib.py` | ATEIE, AI e MO (salvar, gerar, De acordo, reserva, MO-Referência, janelas, menu, GRID) e numerações independentes |
 
