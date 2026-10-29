@@ -32,6 +32,8 @@ O envio usa, sem alteração, `doc_lib_enviar_email`, `EMAIL_ATEIE_REMETENTES`, 
 ## Status e transições
 
 `Reservado` -> `Em análise` -> `Aguarda Conferência` -> `Aprovado para Execução` -> `Em Execução` -> `Concluído`.
+A conferência também pode ser registrada **antes de gerar o documento**: `Em análise` -> `Aprovado para Execução` direto (decisão 23);
+nesse caso o documento é gerado depois, com a SM já aprovada, e `Aguarda Conferência` não ocorre.
 `Cancelado` vale de qualquer status, **menos Concluído**. Concluído e Cancelado não têm saída.
 O e-mail da SM sai no status **Aguarda Conferência** (ver "Encaminhar SM por e-mail" abaixo); o envio não muda o status.
 
@@ -41,12 +43,14 @@ O e-mail da SM sai no status **Aguarda Conferência** (ver "Encaminhar SM por e-
 | Reservado -> Em análise | preencher e salvar a SM reservada (mantém o número) |
 | Em análise -> Aguarda Conferência | botão **Gerar SM Avulso** (documento emitido; dados gerais protegidos) |
 | Aguarda -> Aprovado | salvar ao menos **uma Conferência Manutenção E uma Conferência Operação** válidas (com a SM já Aprovada outras pessoas ainda podem conferir: decisão 22) |
+| Em análise -> Aprovado (direto) | as mesmas duas conferências registradas com a SM salva e **antes** de gerar o documento (decisão 23) |
 | Aprovado -> Em Execução | salvar os Executantes da Liberação, com **todas** as manobras de liberação datadas (a partir daí os itens 6 e 7 ficam bloqueados) |
 | Em Execução -> Concluído | salvar os Executantes da Normalização, com **todas** as manobras de normalização datadas |
 | Aprovado -> Concluído (direto) | só com uma das opções "sem manobras" (itens 6 e 8, ver decisão 21): a SM **não passa por Em Execução** |
 
 O que cada status deixa alterar (`_DOC_LIB_GRUPOS_EDITAVEIS_SM`, vale na tela e no `doc_lib_salvar_sm`):
-Em análise = edição geral (inclusive as opções "sem manobras"); Aguarda = conferências; Aprovado = **reprogramações (botão Habilitar)**,
+Em análise = edição geral (inclusive as opções "sem manobras") **ou, com a SM salva, a conferência** (a primeira conferência registrada encerra a
+edição geral); Aguarda = conferências; Aprovado = **reprogramações (botão Habilitar)**,
 **novas conferências**, data/hora e executantes da liberação (itens 6 e 7); Em Execução = **Prorrogar**, data/hora e executantes da normalização (itens 8 e 9);
 Concluído/Cancelado = nada. Os itens 6 e 7 **ficam inativos para qualquer lançamento depois de salvos** (a SM passa a Em Execução ao salvar
 os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam (decisão 21).
@@ -216,6 +220,23 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
     (ao salvar os executantes da liberação, ou direto a Concluído nas opções "sem manobras") as conferências se encerram. As conferências
     novas aparecem no PDF ao gerar o documento de novo. O Encaminhar SM continua só no status Aguarda Conferência. Não há trava contra a
     mesma pessoa registrar duas vezes (como já era em Aguarda Conferência).
+23. **Conferência antes de gerar o documento (SM salva, Em análise)**: os botões Conferência Manutenção e Conferência Operação ficam ativos
+    assim que a SM é salva em Em análise (inativos só com a SM nova, em edição pelo botão Editar, em execução, concluída ou cancelada; a dica do
+    botão e a do item 12 explicam). Fluxo:
+    - com a SM salva, registrar a **Conferência Manutenção** e a **Conferência Operação** (uma de cada área) leva a SM **direto a Aprovado para
+      Execução**, ainda com o documento não gerado (a barra de status mostra "documento ainda não gerado"). As conferências seguintes, se houver,
+      são facultativas: dão permissão aos demais integrantes das equipes; **as manobras podem ser executadas só com as duas primeiras**;
+    - **Gerar SM Avulso** emite o documento (PDF) depois, sem mudar o status. Enquanto o documento não for gerado, os horários das manobras e os
+      executantes (itens 6 a 9) ficam bloqueados; a reprogramação (Habilitar), novas conferências, cancelamento e SM-Referência continuam
+      disponíveis. Gerar o documento antes e conferir depois (Em análise, Aguarda Conferência, Aprovado) continua valendo; também vale gerar com
+      uma conferência já registrada (a SM vai a Aguarda Conferência e a segunda a aprova). O Encaminhar SM por e-mail segue só em Aguarda
+      Conferência;
+    - **a conferência vale para a versão salva**: registrada a primeira, os dados gerais ficam protegidos (tela e `doc_lib_salvar_sm`), o botão
+      Editar fica desabilitado e a conferência não pode ser gravada junto com uma alteração dos dados gerais. Para mudar o conteúdo, cancela-se a
+      SM e abre-se outra pela SM-Referência. A conferência só é aceita com o documento pronto para emitir (sem ação marcada para conferência pelo
+      Inverter Manobras);
+    - o banco só aceita conferência nova com a SM em Em análise, Aguarda Conferência ou Aprovada (trigger) e a transição Em análise -> Aprovado
+      existe na tabela de transições.
 
 ## Banco de dados
 
@@ -249,6 +270,7 @@ xvfb-run -a python -m pytest tests  # Linux sem tela (o conftest também inicia 
 | `test_sm_avulso_email.py` | lista de contatos (incluir, repetido, inválido, ordem, última escolha), regras de status do envio, PDF para envio (arquivo, aviso, reaproveitamento, revisão), registro dos envios e imutabilidade, banco antigo, marcação manual no GRID, janela de envio (Para/Cc, novo e-mail, excluir, confirmar), botão da janela da SM, fluxo de envio com falha, reenvio e SM alterada durante o envio |
 | `test_sm_avulso_prorrogacao.py` | Prorrogar: regras no banco (só Em Execução, novo término posterior, P1 a P5, conflito de revisão, imutabilidade), período em vigor e reprogramação, trava do período salvo, botão no quadro certo e alternando com o Habilitar, janela do Prorrogar, P no PDF (fonte menor, ao lado do término, margens) |
 | `test_sm_avulso_sem_manobras.py` | opções dos itens 6 e 8: dados, exclusão mútua (validação e banco), imutabilidade depois de gerado, status direto a Concluído, 3 h, referência, PDF, janela (checkbuttons, aviso, restauração, bloqueios, itens 7 e 9, altura da célula Ação) |
+| `test_sm_avulso_conferencia_antecipada.py` | conferência com a SM Em análise: aprovação direta, proteção dos dados gerais, emissão depois, execução só com as duas primeiras conferências, trigger do banco, janela (botões, Editar, mensagens, status) |
 | `test_sm_avulso_pdf.py` | conteúdo, caixa alta, Indisponível, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
 | `test_regressao_doc_lib.py` | ATEIE, AI e MO (salvar, gerar, De acordo, reserva, MO-Referência, janelas, menu, GRID) e numerações independentes |
 

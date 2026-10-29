@@ -1,4 +1,4 @@
-# Código atualizado em 29-10-26 - 1359 - Click_25: (SM_Avulso - conferências adicionais com a SM Aprovada para Execução, até 10 no total)
+# Código atualizado em 29-10-26 - 1435 - Click_25: (SM_Avulso - conferências já com a SM salva, antes de gerar o documento)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -22379,7 +22379,9 @@ DOC_LIB_COR_STATUS[STATUS_SM_AGUARDA_CONFERENCIA] = DOC_LIB_COR_STATUS[STATUS_AT
 # e um trigger recusa qualquer UPDATE de status fora dela. Concluído e Cancelado não têm saída.
 DOC_LIB_TRANSICOES_SM = {
     STATUS_ATEIE_RESERVADO: (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_CANCELADO),
-    STATUS_ATEIE_EM_ANALISE: (STATUS_SM_AGUARDA_CONFERENCIA, STATUS_ATEIE_CANCELADO),
+    # as conferências podem ser registradas já com a SM salva (Em análise): com as duas primeiras ela vai direto a Aprovado, e o
+    # documento é emitido (Gerar SM Avulso) depois; quem gera o documento antes passa por Aguarda Conferência
+    STATUS_ATEIE_EM_ANALISE: (STATUS_SM_AGUARDA_CONFERENCIA, STATUS_ATEIE_APROVADO_EXECUCAO, STATUS_ATEIE_CANCELADO),
     STATUS_SM_AGUARDA_CONFERENCIA: (STATUS_ATEIE_APROVADO_EXECUCAO, STATUS_ATEIE_CANCELADO),
     # Aprovado vai direto a Concluído quando uma das duas etapas dispensa manobras (checkbuttons do item 6 ou do item 8)
     STATUS_ATEIE_APROVADO_EXECUCAO: (STATUS_ATEIE_EM_EXECUCAO, STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO),
@@ -22832,6 +22834,11 @@ def _garantir_tabelas_doc_lib_sm(cursor):
             BEGIN SELECT RAISE(ABORT, 'SM: o número do documento não pode ser alterado'); END''',
         "trg_doclib_sm_sem_exclusao": '''BEFORE DELETE ON doclib_sm
             BEGIN SELECT RAISE(ABORT, 'SM não pode ser excluída (o número nunca é reaproveitado)'); END''',
+        # a conferência só entra com a SM Em análise (documento ainda não gerado), Aguarda Conferência ou Aprovada para Execução
+        "trg_doclib_sm_conferencia_nova": f'''BEFORE INSERT ON doclib_sm_conferencias
+            WHEN (SELECT status FROM doclib_sm WHERE id = NEW.sm_id) NOT IN ('{STATUS_ATEIE_EM_ANALISE}',
+                '{STATUS_SM_AGUARDA_CONFERENCIA}', '{STATUS_ATEIE_APROVADO_EXECUCAO}')
+            BEGIN SELECT RAISE(ABORT, 'SM: a conferência só é registrada com a SM Em análise, Aguarda Conferência ou Aprovada para Execução'); END''',
         # conferência registrada não muda nem é apagada
         "trg_doclib_sm_conferencia_altera": '''BEFORE UPDATE ON doclib_sm_conferencias
             BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser alterada'); END''',
@@ -22953,7 +22960,9 @@ def doc_lib_calcular_status_sm(doc, emitido):
     """Status automático da SM, em função do que já aconteceu com ela:
       Cancelado ................ foi cancelada (nunca volta atrás)
       Reservado ................ número reservado e ainda sem o preenchimento
-      Em análise ............... salva, mas o documento ainda não foi gerado
+      Em análise ............... salva, o documento ainda não foi gerado e as duas conferências ainda não foram registradas
+      Aprovado para Execução ... conferência manual E conferência pelo sistema válidas (com o documento gerado ou não: a
+                                 conferência pode ser registrada já com a SM salva, antes de gerar)
       Concluído ................ documento gerado e Executantes da Normalização informados (com a opção "manobras executadas em
                                  emergência" do item 6, só estes; com a opção "sem necessidade de manobras de normalização" do
                                  item 8, os Executantes da Liberação: nos dois casos a SM vai direto de Aprovado a Concluído)
@@ -22964,8 +22973,8 @@ def doc_lib_calcular_status_sm(doc, emitido):
         return STATUS_ATEIE_CANCELADO
     if doc.get("status") == STATUS_ATEIE_RESERVADO and not doc_lib_sm_tem_conteudo(doc):
         return STATUS_ATEIE_RESERVADO
-    if not emitido:
-        return STATUS_ATEIE_EM_ANALISE
+    if not emitido:     # documento ainda não gerado: Em análise, ou Aprovado se as duas conferências já foram registradas
+        return STATUS_ATEIE_APROVADO_EXECUCAO if doc_lib_conferencia_aprovada_sm(doc.get("conferencias")) else STATUS_ATEIE_EM_ANALISE
     if doc.get("lib_emergencia"):           # sem liberação: conclui com os executantes da normalização (nunca fica Em Execução)
         if doc_lib_executantes_informados_sm(doc, "nor"):
             return STATUS_ATEIE_CONCLUIDO
@@ -23332,12 +23341,22 @@ _DOC_LIB_GRUPOS_EDITAVEIS_SM = {
 
 
 def doc_lib_grupos_editaveis_sm(status, doc=None):
-    """Grupos de campos que o status deixa alterar, considerando as opções do item 6 e do item 8. Com a opção de emergência
+    """Grupos de campos que o status deixa alterar, considerando as opções do item 6 e do item 8, as conferências e a emissão
+    do documento. Em análise (documento ainda não gerado) aceita também a conferência, mas só até a primeira ser registrada: dali
+    em diante os dados gerais ficam protegidos. Aprovada antes de gerar o documento só aceita os horários e os executantes depois
+    de ele ser gerado. Com a opção de emergência
     (liberação dispensada) a SM Aprovada para Execução recebe os horários e os executantes da NORMALIZAÇÃO, no lugar dos da
     liberação, e conclui por aí; com a opção sem normalização ela recebe os da liberação e conclui por aí."""
+    doc = doc or {}
     grupos = _DOC_LIB_GRUPOS_EDITAVEIS_SM.get(status, ())
-    if status == STATUS_ATEIE_APROVADO_EXECUCAO and (doc or {}).get("lib_emergencia"):
-        grupos = tuple(grupo for grupo in grupos if grupo not in ("datas_lib", "exec_lib")) + ("datas_nor", "exec_nor")
+    if status == STATUS_ATEIE_EM_ANALISE and not doc.get("emitido"):
+        # a conferência vale para a versão salva: a primeira conferência registrada encerra a edição geral do documento
+        grupos = ("conferencias",) if doc.get("conferencias") else ("geral", "conferencias")
+    if status == STATUS_ATEIE_APROVADO_EXECUCAO:
+        if doc.get("lib_emergencia"):
+            grupos = tuple(grupo for grupo in grupos if grupo not in ("datas_lib", "exec_lib")) + ("datas_nor", "exec_nor")
+        if not doc.get("emitido"):        # aprovada antes de gerar o documento: só lança horários e executantes depois de gerá-lo
+            grupos = tuple(grupo for grupo in grupos if grupo not in ("datas_lib", "exec_lib", "datas_nor", "exec_nor"))
     return grupos
 _DOC_LIB_NOMES_GRUPOS_SM = {
     "geral": "dados gerais do documento (só podem ser alterados com a SM Em análise)",
@@ -23392,6 +23411,10 @@ def doc_lib_diferencas_bloqueadas_sm(atual, dados):
                   if grupo not in editaveis and antes[grupo] != depois[grupo]]
     if "conferencias" in editaveis and depois["conferencias"][:len(antes["conferencias"])] != antes["conferencias"]:
         bloqueadas.append("Conferência já registrada (não pode ser alterada nem removida)")
+    if status == STATUS_ATEIE_EM_ANALISE and len(depois["conferencias"]) > len(antes["conferencias"]) \
+            and antes["geral"] != depois["geral"] and "dados gerais do documento" not in " ".join(bloqueadas):
+        bloqueadas.append("dados gerais do documento na mesma gravação da conferência (a conferência vale para a versão salva: "
+                          "grave as alterações antes de registrar a conferência)")
     for prefixo, _, nome in DOC_LIB_PERIODOS_SM[1:]:    # reprogramação já salva: não é mais editada (nova mudança = nova reprogramação)
         campos = doc_lib_campos_periodo_sm(prefixo)
         if any(_doc_lib_txt(atual.get(campo)) for campo in campos) and any(
@@ -23522,8 +23545,17 @@ def doc_lib_salvar_sm(dados, usuario):
 
         bloqueadas = doc_lib_diferencas_bloqueadas_sm(atual, dados)
         if bloqueadas:
+            if status == STATUS_ATEIE_EM_ANALISE and atual.get("conferencias"):
+                rodape = (".\n\nA SM já tem conferência registrada: os dados gerais não podem mais ser alterados. Para mudar o "
+                          "conteúdo, cancele a SM e abra uma nova pelo botão SM-Referência.")
+            else:
+                rodape = ".\n\nEm análise (sem conferência registrada) é o único status que permite a edição geral do documento."
             raise DocLibBloqueado(f"Com a SM no status '{status or 'nova'}' não é permitido alterar: " + "; ".join(bloqueadas)
-                                  + ".\n\nEm análise é o único status que permite a edição geral do documento.")
+                                  + rodape)
+        if status == STATUS_ATEIE_EM_ANALISE and len(dados["conferencias"]) > registradas:
+            erros_geracao = doc_lib_erros_geracao_sm(atual)         # a conferência só vale para um documento pronto para emitir
+            if erros_geracao:
+                raise DocLibValidacaoSM(erros_geracao)
         erros = doc_lib_validar_sm(dados, atual)
         if erros:
             raise DocLibValidacaoSM(erros)
@@ -23562,7 +23594,9 @@ def doc_lib_salvar_sm(dados, usuario):
                 f"atualizado_por = ?, atualizado_em = ? WHERE id = ?",
                 [dados[campo] for campo in colunas] + [usuario, agora_texto, sm_id])
             if geral:
-                _doc_lib_gravar_filhos_sm(cursor, sm_id, dados)
+                if "geral" in doc_lib_grupos_editaveis_sm(status, atual):
+                    _doc_lib_gravar_filhos_sm(cursor, sm_id, dados)
+                _doc_lib_gravar_conferencias_sm(cursor, atual, dados, usuario, agora_texto)
             else:
                 _doc_lib_gravar_acompanhamento_sm(cursor, atual, dados, usuario, agora_texto)
 
@@ -23586,6 +23620,20 @@ def doc_lib_salvar_sm(dados, usuario):
         conexao.close()
 
 
+def _doc_lib_gravar_conferencias_sm(cursor, atual, dados, usuario, agora_texto):
+    """Grava as conferências novas (as já registradas não mudam) e registra cada uma no histórico (quem, quando e o quê)."""
+    sm_id = atual["id"]
+    for ordem, conferencia in enumerate(dados["conferencias"], start=1):
+        if ordem > len(atual["conferencias"]):
+            cursor.execute("INSERT INTO doclib_sm_conferencias (sm_id, ordem, modalidade, nome, area, data, ass, registrado_por, "
+                           "registrado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (sm_id, ordem, conferencia["modalidade"], conferencia["nome"], conferencia["area"],
+                            conferencia["data"], conferencia["ass"], usuario, agora_texto))
+            _doc_lib_historico_sm(cursor, sm_id, "conferencia",
+                                  f"Conferência {DOC_LIB_MODALIDADES_SM[conferencia['modalidade']].lower()} registrada: "
+                                  f"{conferencia['nome']} ({conferencia['area']})", usuario, agora_texto)
+
+
 def _doc_lib_gravar_acompanhamento_sm(cursor, atual, dados, usuario, agora_texto):
     """Depois de gerado o documento: grava data e hora das manobras, novas conferências e registra no histórico cada mudança
     (quem, quando e o quê). Os executantes e as reprogramações já foram gravados no UPDATE da SM; aqui só vão para o histórico."""
@@ -23601,15 +23649,7 @@ def _doc_lib_gravar_acompanhamento_sm(cursor, atual, dados, usuario, agora_texto
                                   f"{titulo}, {antiga['identificacao'] or ordem}: "
                                   + (f"data e hora corrigidas de {anterior} para " if anterior else "data e hora informadas: ")
                                   + f"{nova['data']} {nova['hora']}", usuario, agora_texto)
-    for ordem, conferencia in enumerate(dados["conferencias"], start=1):
-        if ordem > len(atual["conferencias"]):
-            cursor.execute("INSERT INTO doclib_sm_conferencias (sm_id, ordem, modalidade, nome, area, data, ass, registrado_por, "
-                           "registrado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                           (sm_id, ordem, conferencia["modalidade"], conferencia["nome"], conferencia["area"],
-                            conferencia["data"], conferencia["ass"], usuario, agora_texto))
-            _doc_lib_historico_sm(cursor, sm_id, "conferencia",
-                                  f"Conferência {DOC_LIB_MODALIDADES_SM[conferencia['modalidade']].lower()} registrada: "
-                                  f"{conferencia['nome']} ({conferencia['area']})", usuario, agora_texto)
+    _doc_lib_gravar_conferencias_sm(cursor, atual, dados, usuario, agora_texto)
     antes, depois = _doc_lib_grupos_sm(atual), _doc_lib_grupos_sm(dados)
     for grupo, descricao in (("exec_lib", "Executantes da Liberação"), ("exec_nor", "Executantes da Normalização"),
                              ("reprogramacao", "Reprogramações do período programado")):
@@ -23843,7 +23883,7 @@ def doc_lib_registrar_geracao_sm(doc, caminho, usuario):
         if atual is None or atual["revisao"] != doc["revisao"]:
             raise DocLibConflito("Esta SM foi alterada por outro usuário enquanto o documento era gerado.\n\n"
                                  "Feche-a e abra-a novamente (GRID SM) antes de gerar o documento.")
-        emitir = not atual["emitido"] and atual["status"] == STATUS_ATEIE_EM_ANALISE
+        emitir = not atual["emitido"] and atual["status"] in (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_APROVADO_EXECUCAO)
         if emitir:
             erros = doc_lib_erros_geracao_sm(atual)
             if erros:
@@ -24271,7 +24311,7 @@ def doc_lib_registrar_e_arquivar_sm(doc, usuario):
     """Gera o PDF da SM, arquiva na pasta do Doc_Lib. (nunca sobrescreve um arquivo anterior), registra o arquivo no banco e,
     na primeira geração, emite a SM (doc_lib_registrar_geracao_sm). Retorna (caminho, aviso). A SM só é emitida se estiver
     válida: a validação roda antes de gerar o arquivo (DocLibValidacaoSM)."""
-    if not doc.get("emitido") and doc.get("status") == STATUS_ATEIE_EM_ANALISE:
+    if not doc.get("emitido") and doc.get("status") in (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_APROVADO_EXECUCAO):
         erros = doc_lib_erros_geracao_sm(doc)
         if erros:
             raise DocLibValidacaoSM(erros)
@@ -24286,9 +24326,9 @@ def doc_lib_registrar_e_arquivar_sm(doc, usuario):
         caminho = os.path.join(pasta, f"{nome_base}-{repeticao}.pdf")
     caminho_temporario = caminho + ".tmp"
     # a primeira geração é o documento que vai para a conferência: o PDF já sai com o estado que a emissão vai gravar
-    primeira = not doc.get("emitido") and doc.get("status") == STATUS_ATEIE_EM_ANALISE
+    primeira = not doc.get("emitido") and doc.get("status") in (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_APROVADO_EXECUCAO)
     try:
-        doc_lib_gerar_pdf_sm(dict(doc, emitido=1, status=STATUS_SM_AGUARDA_CONFERENCIA) if primeira else doc,
+        doc_lib_gerar_pdf_sm(dict(doc, emitido=1, status=doc_lib_calcular_status_sm(doc, True)) if primeira else doc,
                              caminho_temporario, usuario)
         os.replace(caminho_temporario, caminho)
     finally:
@@ -25359,6 +25399,9 @@ class LinhasConferenciaSM:
                                                fonte=(SGA_FONTE, 9, "bold"))
         self.btn_manual.pack(side=LEFT, padx=4, ipadx=6)
         self.btn_sistema.pack(side=LEFT, padx=4, ipadx=6)
+        for botao in (self.btn_manual, self.btn_sistema):
+            DicaBotaoSM(botao, "Registra a conferência da SM salva (Em análise), gerada (Aguarda Conferência) ou aprovada. "
+                               "Inativo com a SM nova, em edição, em execução, concluída ou cancelada")
         self.lbl_contador = Label(barra, text="", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9))
         self.lbl_contador.pack(side=LEFT, padx=10)
         self._reorganizar()
@@ -25510,7 +25553,18 @@ class JanelaSMAvulso:
     _mostrar_erros = JanelaMO._mostrar_erros
     _assinatura = JanelaMO._assinatura
     _tem_alteracoes_pendentes = JanelaMO._tem_alteracoes_pendentes
-    _vigiar_alteracoes = JanelaMO._vigiar_alteracoes
+
+    def _vigiar_alteracoes(self):
+        """Reavalia os botões enquanto o usuário digita: com a SM salva, reservada ou emitida (inclusive o nome de uma conferência
+        digitado na SM ainda Em análise), "há dados não salvos" depende do que está na tela, e nenhum campo avisa a janela quando muda."""
+        try:
+            if not self.janela.winfo_exists():
+                return
+            if self.sm_id is not None and self._pendente() != self._ultimo_pendente:
+                self._atualizar_estado()
+            self.janela.after(300, self._vigiar_alteracoes)
+        except TclError:
+            pass                      # janela fechada durante a conferência
     forcar_maiusculas = staticmethod(JanelaMO.forcar_maiusculas)
     _texto = staticmethod(JanelaMO._texto)
     _definir_texto = staticmethod(JanelaMO._definir_texto)
@@ -25800,10 +25854,14 @@ class JanelaSMAvulso:
         self._alvos["elaborado_data"] = (self.ent_elaborado_data, rot)
 
         self._titulo_secao("12. Conferência:",
-                           "Feita depois de gerada a SM, com até 10 linhas. A SM só passa a Aprovado para Execução com pelo menos\n"
-                           "uma Conferência Manutenção (profissional da Manutenção, via fonia) E uma Conferência Operação (profissional "
-                           "autenticado no sistema);\nsó uma delas não aprova. Com a SM Aprovada para Execução outras pessoas ainda podem "
-                           "registrar a conferência, até 10 no total.\nA conferência salva não muda mais.")
+                           "Com até 10 linhas. Pode ser registrada já com a SM salva (Em análise), antes de gerar o documento, ou depois de "
+                           "gerado (Aguarda Conferência);\n"
+                           "registrada a primeira, os dados gerais não podem mais ser alterados. A SM só passa a Aprovado para Execução com "
+                           "pelo menos uma Conferência Manutenção\n"
+                           "(profissional da Manutenção, via fonia) E uma Conferência Operação (profissional autenticado no sistema); só "
+                           "uma delas não aprova.\n"
+                           "Com a SM Aprovada para Execução outras pessoas ainda podem registrar a conferência, até 10 no total. A "
+                           "conferência salva não muda mais.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.conferencias = LinhasConferenciaSM(self, quadro)
@@ -26114,13 +26172,16 @@ class JanelaSMAvulso:
 
     def _grupos_editaveis(self):
         """Grupos de campos que o status atual deixa alterar nesta janela (a mesma regra vale no banco). Em análise, depois
-        de Salvar, tudo fica travado até o Editar."""
+        de Salvar, só a conferência fica liberada (os dados gerais voltam com o Editar, enquanto não houver conferência)."""
         if self.cancelada or self.status in DOC_LIB_STATUS_DEFINITIVOS_SM:
             return ()
         if self.sm_id is None:
             return _DOC_LIB_GRUPOS_EDITAVEIS_SM[None]
-        if self.status in (STATUS_ATEIE_RESERVADO, STATUS_ATEIE_EM_ANALISE) and not self.emitido:
-            return () if self.salvo and self.status == STATUS_ATEIE_EM_ANALISE else _DOC_LIB_GRUPOS_EDITAVEIS_SM[self.status]
+        if self.status == STATUS_ATEIE_RESERVADO and not self.emitido:
+            return _DOC_LIB_GRUPOS_EDITAVEIS_SM[self.status]
+        if self.status == STATUS_ATEIE_EM_ANALISE and not self.emitido:
+            # salva: só a conferência (que vale para a versão salva); em edição (botão Editar): só os dados gerais
+            return ("conferencias",) if self.salvo else ("geral",)
         return doc_lib_grupos_editaveis_sm(self.status, self._doc_gravado)
 
     def _aplicar_bloqueios(self):
@@ -26151,9 +26212,9 @@ class JanelaSMAvulso:
             return True
         if self.cancelada or self.status in DOC_LIB_STATUS_DEFINITIVOS_SM:
             return False
-        if self.emitido or self.reservado:      # reservada: já nasce editável, só há o que salvar depois de digitar
+        if self.emitido or self.reservado or self.salvo:      # salva ou reservada: só há o que salvar depois de digitar algo
             return self._assinatura() != self._assinatura_ref
-        return not self.salvo
+        return True                                            # em edição (botão Editar)
 
     def _atualizar_estado(self):
         pendente = self._pendente()
@@ -26161,7 +26222,8 @@ class JanelaSMAvulso:
         doc_lib_estado_botao(self.btn_voltar, True)
         doc_lib_estado_botao(self.btn_salvar, pendente)
         doc_lib_estado_botao(self.btn_editar, self.sm_id is not None and not self.emitido and self.salvo
-                             and self.status == STATUS_ATEIE_EM_ANALISE and not self.cancelada)
+                             and self.status == STATUS_ATEIE_EM_ANALISE and not self.cancelada and not pendente
+                             and not (self._doc_gravado or {}).get("conferencias"))      # com conferência registrada não se edita mais
         doc_lib_estado_botao(self.btn_gerar, self.sm_id is not None and not pendente)
         doc_lib_estado_botao(self.btn_cancelar, self.sm_id is not None and not pendente
                              and self.status in DOC_LIB_STATUS_CANCELAVEIS_SM)
@@ -26175,8 +26237,10 @@ class JanelaSMAvulso:
         else:
             situacao = ("cancelada" if self.cancelada else "emitida" if self.emitido else
                         "reservada" if self.reservado else "salva" if self.salvo else "em edição")
+            if situacao == "salva" and self.status == STATUS_ATEIE_APROVADO_EXECUCAO:
+                situacao = "documento ainda não gerado"
             texto = f"SM {self.numero} - {self.status} ({situacao}, rev. {self.revisao})" \
-                    + (" - alterações não salvas" if pendente and (self.emitido or self.reservado) else "")
+                    + (" - alterações não salvas" if pendente and (self.emitido or self.reservado or self.salvo) else "")
         self.lbl_status.configure(text=texto)
         self._atualizar_numero_provisorio()
 
@@ -26310,6 +26374,7 @@ class JanelaSMAvulso:
         status_antes = self.status
         numero_previsto = self.numero_previsto if self.sm_id is None else ""
         era_reservada = self.reservado
+        era_nova = self.sm_id is None
         ja_emitida = self.emitido
         conferencias_antes = len((self._doc_gravado or {}).get("conferencias") or [])
         try:
@@ -26344,6 +26409,15 @@ class JanelaSMAvulso:
                              f"Enquanto a SM estiver Aprovada para Execução outras pessoas ainda podem registrar a conferência.")
             if doc["status"] != STATUS_ATEIE_CONCLUIDO and doc["status"] != STATUS_ATEIE_CANCELADO:
                 mensagem += "\n\nGere o documento novamente para que o PDF mostre as alterações."
+        elif not era_nova and not era_reservada and len(doc["conferencias"]) > conferencias_antes:
+            mensagem = f"Conferência registrada ({len(doc['conferencias'])} de {DOC_LIB_LIMITE_CONFERENCIAS_SM}).\n\nStatus: {doc['status']}"
+            if doc["status"] == STATUS_ATEIE_APROVADO_EXECUCAO:
+                mensagem += ("\n\nA SM está aprovada para execução com as duas conferências (Manutenção e Operação); as demais "
+                             "são facultativas. Use 'Gerar SM Avulso' para emitir o documento: os horários das manobras e os "
+                             "executantes da liberação só são lançados depois de ele ser gerado.")
+            else:
+                mensagem += ("\n\nA SM só passa a Aprovado para Execução com uma Conferência Manutenção E uma Conferência "
+                             "Operação. Os dados gerais já não podem ser alterados.")
         else:
             mensagem = ("SM reservada preenchida e salva com sucesso!" if era_reservada else "SM salva com sucesso!") + \
                 f"\n\nSM Nº COG: {doc['numero']}\nStatus: {doc['status']}"
@@ -26354,7 +26428,8 @@ class JanelaSMAvulso:
         messagebox.showinfo("Sucesso", mensagem, parent=self.janela)
 
     def editar(self):
-        if not self.salvo or self.emitido or self.cancelada or self.status != STATUS_ATEIE_EM_ANALISE:
+        if not self.salvo or self.emitido or self.cancelada or self.status != STATUS_ATEIE_EM_ANALISE \
+                or (self._doc_gravado or {}).get("conferencias"):
             return
         self.salvo = False
         self._aplicar_bloqueios()
@@ -26485,7 +26560,7 @@ class JanelaSMAvulso:
                                    "Esta SM foi alterada por outro usuário depois de aberta nesta janela.\n\n"
                                    "Feche-a e abra-a novamente (GRID SM) antes de gerar o documento.", parent=self.janela)
             return
-        primeira = not doc["emitido"] and doc["status"] == STATUS_ATEIE_EM_ANALISE
+        primeira = not doc["emitido"] and doc["status"] in (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_APROVADO_EXECUCAO)
         if primeira:
             erros = doc_lib_erros_geracao_sm(doc)
             if erros:
@@ -26493,9 +26568,10 @@ class JanelaSMAvulso:
                                        "A SM salva possui pendências e não pode ser gerada:\n\n"
                                        + "\n".join(f"• {mensagem}" for _, mensagem in erros[:14]), parent=self.janela)
                 return
+            status_depois = doc_lib_calcular_status_sm(doc, True)
             if not messagebox.askyesno(
                     "Gerar SM Avulso",
-                    "Ao gerar o documento a SM será considerada EMITIDA, com status 'Aguarda Conferência'.\n\nA partir daí "
+                    f"Ao gerar o documento a SM será considerada EMITIDA, com status '{status_depois}'.\n\nA partir daí "
                     "os dados gerais da SM não poderão mais ser alterados (só as reprogramações, a conferência, a data e "
                     "hora das manobras e os executantes).\n\nDeseja gerar o documento?", parent=self.janela):
                 return
@@ -26521,6 +26597,9 @@ class JanelaSMAvulso:
         elif doc["status"] == STATUS_SM_AGUARDA_CONFERENCIA:
             lembrete = ("Status: Aguarda Conferência. Registre a Conferência Manutenção e a Conferência Operação: a SM só é "
                         "aprovada para execução com as duas.")
+        elif doc["status"] == STATUS_ATEIE_APROVADO_EXECUCAO and primeira:
+            lembrete = ("Documento emitido. A SM já estava aprovada: agora podem ser lançados os horários das manobras e os "
+                        "executantes da liberação.")
         doc_lib_dialogo_documento_gerado(self.janela, caminho, aviso, lembrete)
 
     def reservar(self):

@@ -120,11 +120,14 @@ class TestDadosDasOpcoes:
 class TestStatusComAsOpcoes:
     def test_grupos_editaveis_por_status_e_opcao(self, app):
         grupos = app.doc_lib_grupos_editaveis_sm
-        assert grupos(APROVADO, {}) == ("reprogramacao", "conferencias", "datas_lib", "exec_lib")
-        assert grupos(APROVADO, {"nor_sem_manobras": 1}) == ("reprogramacao", "conferencias", "datas_lib", "exec_lib")
-        assert grupos(APROVADO, {"lib_emergencia": 1}) == ("reprogramacao", "conferencias", "datas_nor", "exec_nor")
+        emitida = {"emitido": 1}
+        assert grupos(APROVADO, emitida) == ("reprogramacao", "conferencias", "datas_lib", "exec_lib")
+        assert grupos(APROVADO, dict(emitida, nor_sem_manobras=1)) == ("reprogramacao", "conferencias", "datas_lib", "exec_lib")
+        assert grupos(APROVADO, dict(emitida, lib_emergencia=1)) == ("reprogramacao", "conferencias", "datas_nor", "exec_nor")
+        assert grupos(APROVADO, {}) == ("reprogramacao", "conferencias")                  # aprovada antes de gerar o documento
         assert grupos(EM_EXECUCAO, {}) == ("datas_nor", "exec_nor") and grupos(AGUARDA, {}) == ("conferencias",)
-        assert grupos(EM_ANALISE, {"lib_emergencia": 1}) == ("geral",) and grupos(CONCLUIDO, {}) == ()
+        assert grupos(EM_ANALISE, {"lib_emergencia": 1}) == ("geral", "conferencias") and grupos(CONCLUIDO, {}) == ()
+        assert grupos(EM_ANALISE, {"conferencias": [{"nome": "x"}]}) == ("conferencias",)   # a primeira conferência encerra a edição geral
 
     def test_sem_normalizacao_conclui_ao_lancar_horarios_e_executantes_da_liberacao(self, app, fluxo):
         sm_id = aprovada(fluxo, nor_sem_manobras=1)

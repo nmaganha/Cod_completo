@@ -821,10 +821,7 @@ class TestStatus:
             fluxo.conferir(sm_id, fluxo.conferencia_manual(modalidade="outra"))
         assert fluxo.doc(sm_id)["conferencias"] == []
 
-    def test_conferencia_so_com_aguarda_conferencia_ou_aprovada_para_execucao(self, app, fluxo):
-        sm_id = fluxo.salvar()                                           # Em análise
-        with pytest.raises(app.DocLibBloqueado):
-            fluxo.conferir(sm_id, fluxo.conferencia_manual())
+    def test_conferencia_so_ate_a_execucao_comecar(self, app, fluxo):
         for status in (EM_EXECUCAO, CONCLUIDO):                          # a execução começou: ninguém mais registra conferência
             sm_id = fluxo.ate(status)
             with pytest.raises(app.DocLibBloqueado, match="Conferência|não pode mais ser alterada"):    # Concluído: nada muda
@@ -1069,7 +1066,7 @@ class TestBanco:
         finally:
             conexao.close()
 
-    @pytest.mark.parametrize("origem,destino", [(EM_ANALISE, CONCLUIDO), (EM_ANALISE, APROVADO), (EM_ANALISE, EM_EXECUCAO),
+    @pytest.mark.parametrize("origem,destino", [(EM_ANALISE, CONCLUIDO), (EM_ANALISE, EM_EXECUCAO),
                                                 (AGUARDA, EM_EXECUCAO), (AGUARDA, CONCLUIDO), (APROVADO, EM_ANALISE),
                                                 (AGUARDA, EM_ANALISE), (APROVADO, AGUARDA), (EM_EXECUCAO, APROVADO)])
     def test_transicao_invalida_e_recusada_pelo_banco(self, app, fluxo, origem, destino):
