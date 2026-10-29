@@ -226,11 +226,13 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
     - com a SM salva, registrar a **Conferência Manutenção** e a **Conferência Operação** (uma de cada área) leva a SM **direto a Aprovado para
       Execução**, ainda com o documento não gerado (a barra de status mostra "documento ainda não gerado"). As conferências seguintes, se houver,
       são facultativas: dão permissão aos demais integrantes das equipes; **as manobras podem ser executadas só com as duas primeiras**;
-    - **Gerar SM Avulso** emite o documento (PDF) depois, sem mudar o status. Enquanto o documento não for gerado, os horários das manobras e os
-      executantes (itens 6 a 9) ficam bloqueados; a reprogramação (Habilitar), novas conferências, cancelamento e SM-Referência continuam
-      disponíveis. Gerar o documento antes e conferir depois (Em análise, Aguarda Conferência, Aprovado) continua valendo; também vale gerar com
-      uma conferência já registrada (a SM vai a Aguarda Conferência e a segunda a aprova). O Encaminhar SM por e-mail segue só em Aguarda
-      Conferência;
+    - **Gerar SM Avulso** emite o documento (PDF) quando o usuário quiser, sem mudar o status. **Gerar o documento não é pré-requisito da
+      execução**: com a SM Aprovada para Execução os horários das manobras de liberação e os executantes (itens 6 e 7) já ficam abertos, tenha o
+      documento sido gerado ou não, e o caminho segue normalmente (Em Execução, Concluído). Gerar com a SM Aprovada ou Em Execução apenas emite
+      o documento (marca como emitido e gera o PDF); com a SM já Concluída ou Cancelada só se gera o PDF. A reprogramação (Habilitar), novas
+      conferências, cancelamento e SM-Referência continuam disponíveis. Gerar o documento antes e conferir depois (Em análise, Aguarda Conferência,
+      Aprovado) continua valendo; também vale gerar com uma conferência já registrada (a SM vai a Aguarda Conferência e a segunda a aprova). O
+      Encaminhar SM por e-mail segue só em Aguarda Conferência;
     - **a conferência vale para a versão salva**: registrada a primeira, os dados gerais ficam protegidos (tela e `doc_lib_salvar_sm`), o botão
       Editar fica desabilitado e a conferência não pode ser gravada junto com uma alteração dos dados gerais. Para mudar o conteúdo, cancela-se a
       SM e abre-se outra pela SM-Referência. A conferência só é aceita com o documento pronto para emitir (sem ação marcada para conferência pelo
