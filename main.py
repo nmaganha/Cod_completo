@@ -1,4 +1,4 @@
-# Código atualizado em 29-10-26 - 1303 - Click_25: (SM_Avulso - opções sem manobras nos itens 6 e 8, Habilitar só com a SM Aprovada, reprogramação salva travada)
+# Código atualizado em 29-10-26 - 1359 - Click_25: (SM_Avulso - conferências adicionais com a SM Aprovada para Execução, até 10 no total)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -23324,8 +23324,9 @@ _DOC_LIB_GRUPOS_EDITAVEIS_SM = {
     STATUS_ATEIE_RESERVADO: ("geral",),
     STATUS_ATEIE_EM_ANALISE: ("geral",),
     STATUS_SM_AGUARDA_CONFERENCIA: ("conferencias",),
-    # a reprogramação (botão Habilitar) só existe com a SM Aprovada para Execução; com a SM Em Execução só há a prorrogação
-    STATUS_ATEIE_APROVADO_EXECUCAO: ("reprogramacao", "datas_lib", "exec_lib"),
+    # a reprogramação (botão Habilitar) só existe com a SM Aprovada para Execução; com a SM Em Execução só há a prorrogação.
+    # Com a SM Aprovada outras pessoas ainda podem registrar a conferência (até o limite de 10 no total); as já registradas não mudam
+    STATUS_ATEIE_APROVADO_EXECUCAO: ("reprogramacao", "conferencias", "datas_lib", "exec_lib"),
     STATUS_ATEIE_EM_EXECUCAO: ("datas_nor", "exec_nor"),     # liberação (itens 6 e 7) já registrada: bloqueada
 }
 
@@ -23346,7 +23347,7 @@ _DOC_LIB_NOMES_GRUPOS_SM = {
     "datas_nor": "Data e hora das manobras de normalização (só com a SM Em Execução)",
     "exec_lib": "Executantes da Liberação (só com a SM Aprovada para Execução; depois de salvos ficam bloqueados)",
     "exec_nor": "Executantes da Normalização (só com a SM Em Execução)",
-    "conferencias": "Conferência (Manutenção e Operação: só com a SM Aguardando Conferência)"}
+    "conferencias": "Conferência (Manutenção e Operação: só com a SM Aguardando Conferência ou Aprovada para Execução)"}
 
 
 def _doc_lib_grupos_sm(doc):
@@ -25332,7 +25333,8 @@ class LinhasConferenciaSM:
         e Ass. são digitados; Área começa com "Manutenção", Ass. com "via fonia" e Data com a data de hoje.
       - Conferência OPERAÇÃO (modalidade "sistema"): o profissional autenticado. Conferido por e Ass. são o nome completo e o
         login dele, sem digitação; Área começa com "COG" e Data com a data de hoje.
-    A SM só é aprovada com pelo menos uma de cada. A conferência salva não muda mais (linha travada, com o selo Registrada)."""
+    A SM só é aprovada com pelo menos uma de cada. Depois de aprovada (Aprovado para Execução) outras pessoas ainda podem registrar a
+    conferência, até o limite de 10 no total. A conferência salva não muda mais (linha travada, com o selo Registrada)."""
 
     COLUNAS = (("Modalidade", 116), ("Conferido por", 220), ("Área", 130), ("Data", 150), ("Ass.", 150), ("", 110))
 
@@ -25800,7 +25802,8 @@ class JanelaSMAvulso:
         self._titulo_secao("12. Conferência:",
                            "Feita depois de gerada a SM, com até 10 linhas. A SM só passa a Aprovado para Execução com pelo menos\n"
                            "uma Conferência Manutenção (profissional da Manutenção, via fonia) E uma Conferência Operação (profissional "
-                           "autenticado no sistema);\nsó uma delas não aprova. A conferência salva não muda mais.")
+                           "autenticado no sistema);\nsó uma delas não aprova. Com a SM Aprovada para Execução outras pessoas ainda podem "
+                           "registrar a conferência, até 10 no total.\nA conferência salva não muda mais.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.conferencias = LinhasConferenciaSM(self, quadro)
@@ -26336,6 +26339,9 @@ class JanelaSMAvulso:
             if len(doc["conferencias"]) > conferencias_antes and doc["status"] == STATUS_SM_AGUARDA_CONFERENCIA:
                 mensagem += ("\n\nConferência registrada. A SM só passa a Aprovado para Execução com uma Conferência "
                              "Manutenção E uma Conferência Operação; a SM continua em Aguarda Conferência.")
+            elif len(doc["conferencias"]) > conferencias_antes and status_antes == doc["status"] == STATUS_ATEIE_APROVADO_EXECUCAO:
+                mensagem += (f"\n\nConferência registrada ({len(doc['conferencias'])} de {DOC_LIB_LIMITE_CONFERENCIAS_SM}). "
+                             f"Enquanto a SM estiver Aprovada para Execução outras pessoas ainda podem registrar a conferência.")
             if doc["status"] != STATUS_ATEIE_CONCLUIDO and doc["status"] != STATUS_ATEIE_CANCELADO:
                 mensagem += "\n\nGere o documento novamente para que o PDF mostre as alterações."
         else:

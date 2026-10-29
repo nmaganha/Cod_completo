@@ -113,6 +113,15 @@ class TestConteudo:
         assert "Aguardando a Conferência" not in plano
         assert plano.count("Nome:") == 3                                             # 2 registradas + 1 em branco
 
+    def test_conferencias_registradas_com_a_sm_aprovada_aparecem_no_documento(self, app, fluxo, pdf):
+        sm_id = fluxo.ate(APROVADO)
+        for nome in ("Maria da Manutencao", "Pedro da Operacao"):
+            fluxo.conferir(sm_id, fluxo.conferencia_manual(nome=nome))
+        _, _, texto = pdf(sm_id)
+        plano = sem_quebras(texto)
+        assert "Maria da Manutencao" in plano and "Pedro da Operacao" in plano and "Joao da Manutencao" in plano
+        assert plano.count("Nome:") == 4 and "Aguardando a Conferência" not in plano
+
     def test_dez_conferencias_no_documento(self, app, fluxo, pdf):
         sm_id = fluxo.ate(AGUARDA)
         fluxo.conferir(sm_id, *[fluxo.conferencia_manual(nome=f"Conferente {i:02d}") for i in range(1, 11)])

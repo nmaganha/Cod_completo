@@ -40,14 +40,14 @@ O e-mail da SM sai no status **Aguarda Conferência** (ver "Encaminhar SM por e-
 | (nova) -> Em análise | primeiro Salvar (consome o número) |
 | Reservado -> Em análise | preencher e salvar a SM reservada (mantém o número) |
 | Em análise -> Aguarda Conferência | botão **Gerar SM Avulso** (documento emitido; dados gerais protegidos) |
-| Aguarda -> Aprovado | salvar ao menos **uma Conferência Manutenção E uma Conferência Operação** válidas |
+| Aguarda -> Aprovado | salvar ao menos **uma Conferência Manutenção E uma Conferência Operação** válidas (com a SM já Aprovada outras pessoas ainda podem conferir: decisão 22) |
 | Aprovado -> Em Execução | salvar os Executantes da Liberação, com **todas** as manobras de liberação datadas (a partir daí os itens 6 e 7 ficam bloqueados) |
 | Em Execução -> Concluído | salvar os Executantes da Normalização, com **todas** as manobras de normalização datadas |
 | Aprovado -> Concluído (direto) | só com uma das opções "sem manobras" (itens 6 e 8, ver decisão 21): a SM **não passa por Em Execução** |
 
 O que cada status deixa alterar (`_DOC_LIB_GRUPOS_EDITAVEIS_SM`, vale na tela e no `doc_lib_salvar_sm`):
 Em análise = edição geral (inclusive as opções "sem manobras"); Aguarda = conferências; Aprovado = **reprogramações (botão Habilitar)**,
-data/hora e executantes da liberação (itens 6 e 7); Em Execução = **Prorrogar**, data/hora e executantes da normalização (itens 8 e 9);
+**novas conferências**, data/hora e executantes da liberação (itens 6 e 7); Em Execução = **Prorrogar**, data/hora e executantes da normalização (itens 8 e 9);
 Concluído/Cancelado = nada. Os itens 6 e 7 **ficam inativos para qualquer lançamento depois de salvos** (a SM passa a Em Execução ao salvar
 os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam (decisão 21).
 
@@ -208,7 +208,14 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
       nesse tempo ela pode ser reprogramada e cancelada, mas não prorrogada (a prorrogação é só de SM Em Execução);
     - a regra de ordem dos horários e a pendência de "todas as manobras datadas e executantes" valem apenas para a etapa que tem manobras.
     Se os dados trouxerem manobras ou executantes da etapa dispensada junto com a opção, a opção prevalece e o resto é descartado.
-
+22. **Conferência com a SM Aprovada para Execução**: enquanto a SM está **Aprovada para Execução**, mais pessoas podem registrar a conferência
+    (botões Conferência Manutenção e Conferência Operação continuam ativos), até o limite de **10 no total** (as 2 que aprovaram contam). As
+    regras são as de antes: a Operação grava o nome e o login de quem registra, a Manutenção é digitada. **Quem já registrou não muda**: a
+    conferência salva fica travada (selo Registrada), não pode ser alterada, trocada de ordem nem removida (tela, `doc_lib_salvar_sm` e
+    triggers do banco). O status não muda por causa delas; cada uma vai para o histórico e a revisão avança. Quando a SM passa a Em Execução
+    (ao salvar os executantes da liberação, ou direto a Concluído nas opções "sem manobras") as conferências se encerram. As conferências
+    novas aparecem no PDF ao gerar o documento de novo. O Encaminhar SM continua só no status Aguarda Conferência. Não há trava contra a
+    mesma pessoa registrar duas vezes (como já era em Aguarda Conferência).
 
 ## Banco de dados
 
