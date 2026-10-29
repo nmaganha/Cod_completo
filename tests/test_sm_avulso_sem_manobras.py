@@ -124,7 +124,7 @@ class TestStatusComAsOpcoes:
         assert grupos(APROVADO, emitida) == ("reprogramacao", "conferencias", "datas_lib", "exec_lib")
         assert grupos(APROVADO, dict(emitida, nor_sem_manobras=1)) == ("reprogramacao", "conferencias", "datas_lib", "exec_lib")
         assert grupos(APROVADO, dict(emitida, lib_emergencia=1)) == ("reprogramacao", "conferencias", "datas_nor", "exec_nor")
-        assert grupos(APROVADO, {}) == ("reprogramacao", "conferencias")                  # aprovada antes de gerar o documento
+        assert grupos(APROVADO, {}) == ("reprogramacao", "conferencias", "datas_lib", "exec_lib")   # gerado o documento ou não
         assert grupos(EM_EXECUCAO, {}) == ("datas_nor", "exec_nor") and grupos(AGUARDA, {}) == ("conferencias",)
         assert grupos(EM_ANALISE, {"lib_emergencia": 1}) == ("geral", "conferencias") and grupos(CONCLUIDO, {}) == ()
         assert grupos(EM_ANALISE, {"conferencias": [{"nome": "x"}]}) == ("conferencias",)   # a primeira conferência encerra a edição geral
