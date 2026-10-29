@@ -354,15 +354,18 @@ class TestConferenciaComASmAprovada:
         nova = conferencias.adicionar_nova("manual")
         assert nova is not None and not nova["registrada"] and not travado(nova["nome"])
         definir(app, nova["nome"], "Maria da Manutencao")
-        assert conferencias.adicionar_nova("sistema") is None                              # operador1 já fez a Conferência Operação
+        assert conferencias.adicionar_nova("sistema") is None                              # operador1 elaborou a SM
+        assert "foi elaborada por você (operador1)" in mensagens.avisos[-1][1]
+        monkeypatch.setattr(app, "current_user", "operador2 em 29/10/2026 - 10:00h")         # operador2 já fez a Conferência Operação
+        assert conferencias.adicionar_nova("sistema") is None
         assert "já efetuou a conferência deste documento" in mensagens.avisos[-1][1]
-        monkeypatch.setattr(app, "current_user", "operador2 em 29/10/2026 - 10:00h")         # outra pessoa logada
+        monkeypatch.setattr(app, "current_user", "operador3 em 29/10/2026 - 10:00h")         # outra pessoa logada
         operacao = conferencias.adicionar_nova("sistema")
-        assert operacao["nome"].get() == "operador2" and travado(operacao["nome"])
+        assert operacao["nome"].get() == "operador3" and travado(operacao["nome"])
         assert conferencias.lbl_contador.cget("text") == "4 de 10 conferências"
         assert estado(janela.btn_salvar) == "normal" and estado(janela.btn_gerar) == "disabled"
         janela.salvar()
-        assert len(mensagens.avisos) == 1 and janela.status == APROVADO                    # só o aviso de operador1 já ter conferido
+        assert len(mensagens.avisos) == 2 and janela.status == APROVADO                    # só os dois avisos de cima (elaborou e já conferiu)
         texto = mensagens.infos[-1][1]
         assert "Conferência registrada (4 de 10)" in texto and "outras pessoas ainda podem registrar a conferência" in texto
         assert "Gere o documento novamente" in texto
@@ -432,9 +435,10 @@ class TestAntecedenciaDaLiberacaoPelaJanela:
 
 
 class TestRotulosDaConferencia:
-    def test_botoes_e_modalidades_manutencao_e_operacao(self, app, banco, janelas, fluxo):
+    def test_botoes_e_modalidades_manutencao_e_operacao(self, app, banco, janelas, fluxo, monkeypatch):
         janela = janelas()
         janela._carregar_documento(fluxo.doc(fluxo.ate(AGUARDA)))
+        monkeypatch.setattr(app, "current_user", "operador2 em 29/10/2026 - 10:00h")              # quem confere não é quem elaborou
         conferencias = janela.conferencias
         assert conferencias.btn_manual.cget("text") == "Conferência Manutenção" and conferencias.btn_sistema.cget("text") == "Conferência Operação"
         assert app.DOC_LIB_MODALIDADES_SM == {"manual": "Manutenção", "sistema": "Operação"}
@@ -716,7 +720,7 @@ class TestSalvarEValidacoes:
 
 
 class TestFluxoCompletoPelaInterface:
-    def test_do_salvamento_a_conclusao(self, app, banco, janelas, mensagens, dialogos):
+    def test_do_salvamento_a_conclusao(self, app, banco, janelas, mensagens, dialogos, monkeypatch):
         janela = janelas()
         preencher(app, janela)
         janela.salvar()
@@ -739,9 +743,11 @@ class TestFluxoCompletoPelaInterface:
         janela.salvar()
         assert janela.status == AGUARDA and conferencias.linhas[0]["registrada"]
         assert travado(conferencias.linhas[0]["nome"])
-        # --- conferência pelo sistema completa a aprovação
+        # --- conferência pelo sistema completa a aprovação (feita por outra pessoa: quem elabora a SM não a confere)
+        assert conferencias.adicionar_nova("sistema") is None and "foi elaborada por você (operador1)" in mensagens.avisos[-1][1]
+        monkeypatch.setattr(app, "current_user", "operador2 em 29/10/2026 - 10:00h")
         linha = conferencias.adicionar_nova("sistema")
-        assert linha["nome"].get() == "operador1" and linha["ass"].get() == "operador1" and linha["area"].get() == "COG"
+        assert linha["nome"].get() == "operador2" and linha["ass"].get() == "operador2" and linha["area"].get() == "COG"
         assert linha["selo"].cget("text") == "Operação"
         assert travado(linha["nome"]) and travado(linha["ass"]) and not travado(linha["area"])
         janela.salvar()

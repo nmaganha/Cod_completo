@@ -78,7 +78,8 @@ def mensagens(app, monkeypatch):
 
 class FluxoSM:
     """Atalhos para percorrer o ciclo de vida de uma SM Avulso nos testes (usa as mesmas funções do aplicativo)."""
-    OPERADOR = "operador1"
+    OPERADOR = "operador1"                       # quem elabora as SM dos testes
+    CONFERENTE = "operador2"                     # quem as confere (a mesma pessoa não elabora e confere)
 
     def __init__(self, app):
         self.app = app
@@ -132,9 +133,10 @@ class FluxoSM:
                      "ass": "digitado errado"}, **valores)
 
     def conferir(self, sm_id, *novas, usuario=None):
-        """Registra as conferências informadas (as já gravadas são mantidas)."""
+        """Registra as conferências informadas (as já gravadas são mantidas). Por padrão quem confere é OUTRA pessoa que não o
+        elaborador (CONFERENTE): quem elabora a SM não a confere."""
         gravadas = self.doc(sm_id)["conferencias"]
-        return self.alterar(sm_id, usuario=usuario, conferencias=gravadas + list(novas))
+        return self.alterar(sm_id, usuario=usuario or self.CONFERENTE, conferencias=gravadas + list(novas))
 
     def aprovar(self, sm_id):
         return self.conferir(sm_id, self.conferencia_manual(), self.conferencia_sistema())

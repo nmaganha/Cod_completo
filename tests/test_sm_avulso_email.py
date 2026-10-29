@@ -108,25 +108,44 @@ class TestContatos:
 
 
 class TestRegrasDoEnvio:
-    @pytest.mark.parametrize("status", [EM_ANALISE, APROVADO, EM_EXECUCAO, CONCLUIDO])
-    def test_so_aguarda_conferencia_pode_ser_encaminhada(self, app, fluxo, status):
-        sm_id = fluxo.ate(status)
-        with pytest.raises(app.DocLibRegra, match=f"Situação atual: {status}"):
-            app.doc_lib_validar_envio_sm(fluxo.doc(sm_id))
-        with pytest.raises(app.DocLibRegra):
-            app.doc_lib_pdf_para_envio_sm(fluxo.doc(sm_id), "operador1")
+    @pytest.mark.parametrize("status", [EM_ANALISE, AGUARDA, APROVADO, EM_EXECUCAO, CONCLUIDO])
+    def test_a_sm_pode_ser_encaminhada_em_qualquer_status(self, app, fluxo, status):
+        sm_id = fluxo.salvar() if status == EM_ANALISE else fluxo.ate(status)
+        app.doc_lib_validar_envio_sm(fluxo.doc(sm_id))
+        caminho, _ = app.doc_lib_pdf_para_envio_sm(fluxo.doc(sm_id), "operador1")
+        assert os.path.isfile(caminho)
+        app.doc_lib_registrar_envio_sm(sm_id, "temporeal@alupar.com.br", ["a@x.com.br"], [], "A", caminho, "SMTP", "operador1")
+        assert fluxo.doc(sm_id)["email_enviado_em"] == HOJE and fluxo.doc(sm_id)["status"] == status     # a coluna do GRID acompanha
 
-    def test_reservada_e_cancelada_nao_sao_encaminhadas(self, app, fluxo):
-        app.doc_lib_reservar_sm(1, "operador1")
-        with pytest.raises(app.DocLibRegra, match="reservada"):
-            app.doc_lib_validar_envio_sm(fluxo.doc(1))
+    def test_reservada_e_cancelada_tambem_podem_ser_encaminhadas(self, app, fluxo):
+        reservada = app.doc_lib_reservar_sm(1, "operador1")[0]["ateie_id"]
+        caminho, _ = app.doc_lib_pdf_para_envio_sm(fluxo.doc(reservada), "operador1")                 # formulário em branco
+        texto = " ".join("\n".join(p.get_text() for p in pymupdf.open(caminho)).split())
+        assert "COG-0001/26" in texto and "Aguardando a Conferência" not in texto
         sm_id = fluxo.ate(AGUARDA)
         app.doc_lib_cancelar_sm(sm_id, "operador1", "Cancelada", fluxo.doc(sm_id)["revisao"])
-        with pytest.raises(app.DocLibRegra, match="Cancelado"):
-            app.doc_lib_validar_envio_sm(fluxo.doc(sm_id))
+        caminho, _ = app.doc_lib_pdf_para_envio_sm(fluxo.doc(sm_id), "operador1")
+        assert os.path.isfile(caminho)
+        app.doc_lib_registrar_envio_sm(sm_id, "temporeal@alupar.com.br", ["a@x.com.br"], [], "A", caminho, "SMTP", "operador1")
+        assert fluxo.doc(sm_id)["email_enviado_em"] == HOJE and fluxo.doc(sm_id)["status"] == CANCELADO
 
-    def test_aguarda_conferencia_emitida_e_aceita(self, app, fluxo):
-        app.doc_lib_validar_envio_sm(fluxo.doc(fluxo.ate(AGUARDA)))
+    def test_sm_inexistente_nao_pode_ser_encaminhada(self, app, banco):
+        with pytest.raises(app.DocLibRegra, match="não existe mais"):
+            app.doc_lib_validar_envio_sm(None)
+
+    @pytest.mark.parametrize("status, conferencia", [(EM_ANALISE, True), (AGUARDA, True), (APROVADO, False), (EM_EXECUCAO, False),
+                                                    (CONCLUIDO, False), (CANCELADO, False)])
+    def test_assunto_e_texto_variam_com_o_status(self, app, fluxo, status, conferencia):
+        if status == CANCELADO:
+            sm_id = fluxo.ate(AGUARDA)
+            app.doc_lib_cancelar_sm(sm_id, "operador1", "Cancelada", fluxo.doc(sm_id)["revisao"])
+        else:
+            sm_id = fluxo.salvar() if status == EM_ANALISE else fluxo.ate(status)
+        assunto, texto = app.doc_lib_assunto_e_texto_envio_sm(fluxo.doc(sm_id))
+        assert assunto == ("TESTE DE ENVIO DE E-MAIL - SM - Para Conferência" if conferencia
+                           else "TESTE DE ENVIO DE E-MAIL - SM - Para conhecimento")
+        assert ("para conferência" if conferencia else "para conhecimento") in texto
+        assert app.doc_lib_envio_para_conferencia_sm(fluxo.doc(sm_id)) is conferencia
 
 
 class TestPdfParaEnvio:
@@ -140,6 +159,15 @@ class TestPdfParaEnvio:
         linhas = conexao.execute("SELECT tipo, revisao_final, caminho FROM doclib_sm_pdfs WHERE tipo = 'envio'").fetchall()
         conexao.close()
         assert linhas == [("envio", fluxo.doc(sm_id)["revisao"], caminho)]
+
+    @pytest.mark.parametrize("status, com_aviso", [(EM_ANALISE, True), (AGUARDA, True), (APROVADO, False), (EM_EXECUCAO, False),
+                                                   (CONCLUIDO, False)])
+    def test_aviso_de_conferencia_no_pdf_so_enquanto_falta_conferir(self, app, fluxo, status, com_aviso):
+        sm_id = fluxo.salvar() if status == EM_ANALISE else fluxo.ate(status)
+        caminho, _ = app.doc_lib_pdf_para_envio_sm(fluxo.doc(sm_id), "operador1")
+        texto = " ".join("\n".join(p.get_text() for p in pymupdf.open(caminho)).split())
+        assert ("Aguardando a Conferência do documento" in texto) is com_aviso
+        assert app.doc_lib_descricao_anexo_sm(fluxo.doc(sm_id)).endswith('Conferência do documento"') is com_aviso
 
     def test_reaproveita_o_pdf_enquanto_o_documento_nao_muda_e_gera_outro_depois(self, app, fluxo):
         sm_id = fluxo.ate(AGUARDA)
@@ -214,11 +242,28 @@ class TestRegistroDosEnvios:
             conexao.execute("DELETE FROM doclib_sm_emails")
         conexao.close()
 
-    def test_sm_cancelada_durante_o_envio_registra_o_envio_sem_tocar_na_sm(self, app, fluxo):
-        sm_id = fluxo.ate(AGUARDA)
-        app.doc_lib_cancelar_sm(sm_id, "operador1", "Cancelada", fluxo.doc(sm_id)["revisao"])
-        app.doc_lib_registrar_envio_sm(sm_id, "temporeal@alupar.com.br", ["a@x.com.br"], [], "A", "/tmp/x.pdf", "SMTP", "operador1")
-        assert len(app.doc_lib_emails_enviados_sm(sm_id)) == 1 and fluxo.doc(sm_id)["email_enviado_em"] in (None, "")
+    def test_sm_cancelada_ou_concluida_durante_o_envio_registra_o_envio_e_marca_o_grid_sem_mexer_no_resto(self, app, fluxo):
+        cancelada = fluxo.ate(AGUARDA)
+        app.doc_lib_cancelar_sm(cancelada, "operador1", "Cancelada", fluxo.doc(cancelada)["revisao"])
+        concluida = fluxo.ate(CONCLUIDO)
+        for sm_id in (cancelada, concluida):
+            antes = fluxo.doc(sm_id)
+            app.doc_lib_registrar_envio_sm(sm_id, "temporeal@alupar.com.br", ["a@x.com.br"], [], "A", "/tmp/x.pdf", "SMTP", "operador1")
+            depois = fluxo.doc(sm_id)
+            assert len(app.doc_lib_emails_enviados_sm(sm_id)) == 1 and depois["email_enviado_em"] == HOJE
+            assert (depois["status"], depois["revisao"]) == (antes["status"], antes["revisao"])
+
+    def test_sm_concluida_ou_cancelada_continua_protegida_para_o_resto(self, app, fluxo):
+        concluida = fluxo.ate(CONCLUIDO)
+        conexao = app.doc_lib_conectar()
+        for sql in ("UPDATE doclib_sm SET motivo = 'x' WHERE id = ?", "UPDATE doclib_sm SET status = 'Cancelado' WHERE id = ?",
+                    "UPDATE doclib_sm SET revisao = 99 WHERE id = ?", "UPDATE doclib_sm SET email_enviado_em = 'x', motivo = 'y' WHERE id = ?"):
+            with pytest.raises(sqlite3.DatabaseError):
+                conexao.execute(sql, (concluida,))
+        conexao.execute("UPDATE doclib_sm SET email_enviado_em = '01/01/2026', email_enviado_por = 'x' WHERE id = ?", (concluida,))
+        conexao.commit()
+        conexao.close()
+        assert fluxo.doc(concluida)["email_enviado_em"] == "01/01/2026"
 
     def test_sm_inexistente(self, app, banco):
         with pytest.raises(app.DocLibConflito):
@@ -259,18 +304,17 @@ class TestMarcacaoManualNoGrid:
         app.doc_lib_definir_email_enviado_sm([(sm_id, 1)], "25/10/2026", "operador1")
         assert fluxo.doc(sm_id)["email_enviado_em"] == "25/10/2026"
 
-    def test_nao_vale_para_em_analise_reservada_concluida_e_cancelada(self, app, fluxo):
+    def test_vale_tambem_para_em_analise_reservada_concluida_e_cancelada(self, app, fluxo):
         em_analise = fluxo.salvar()
-        with pytest.raises(app.DocLibRegra, match="depois que o documento é gerado"):
-            app.doc_lib_definir_email_enviado_sm([(em_analise, 1)], "25/10/2026", "operador1")
         reservada = app.doc_lib_reservar_sm(1, "operador1")[0]["ateie_id"]
-        with pytest.raises(app.DocLibRegra, match="Reservado"):
-            app.doc_lib_definir_email_enviado_sm([(reservada, 1)], "25/10/2026", "operador1")
         concluida = fluxo.ate(CONCLUIDO)
-        with pytest.raises(app.DocLibRegra, match="não pode mais ser alterada"):
-            app.doc_lib_definir_email_enviado_sm([(concluida, 1)], "25/10/2026", "operador1")
-        with pytest.raises(app.DocLibRegra, match="não pode mais ser alterada"):
-            app.doc_lib_definir_email_enviado_sm([(concluida, 1)], None, "operador1")
+        cancelada = fluxo.ate(AGUARDA)
+        app.doc_lib_cancelar_sm(cancelada, "operador1", "Cancelada", fluxo.doc(cancelada)["revisao"])
+        for sm_id in (em_analise, reservada, concluida, cancelada):
+            app.doc_lib_definir_email_enviado_sm([(sm_id, 1)], "25/10/2026", "operador1")
+            assert fluxo.doc(sm_id)["email_enviado_em"] == "25/10/2026"
+            app.doc_lib_definir_email_enviado_sm([(sm_id, 1)], None, "operador1")                     # voltar para Não
+            assert fluxo.doc(sm_id)["email_enviado_em"] is None
 
     def test_selecao_vazia_e_sm_inexistente(self, app, banco):
         with pytest.raises(app.DocLibRegra, match="Selecione"):
@@ -279,10 +323,11 @@ class TestMarcacaoManualNoGrid:
             app.doc_lib_definir_email_enviado_sm([(999, 1)], "25/10/2026", "operador1")
 
     def test_varias_sm_de_uma_vez_so_valem_se_todas_puderem(self, app, fluxo):
-        primeira, segunda = fluxo.ate(AGUARDA), fluxo.salvar()                      # a segunda ainda está Em análise
-        with pytest.raises(app.DocLibRegra):
+        primeira, segunda = fluxo.ate(AGUARDA), fluxo.salvar()
+        app.doc_lib_definir_email_enviado_sm([(segunda, 1)], "24/10/2026", "operador1")           # a segunda já consta como enviada
+        with pytest.raises(app.DocLibRegra, match="Já consta"):
             app.doc_lib_definir_email_enviado_sm([(primeira, 1), (segunda, 1)], "25/10/2026", "operador1")
-        assert fluxo.doc(primeira)["email_enviado_em"] is None                      # nada foi gravado
+        assert fluxo.doc(primeira)["email_enviado_em"] is None                                  # nada foi gravado
 
 
 @pytest.fixture()
@@ -442,12 +487,20 @@ class TestJanelaDeEnvio:
 
 
 class TestBotaoEncaminharNaJanelaDaSM:
-    def test_botao_so_fica_ativo_em_aguarda_conferencia_sem_alteracoes_pendentes(self, app, banco, janelas, fluxo):
+    def test_botao_fica_ativo_em_qualquer_status_com_a_sm_salva_e_sem_alteracoes_pendentes(self, app, banco, janelas, fluxo):
         janela = janelas()
-        assert estado(janela.btn_encaminhar) == "disabled"                                      # SM nova
-        for status, esperado in ((EM_ANALISE, "disabled"), (AGUARDA, "normal"), (APROVADO, "disabled")):
-            janela._carregar_documento(fluxo.doc(fluxo.ate(status)))
-            assert estado(janela.btn_encaminhar) == esperado, status
+        assert estado(janela.btn_encaminhar) == "disabled"                                      # SM nova, ainda não salva
+        for status in (EM_ANALISE, AGUARDA, APROVADO, EM_EXECUCAO, CONCLUIDO):
+            sm_id = fluxo.salvar() if status == EM_ANALISE else fluxo.ate(status)
+            janela._carregar_documento(fluxo.doc(sm_id))
+            assert estado(janela.btn_encaminhar) == "normal", status
+        cancelada = fluxo.ate(AGUARDA)
+        app.doc_lib_cancelar_sm(cancelada, "operador1", "Cancelada", fluxo.doc(cancelada)["revisao"])
+        janela._carregar_documento(fluxo.doc(cancelada))
+        assert estado(janela.btn_encaminhar) == "normal"
+        reservada = app.doc_lib_reservar_sm(1, "operador1")[0]["ateie_id"]
+        janela._carregar_documento(fluxo.doc(reservada))
+        assert estado(janela.btn_encaminhar) == "normal"
         janela._carregar_documento(fluxo.doc(fluxo.ate(AGUARDA)))
         janela._definir_texto(janela.txt_observacoes, "alteração ainda não salva")
         janela._atualizar_estado()
