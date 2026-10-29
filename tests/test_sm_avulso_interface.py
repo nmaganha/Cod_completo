@@ -340,6 +340,71 @@ def _todos_os_widgets(raiz):
         yield from _todos_os_widgets(filho)
 
 
+class TestConferenciaComASmAprovada:
+    def test_aprovada_libera_novas_conferencias_e_trava_as_registradas(self, app, banco, janelas, fluxo, mensagens, dialogos):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
+        conferencias = janela.conferencias
+        assert len(conferencias.linhas) == 2 and all(linha["registrada"] for linha in conferencias.linhas)
+        for linha in conferencias.linhas:                                                   # as já registradas não mudam
+            assert all(travado(linha[campo]) for campo in ("nome", "area", "data", "ass", "icone"))
+            assert not linha["btn_remover"].winfo_manager() and linha["lbl_registrada"].winfo_manager()
+        assert estado(conferencias.btn_manual) == "normal" and estado(conferencias.btn_sistema) == "normal"
+        assert conferencias.lbl_contador.cget("text") == "2 de 10 conferências"
+        nova = conferencias.adicionar_nova("manual")
+        assert nova is not None and not nova["registrada"] and not travado(nova["nome"])
+        definir(app, nova["nome"], "Maria da Manutencao")
+        operacao = conferencias.adicionar_nova("sistema")
+        assert operacao["nome"].get() == "operador1" and travado(operacao["nome"])
+        assert conferencias.lbl_contador.cget("text") == "4 de 10 conferências"
+        assert estado(janela.btn_salvar) == "normal" and estado(janela.btn_gerar) == "disabled"
+        janela.salvar()
+        assert not mensagens.avisos and janela.status == APROVADO
+        texto = mensagens.infos[-1][1]
+        assert "Conferência registrada (4 de 10)" in texto and "outras pessoas ainda podem registrar a conferência" in texto
+        assert "Gere o documento novamente" in texto
+        assert all(linha["registrada"] for linha in janela.conferencias.linhas) and len(janela.conferencias.linhas) == 4
+        assert all(travado(linha["nome"]) for linha in janela.conferencias.linhas)
+        assert [c["nome"] for c in app.doc_lib_carregar_sm(janela.sm_id)["conferencias"]][2] == "Maria da Manutencao"
+
+    def test_limite_de_10_conferencias_no_total_com_a_sm_aprovada(self, app, banco, janelas, fluxo):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
+        conferencias = janela.conferencias
+        for _ in range(8):
+            assert conferencias.adicionar_nova("manual") is not None
+        assert len(conferencias.linhas) == 10
+        assert estado(conferencias.btn_manual) == "disabled" and estado(conferencias.btn_sistema) == "disabled"
+        assert conferencias.adicionar_nova("sistema") is None and len(conferencias.linhas) == 10
+        conferencias.remover_linha(conferencias.linhas[-1])                                  # só a ainda não registrada sai
+        assert len(conferencias.linhas) == 9 and estado(conferencias.btn_sistema) == "normal"
+        conferencias.remover_linha(conferencias.linhas[0])                                   # registrada: ignorado
+        assert len(conferencias.linhas) == 9 and conferencias.linhas[0]["registrada"]
+
+    def test_conferencia_adicional_e_horarios_da_liberacao_na_mesma_gravacao(self, app, banco, janelas, fluxo, mensagens, dialogos):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
+        definir(app, janela.conferencias.adicionar_nova("manual")["nome"], "Mais Uma")
+        for indice, linha in enumerate(janela.tab_lib.linhas):
+            definir(app, linha["data"], "25/10/2026")
+            definir(app, linha["hora"], f"08:{indice * 10:02d}")
+        definir(app, janela.ent_exec_lib_local, "Fulano (campo)")
+        janela.salvar()
+        assert janela.status == EM_EXECUCAO and len(app.doc_lib_carregar_sm(janela.sm_id)["conferencias"]) == 3
+        assert estado(janela.conferencias.btn_manual) == "disabled" and estado(janela.conferencias.btn_sistema) == "disabled"
+
+    @pytest.mark.parametrize("status", [EM_EXECUCAO, CONCLUIDO])
+    def test_em_execucao_e_concluida_nao_aceitam_mais_conferencias(self, app, banco, janelas, fluxo, status):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(status)))
+        assert estado(janela.conferencias.btn_manual) == "disabled" and estado(janela.conferencias.btn_sistema) == "disabled"
+        assert janela.conferencias.adicionar_nova("manual") is None
+
+    def test_dica_do_item_12_informa_que_a_aprovada_ainda_aceita_conferencias(self, app, banco, janelas):
+        textos = [w.cget("text") for w in _todos_os_widgets(janelas().janela) if w.winfo_class() == "Label"]
+        assert any("Com a SM Aprovada para Execução outras pessoas ainda podem registrar a conferência, até 10 no total" in x for x in textos)
+
+
 class TestAntecedenciaDaLiberacaoPelaJanela:
     def test_manobra_com_mais_de_3_horas_de_antecedencia_e_recusada_e_marcada(self, app, banco, janelas, fluxo, mensagens):
         janela = janelas()
@@ -678,7 +743,7 @@ class TestFluxoCompletoPelaInterface:
         assert travado(linha["nome"]) and travado(linha["ass"]) and not travado(linha["area"])
         janela.salvar()
         assert janela.status == APROVADO and len(app.doc_lib_carregar_sm(janela.sm_id)["conferencias"]) == 2
-        assert estado(conferencias.btn_manual) == "disabled"
+        assert estado(conferencias.btn_manual) == "normal"                           # Aprovada: outras pessoas ainda podem conferir
         # --- Aprovado: horários das manobras de liberação e executantes
         assert not travado(janela.tab_lib.linhas[0]["data"]) and travado(janela.tab_nor.linhas[0]["data"])
         assert not travado(janela.ent_exec_lib_local) and travado(janela.ent_exec_nor_local)

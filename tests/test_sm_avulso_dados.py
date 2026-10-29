@@ -821,14 +821,95 @@ class TestStatus:
             fluxo.conferir(sm_id, fluxo.conferencia_manual(modalidade="outra"))
         assert fluxo.doc(sm_id)["conferencias"] == []
 
-    def test_conferencia_so_com_aguarda_conferencia(self, app, fluxo):
+    def test_conferencia_so_com_aguarda_conferencia_ou_aprovada_para_execucao(self, app, fluxo):
         sm_id = fluxo.salvar()                                           # Em análise
         with pytest.raises(app.DocLibBloqueado):
             fluxo.conferir(sm_id, fluxo.conferencia_manual())
-        fluxo.ate  # (a SM aprovada também não aceita mais conferências)
-        aprovada = fluxo.ate(APROVADO)
+        for status in (EM_EXECUCAO, CONCLUIDO):                          # a execução começou: ninguém mais registra conferência
+            sm_id = fluxo.ate(status)
+            with pytest.raises(app.DocLibBloqueado, match="Conferência|não pode mais ser alterada"):    # Concluído: nada muda
+                fluxo.conferir(sm_id, fluxo.conferencia_manual(nome="Tarde Demais"))
+            assert len(fluxo.doc(sm_id)["conferencias"]) == 2
+        cancelada = fluxo.ate(AGUARDA)
+        app.doc_lib_cancelar_sm(cancelada, "operador1", "Cancelada", fluxo.doc(cancelada)["revisao"])
         with pytest.raises(app.DocLibBloqueado):
-            fluxo.conferir(aprovada, fluxo.conferencia_manual())
+            fluxo.conferir(cancelada, fluxo.conferencia_manual())
+
+    # ---- SM Aprovada para Execução: mais pessoas podem registrar a conferência, até 10 no total ----------------------------
+    def test_aprovada_aceita_mais_conferencias_e_continua_aprovada(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        revisao = fluxo.doc(sm_id)["revisao"]
+        fluxo.conferir(sm_id, fluxo.conferencia_manual(nome="Maria da Manutencao"))
+        fluxo.conferir(sm_id, fluxo.conferencia_sistema(), usuario="operador2")
+        doc = fluxo.doc(sm_id)
+        assert doc["status"] == APROVADO and doc["revisao"] == revisao + 2
+        assert [c["modalidade"] for c in doc["conferencias"]] == ["manual", "sistema", "manual", "sistema"]
+        assert doc["conferencias"][2]["nome"] == "Maria da Manutencao"
+        assert doc["conferencias"][3]["ass"] == "operador2"                                  # a Operação grava o login de quem registrou
+        conexao = app.doc_lib_conectar()
+        historico = conexao.execute("SELECT descricao, usuario FROM doclib_sm_historico WHERE evento = 'conferencia' ORDER BY id").fetchall()
+        conexao.close()
+        assert len(historico) == 4 and historico[2][1] == "operador1" and historico[3][1] == "operador2"
+
+    def test_aprovada_vai_ate_10_conferencias_no_total(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)                                                          # já tem 2
+        for numero in range(3, 11):
+            fluxo.conferir(sm_id, fluxo.conferencia_manual(nome=f"Conferente {numero:02d}"))
+        assert len(fluxo.doc(sm_id)["conferencias"]) == 10 and fluxo.doc(sm_id)["status"] == APROVADO
+        with pytest.raises(app.DocLibValidacaoSM, match="no máximo 10"):
+            fluxo.conferir(sm_id, fluxo.conferencia_manual(nome="Onze"))
+        assert len(fluxo.doc(sm_id)["conferencias"]) == 10
+
+    def test_conferencia_ja_registrada_nao_muda_nem_sai_com_a_sm_aprovada(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        gravadas = fluxo.doc(sm_id)["conferencias"]
+        revisao = fluxo.doc(sm_id)["revisao"]
+        with pytest.raises(app.DocLibBloqueado, match="Conferência já registrada"):
+            fluxo.alterar(sm_id, conferencias=[dict(gravadas[0], nome="Outro Nome"), gravadas[1]])         # trocar o nome
+        with pytest.raises(app.DocLibBloqueado, match="Conferência já registrada"):
+            fluxo.alterar(sm_id, conferencias=[gravadas[1], gravadas[0]])                                  # trocar a ordem
+        with pytest.raises(app.DocLibBloqueado, match="Conferência já registrada"):
+            fluxo.alterar(sm_id, conferencias=[gravadas[0]])                                               # tirar uma
+        with pytest.raises(app.DocLibBloqueado, match="Conferência já registrada"):
+            fluxo.alterar(sm_id, conferencias=[dict(gravadas[0], data="01/01/2020"), gravadas[1]])
+        assert fluxo.doc(sm_id)["conferencias"] == gravadas and fluxo.doc(sm_id)["revisao"] == revisao
+        fluxo.conferir(sm_id, fluxo.conferencia_manual(nome="Mais Uma"))                                   # acrescentar, sim
+        assert fluxo.doc(sm_id)["conferencias"][:2] == gravadas
+
+    def test_conferencia_registrada_nao_pode_ser_alterada_nem_no_banco(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        conexao = app.doc_lib_conectar()
+        with pytest.raises(sqlite3.DatabaseError, match="não pode ser alterada"):
+            conexao.execute("UPDATE doclib_sm_conferencias SET nome = 'Outro' WHERE sm_id = ?", (sm_id,))
+        with pytest.raises(sqlite3.DatabaseError, match="não pode ser excluída"):
+            conexao.execute("DELETE FROM doclib_sm_conferencias WHERE sm_id = ?", (sm_id,))
+        conexao.close()
+
+    def test_conferencia_nova_valida_os_campos_obrigatorios_com_a_sm_aprovada(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        with pytest.raises(app.DocLibValidacaoSM):
+            fluxo.conferir(sm_id, fluxo.conferencia_manual(nome=""))
+        with pytest.raises(app.DocLibValidacaoSM):
+            fluxo.conferir(sm_id, fluxo.conferencia_manual(modalidade="outra"))
+        assert len(fluxo.doc(sm_id)["conferencias"]) == 2
+
+    def test_conferencia_adicional_junto_com_horarios_da_liberacao_na_mesma_gravacao(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
+        gravadas = fluxo.doc(sm_id)["conferencias"]
+        fluxo.alterar(sm_id, conferencias=gravadas + [fluxo.conferencia_manual(nome="Mais Uma")],
+                      liberacao=fluxo.datar(fluxo.doc(sm_id), "liberacao", 8), exec_lib_local="Fulano (campo)")
+        doc = fluxo.doc(sm_id)
+        assert doc["status"] == EM_EXECUCAO and len(doc["conferencias"]) == 3            # a SM passa a Em Execução e fecha as conferências
+        with pytest.raises(app.DocLibBloqueado):
+            fluxo.conferir(sm_id, fluxo.conferencia_manual(nome="Tarde Demais"))
+
+    def test_conferencia_adicional_com_as_opcoes_sem_manobras(self, app, fluxo):
+        for opcao in ({"lib_emergencia": 1}, {"nor_sem_manobras": 1}):
+            sm_id = fluxo.salvar(**opcao)
+            fluxo.gerar(sm_id)
+            fluxo.aprovar(sm_id)
+            fluxo.conferir(sm_id, fluxo.conferencia_manual(nome="Mais Uma"))
+            assert len(fluxo.doc(sm_id)["conferencias"]) == 3 and fluxo.doc(sm_id)["status"] == APROVADO
 
     def test_conferencia_registrada_nao_muda_nem_sai(self, app, fluxo):
         sm_id = fluxo.ate(AGUARDA)

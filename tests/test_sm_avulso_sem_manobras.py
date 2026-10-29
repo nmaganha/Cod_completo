@@ -120,9 +120,9 @@ class TestDadosDasOpcoes:
 class TestStatusComAsOpcoes:
     def test_grupos_editaveis_por_status_e_opcao(self, app):
         grupos = app.doc_lib_grupos_editaveis_sm
-        assert grupos(APROVADO, {}) == ("reprogramacao", "datas_lib", "exec_lib")
-        assert grupos(APROVADO, {"nor_sem_manobras": 1}) == ("reprogramacao", "datas_lib", "exec_lib")
-        assert grupos(APROVADO, {"lib_emergencia": 1}) == ("reprogramacao", "datas_nor", "exec_nor")
+        assert grupos(APROVADO, {}) == ("reprogramacao", "conferencias", "datas_lib", "exec_lib")
+        assert grupos(APROVADO, {"nor_sem_manobras": 1}) == ("reprogramacao", "conferencias", "datas_lib", "exec_lib")
+        assert grupos(APROVADO, {"lib_emergencia": 1}) == ("reprogramacao", "conferencias", "datas_nor", "exec_nor")
         assert grupos(EM_EXECUCAO, {}) == ("datas_nor", "exec_nor") and grupos(AGUARDA, {}) == ("conferencias",)
         assert grupos(EM_ANALISE, {"lib_emergencia": 1}) == ("geral",) and grupos(CONCLUIDO, {}) == ()
 
