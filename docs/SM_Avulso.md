@@ -121,9 +121,10 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
     travar/destravar. Nas demais, o original é mantido e a linha fica marcada (alerta laranja); **Gerar SM Avulso** só é aceito
     depois de conferir ou editar cada uma. Pede confirmação antes de substituir uma normalização já preenchida.
 15. **Encaminhar SM por e-mail** (a primeira entrega não tinha e-mail; agora o envio é para conferência, com destinatários internos):
-    - **Quando**: botão **Encaminhar SM** no rodapé da janela da SM, ativo só com a SM salva, sem alterações pendentes, emitida e no
-      status **Aguarda Conferência** (`doc_lib_validar_envio_sm` recusa qualquer outro status). O envio não muda o status nem a
-      revisão do documento.
+    - **Quando**: botão **Encaminhar SM** no rodapé da janela da SM, ativo com a SM salva e sem alterações pendentes, em **qualquer status**
+      (Reservado, Em análise, Aguarda Conferência, Aprovado para Execução, Em Execução, Concluído e Cancelado; a SM reservada sai como
+      formulário em branco e a cancelada com o número riscado). O envio não muda o status nem a revisão do documento. O banco deixa mudar só as
+      colunas do e-mail ("Enviado e-mail") de uma SM concluída ou cancelada; o resto dela continua protegido.
     - **Remetente, método de envio e cópia na pasta Downloads**: os mesmos do ATEIE, do AI e da MO (remetentes
       `EMAIL_ATEIE_REMETENTES`, SMTP ou Outlook pelo `config_email_ateie.json`). O remetente escolhido por último vem sugerido.
     - **Destinatários**: não são por empresa. Há uma **lista única de e-mails da SM** (tabela `doclib_sm_contatos`, com nome opcional) e,
@@ -134,18 +135,19 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
       o botão **Excluir** (com confirmação; os envios já registrados não mudam). A **última escolha de Para e Cc** fica gravada e vem
       marcada no envio seguinte. A lista inicial, criada junto com a tabela, tem só `nmaganha@alupar.com.br` e `jbarros@alupar.com.br`
       (endereços já citados no projeto): `DOC_LIB_CONTATOS_INICIAIS_SM`; o restante é cadastrado na própria janela de envio.
-    - **Anexo**: o PDF da SM como está, **com** o aviso vermelho "Aguardando a Conferência do documento" (quem recebe é quem vai
-      conferir). É arquivado em `SM/Enviados/<ano>` (tipo `envio` em `doclib_sm_pdfs`) e reaproveitado enquanto a revisão não muda; uma
-      reprogramação ou conferência nova gera outro PDF.
-    - **Assunto e texto**: constantes `EMAIL_SM_ASSUNTO` e `EMAIL_SM_TEXTO`. O assunto segue o padrão de teste dos demais documentos
-      ("TESTE DE ENVIO DE E-MAIL - SM - Para Conferência"); troque a constante quando o texto definitivo for escolhido.
+    - **Anexo**: o PDF da SM como está. Enquanto falta a conferência (Em análise e Aguarda Conferência) ele leva o aviso vermelho
+      "Aguardando a Conferência do documento" (quem recebe é quem vai conferir); nos demais status, não. É arquivado em `SM/Enviados/<ano>`
+      (tipo `envio` em `doclib_sm_pdfs`) e reaproveitado enquanto a revisão não muda; uma reprogramação ou conferência nova gera outro PDF.
+    - **Assunto e texto**: variam com o status. Em análise e Aguarda Conferência: "para conferência" (`EMAIL_SM_ASSUNTO` e `EMAIL_SM_TEXTO`);
+      nos demais: "para conhecimento" (`EMAIL_SM_ASSUNTO_CONHECIMENTO` e `EMAIL_SM_TEXTO_CONHECIMENTO`). Os assuntos seguem o padrão de teste
+      dos demais documentos ("TESTE DE ENVIO DE E-MAIL - SM - ..."); troque as constantes quando o texto definitivo for escolhido.
     - **Reenvio**: diferente de ATEIE, AI e MO, uma SM já encaminhada **pode** ser encaminhada de novo (por exemplo, esqueceram alguém ou
       houve reprogramação). Antes, uma pergunta mostra os envios anteriores (data, usuário, Para e Cc). Todos os envios ficam em
       `doclib_sm_emails`, que o banco não deixa alterar nem excluir.
     - **GRID SM**: coluna **Enviado e-mail** ("Não" ou "Sim, em dd/mm/aaaa" do envio mais recente) e botão **Marcar e-mail enviado**,
       para o caso de o envio automático falhar e o e-mail ser mandado à mão. Nesta marcação manual vale a regra dos demais documentos
-      (SM com "Sim" não é marcada de novo; "Voltar para Não" corrige) e só vale para SM em Aguarda Conferência, Aprovado para Execução ou
-      Em Execução. SM Concluída ou Cancelada não muda mais.
+      (SM com "Sim" não é marcada de novo; "Voltar para Não" corrige) e vale para SM em qualquer status. O botão **NOVA SM** do GRID SM
+      já existia (ver decisão 26).
     - **Falhas**: se o e-mail não sair, a mensagem mostra o motivo e o arquivo para envio manual e nada é registrado; se o e-mail sair
       mas o registro no banco falhar, o aviso manda marcar no GRID. Se a SM mudar enquanto a janela de envio está aberta, o e-mail não é
       enviado.
@@ -247,6 +249,20 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
     comparação do login sem diferenciar maiúsculas nem espaços). Outra pessoa pode conferir pela Operação, e quem fez a Operação pode fazer a
     Conferência Manutenção da mesma SM. A Conferência Manutenção, que é digitada, não tem essa trava. Usou-se trigger, e não índice único, para
     o banco de quem já tem conferências repetidas gravadas continuar abrindo normalmente (as antigas ficam como estão).
+25. **Quem elabora a SM não a confere**: ao conferir, o sistema compara a pessoa com quem elaborou a SM (item 11, Elaborado por).
+    - **Conferência Operação** (grava o login de quem está logado): se o login logado é o do elaborador (sem diferenciar maiúsculas nem
+      espaços), o botão não inclui a linha e mostra "Esta SM foi elaborada por você (login) e, portanto, não é possível que você efetue a
+      conferência da SM." A regra vale em Em análise, Aguarda Conferência e Aprovado para Execução, também na gravação
+      (`doc_lib_salvar_sm`) e no banco (trigger `trg_doclib_sm_conferencia_elaborador`); conferências antigas do próprio elaborador, se
+      existirem, ficam como estão.
+    - **Conferência Manutenção** (nome digitado, via fonia): o elaborador **pode registrar** a conferência que outra pessoa da Manutenção
+      deu, mas o nome digitado não pode ser o dele (nome completo ou login, sem diferenciar acentos, maiúsculas nem espaços): a gravação
+      recusa com a mensagem de que o nome informado é o de quem elaborou a SM. Um nome só parecido (por exemplo "José da Silva Junior") passa.
+    - O elaborador segue podendo gerar o documento, lançar os horários e os executantes e concluir; só a conferência é de outra pessoa.
+26. **GRID SM, botão NOVA SM**: o GRID SM já tinha o botão **NOVA SM**, o mesmo mecanismo dos GRIDs ATEIE, AI e MO (rótulo em caixa alta
+    como "NOVA ATEIE" e "NOVA MO", mesma posição, ao lado de Abrir): ele fecha o GRID e abre a tela inicial de emissão de uma SM em
+    branco, no lugar e no tamanho da janela que abriu o GRID. Ganhou testes que o comparam com os dos outros documentos e conferem a troca
+    de janela.
 
 ## Banco de dados
 
@@ -281,6 +297,7 @@ xvfb-run -a python -m pytest tests  # Linux sem tela (o conftest também inicia 
 | `test_sm_avulso_prorrogacao.py` | Prorrogar: regras no banco (só Em Execução, novo término posterior, P1 a P5, conflito de revisão, imutabilidade), período em vigor e reprogramação, trava do período salvo, botão no quadro certo e alternando com o Habilitar, janela do Prorrogar, P no PDF (fonte menor, ao lado do término, margens) |
 | `test_sm_avulso_sem_manobras.py` | opções dos itens 6 e 8: dados, exclusão mútua (validação e banco), imutabilidade depois de gerado, status direto a Concluído, 3 h, referência, PDF, janela (checkbuttons, aviso, restauração, bloqueios, itens 7 e 9, altura da célula Ação) |
 | `test_sm_avulso_conferencia_antecipada.py` | conferência com a SM Em análise: aprovação direta, proteção dos dados gerais, emissão depois, execução só com as duas primeiras conferências, trigger do banco, janela (botões, Editar, mensagens, status) |
+| `test_sm_avulso_elaborador.py` | quem elabora não confere (Operação por login, Manutenção por nome), trigger, janela e o botão NOVA SM do GRID SM |
 | `test_sm_avulso_pdf.py` | conteúdo, caixa alta, Indisponível, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
 | `test_regressao_doc_lib.py` | ATEIE, AI e MO (salvar, gerar, De acordo, reserva, MO-Referência, janelas, menu, GRID) e numerações independentes |
 

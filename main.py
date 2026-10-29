@@ -1,4 +1,4 @@
-# Código atualizado em 29-10-26 - 1625 - Click_25: (SM_Avulso - horários da liberação abertos com a SM Aprovada, gerado o documento ou não)
+# Código atualizado em 29-10-26 - 2002 - Click_25: (SM_Avulso - e-mail em qualquer status e quem elabora a SM não a confere)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -22414,8 +22414,13 @@ EMAIL_SM_TEXTO = ("Prezados,\n\n"
                   "Segue para conferência a SM (Sequência de Manobras) número: {numeros}.\n\n"
                   "Atenciosamente,\n"
                   "COG-ALUPAR")
-# a marcação manual de "Enviado e-mail" no GRID SM vale para SM emitida e ainda em andamento
-DOC_LIB_STATUS_MARCAR_EMAIL_SM = (STATUS_SM_AGUARDA_CONFERENCIA, STATUS_ATEIE_APROVADO_EXECUCAO, STATUS_ATEIE_EM_EXECUCAO)
+# A SM pode ser encaminhada por e-mail em QUALQUER status (e a marcação manual de "Enviado e-mail" do GRID SM também). Enquanto falta a
+# conferência (Em análise e Aguarda Conferência) o e-mail é "para conferência"; nos demais status é "para conhecimento".
+EMAIL_SM_ASSUNTO_CONHECIMENTO = "TESTE DE ENVIO DE E-MAIL - SM - Para conhecimento"
+EMAIL_SM_TEXTO_CONHECIMENTO = ("Prezados,\n\n"
+                               "Segue, para conhecimento, a SM (Sequência de Manobras) número: {numeros}.\n\n"
+                               "Atenciosamente,\n"
+                               "COG-ALUPAR")
 # Lista de e-mails da SM na primeira vez em que o banco é preparado; depois disso a lista vale a do banco, que o usuário
 # completa na janela do Encaminhar SM. (nome, e-mail)
 DOC_LIB_CONTATOS_INICIAIS_SM = [("", "nmaganha@alupar.com.br"), ("", "jbarros@alupar.com.br")]
@@ -22828,9 +22833,6 @@ def _garantir_tabelas_doc_lib_sm(cursor):
             WHEN OLD.status <> NEW.status AND NOT EXISTS (
                 SELECT 1 FROM doclib_sm_transicoes WHERE origem = OLD.status AND destino = NEW.status)
             BEGIN SELECT RAISE(ABORT, 'SM: transição de status não permitida'); END''',
-        # SM concluída ou cancelada não muda mais
-        "trg_doclib_sm_definitivo": f'''BEFORE UPDATE ON doclib_sm WHEN OLD.status IN ({definitivos})
-            BEGIN SELECT RAISE(ABORT, 'SM concluída ou cancelada não pode mais ser alterada'); END''',
         # o número nunca muda nem é reaproveitado
         "trg_doclib_sm_numero": '''BEFORE UPDATE OF numero, ano, sequencia ON doclib_sm
             WHEN OLD.numero <> NEW.numero OR OLD.ano <> NEW.ano OR OLD.sequencia <> NEW.sequencia
@@ -22848,6 +22850,14 @@ def _garantir_tabelas_doc_lib_sm(cursor):
             WHEN NEW.modalidade = 'sistema' AND EXISTS (SELECT 1 FROM doclib_sm_conferencias WHERE sm_id = NEW.sm_id
                 AND modalidade = 'sistema' AND LOWER(TRIM(ass)) = LOWER(TRIM(NEW.ass)))
             BEGIN SELECT RAISE(ABORT, 'SM: esta pessoa já efetuou a Conferência Operação do documento'); END''',
+        # quem elabora a SM (item 11) não registra a conferência dela: Operação pelo login, Manutenção pelo nome digitado (sem a
+        # comparação sem acentos que a camada de dados faz)
+        "trg_doclib_sm_conferencia_elaborador": '''BEFORE INSERT ON doclib_sm_conferencias
+            WHEN EXISTS (SELECT 1 FROM doclib_sm s WHERE s.id = NEW.sm_id AND (
+                (NEW.modalidade = 'sistema' AND LOWER(TRIM(s.elaborado_ass)) = LOWER(TRIM(NEW.ass)))
+                OR (NEW.modalidade = 'manual' AND TRIM(COALESCE(NEW.nome, '')) <> ''
+                    AND LOWER(TRIM(NEW.nome)) IN (LOWER(TRIM(COALESCE(s.elaborado_por, ''))), LOWER(TRIM(COALESCE(s.elaborado_ass, '')))))))
+            BEGIN SELECT RAISE(ABORT, 'SM: quem elabora a SM não pode efetuar a conferência dela'); END''',
         # conferência registrada não muda nem é apagada
         "trg_doclib_sm_conferencia_altera": '''BEFORE UPDATE ON doclib_sm_conferencias
             BEGIN SELECT RAISE(ABORT, 'SM: conferência registrada não pode ser alterada'); END''',
@@ -22882,6 +22892,15 @@ def _garantir_tabelas_doc_lib_sm(cursor):
     }
     for nome, definicao in triggers.items():
         cursor.execute(f"CREATE TRIGGER IF NOT EXISTS {nome} {definicao}")
+    # SM concluída ou cancelada não muda mais, EXCETO as colunas do e-mail (Enviado e-mail do GRID SM: a SM pode ser encaminhada em
+    # qualquer status). O gatilho só dispara quando o UPDATE mexe em alguma das outras colunas; a lista é refeita a cada preparação
+    # do banco, para acompanhar as colunas que o esquema ganhar.
+    colunas_protegidas = [linha[1] for linha in cursor.execute("PRAGMA table_info(doclib_sm)").fetchall()
+                          if linha[1] not in ("email_enviado_em", "email_enviado_por", "email_enviado_origem")]
+    cursor.execute("DROP TRIGGER IF EXISTS trg_doclib_sm_definitivo")
+    cursor.execute(f"CREATE TRIGGER trg_doclib_sm_definitivo BEFORE UPDATE OF {', '.join(colunas_protegidas)} ON doclib_sm "
+                   f"WHEN OLD.status IN ({definitivos}) "
+                   f"BEGIN SELECT RAISE(ABORT, 'SM concluída ou cancelada não pode mais ser alterada'); END")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_doclib_sm_manobras ON doclib_sm_manobras (sm_id, tipo, ordem)")
 
 
@@ -22965,6 +22984,32 @@ def doc_lib_ja_conferiu_operacao_sm(conferencias, usuario):
     return bool(usuario) and any(
         conferencia.get("modalidade") == DOC_LIB_MODALIDADE_SISTEMA_SM
         and str(conferencia.get("ass") or "").strip().lower() == usuario for conferencia in conferencias or [])
+
+
+def _doc_lib_nome_comparavel_sm(texto):
+    """Nome ou login para comparação: sem acentos, em minúsculas e sem espaços repetidos."""
+    return " ".join(_doc_lib_sem_acento(str(texto or "")).lower().split())
+
+
+def doc_lib_conferente_e_o_elaborador_sm(elaborador, conferencia, usuario):
+    """True se a conferência é de quem elaborou a SM (item 11, Elaborado por): quem elabora a SM não a confere.
+      Conferência Operação (grava o login de quem está logado) ... o login de quem está logado é o do elaborador;
+      Conferência Manutenção (nome digitado, via fonia) ......... o nome digitado é o nome ou o login do elaborador.
+    'elaborador' tem 'elaborado_ass' (login) e 'elaborado_por' (nome); 'usuario' é o login de quem está logado."""
+    login, nome = _doc_lib_nome_comparavel_sm((elaborador or {}).get("elaborado_ass")), \
+        _doc_lib_nome_comparavel_sm((elaborador or {}).get("elaborado_por"))
+    if (conferencia or {}).get("modalidade") == DOC_LIB_MODALIDADE_SISTEMA_SM:
+        return bool(login) and _doc_lib_nome_comparavel_sm(usuario) == login
+    digitado = _doc_lib_nome_comparavel_sm((conferencia or {}).get("nome"))
+    return bool(digitado) and digitado in {valor for valor in (nome, login) if valor}
+
+
+def doc_lib_mensagem_elaborador_sm(conferencia, usuario):
+    if (conferencia or {}).get("modalidade") == DOC_LIB_MODALIDADE_SISTEMA_SM:
+        return (f"Esta SM foi elaborada por você ({usuario}) e, portanto, não é possível que você efetue a conferência da SM.\n\n"
+                f"A conferência precisa ser feita por outra pessoa.")
+    return (f"O nome informado ({(conferencia or {}).get('nome')}) é o de quem elaborou esta SM e, portanto, não é possível que "
+            f"ele(a) efetue a conferência da SM.\n\nA conferência precisa ser feita por outra pessoa.")
 
 
 def doc_lib_mensagem_ja_conferiu_sm(usuario):
@@ -23569,6 +23614,8 @@ def doc_lib_salvar_sm(dados, usuario):
         # a mesma pessoa não faz a Conferência Operação duas vezes (nem duas na mesma gravação)
         conferiu = list((atual or {}).get("conferencias") or [])
         for conferencia in dados["conferencias"][registradas:]:
+            if atual and doc_lib_conferente_e_o_elaborador_sm(atual, conferencia, usuario):    # quem elabora não confere a própria SM
+                raise DocLibRegra(doc_lib_mensagem_elaborador_sm(conferencia, usuario))
             if conferencia["modalidade"] == DOC_LIB_MODALIDADE_SISTEMA_SM:
                 if doc_lib_ja_conferiu_operacao_sm(conferiu, usuario):
                     raise DocLibRegra(doc_lib_mensagem_ja_conferiu_sm(usuario))
@@ -24035,8 +24082,9 @@ def doc_lib_gerar_pdf_sm(doc, caminho, gerado_por=""):
                            + DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM + DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM
                            + ("elaborado_por", "elaborado_ass")},
                    equipamentos=[], liberacao=[], normalizacao=[], conferencias=[])
-    aguardando = not reservada and not cancelada and bool(doc.get("emitido")) \
-        and doc.get("status") == STATUS_SM_AGUARDA_CONFERENCIA
+    aguardando = not reservada and not cancelada and (
+        (bool(doc.get("emitido")) and doc.get("status") == STATUS_SM_AGUARDA_CONFERENCIA)
+        or doc.get("status") == STATUS_ATEIE_EM_ANALISE)         # SM salva e ainda sem as duas conferências (e-mail para conferência)
     pdf = PDFSM(f"Gerado pelo sistema COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}",
                 numero=doc.get("numero") or "", cancelada=cancelada,
                 aviso="Aguardando a Conferência do documento" if aguardando else "")
@@ -24483,15 +24531,34 @@ def doc_lib_enderecos_envio_sm(para, copias):
 
 
 def doc_lib_validar_envio_sm(doc):
-    """O e-mail da SM só sai com o documento emitido e no status Aguarda Conferência. Lança DocLibRegra com a orientação."""
+    """A SM salva pode ser encaminhada por e-mail em qualquer status (Reservado, Em análise, Aguarda Conferência, Aprovado para
+    Execução, Em Execução, Concluído e Cancelado). Só falha se a SM não existe mais (DocLibRegra)."""
     if doc is None:
         raise DocLibRegra("Esta SM não existe mais.")
-    if doc["status"] == STATUS_SM_AGUARDA_CONFERENCIA and doc.get("emitido"):
-        return
-    dica = {STATUS_ATEIE_RESERVADO: "\n\nPreencha e salve a SM reservada antes.",
-            STATUS_ATEIE_EM_ANALISE: "\n\nUse 'Gerar SM Avulso' para emitir a SM e mandá-la para a conferência."}.get(doc["status"], "")
-    raise DocLibRegra(f"O envio por e-mail só é permitido para SM no status '{STATUS_SM_AGUARDA_CONFERENCIA}'.\n\n"
-                      f"Situação atual: {doc['status']}{dica}")
+
+
+def doc_lib_envio_para_conferencia_sm(doc):
+    """True se o e-mail da SM vai "para conferência" (Em análise ou Aguarda Conferência, SM que ainda precisa das duas conferências);
+    nos demais status ele vai "para conhecimento"."""
+    return doc.get("status") in (STATUS_ATEIE_EM_ANALISE, STATUS_SM_AGUARDA_CONFERENCIA)
+
+
+def doc_lib_assunto_e_texto_envio_sm(doc):
+    """(assunto, texto) do e-mail da SM conforme o status. O texto tem o campo {numeros}; o assunto recebe ': <número>' no envio."""
+    if doc_lib_envio_para_conferencia_sm(doc):
+        return EMAIL_SM_ASSUNTO, EMAIL_SM_TEXTO
+    return EMAIL_SM_ASSUNTO_CONHECIMENTO, EMAIL_SM_TEXTO_CONHECIMENTO
+
+
+def doc_lib_descricao_anexo_sm(doc):
+    """Descrição do PDF anexado ao e-mail, conforme a situação da SM."""
+    if doc_lib_documento_reservado_sm(doc):
+        return "PDF do formulário da SM em branco (SM reservada)"
+    if doc.get("status") == STATUS_ATEIE_CANCELADO:
+        return "PDF da SM, com o número riscado e as informações do cancelamento"
+    if doc_lib_envio_para_conferencia_sm(doc):
+        return "PDF da SM, com o aviso \"Aguardando a Conferência do documento\""
+    return "PDF da SM"
 
 
 def doc_lib_emails_enviados_sm(sm_id):
@@ -24509,9 +24576,8 @@ def doc_lib_emails_enviados_sm(sm_id):
 
 def doc_lib_registrar_envio_sm(sm_id, remetente, destinatarios, copias, assunto, anexo, metodo, usuario):
     """Registra o e-mail enviado (quem, quando, de qual remetente, para quem, com cópia para quem, qual PDF) e marca a SM como
-    "Sim, em dd/mm/aaaa" na coluna "Enviado e-mail" do GRID SM (a data do envio mais recente). O envio é sempre registrado, mesmo
-    que a SM tenha sido concluída ou cancelada enquanto o e-mail saía; só a coluna do GRID deixa de mudar nesses casos (o banco
-    não aceita alteração em SM concluída ou cancelada). Não altera a revisão do documento. Devolve a data gravada."""
+    "Sim, em dd/mm/aaaa" na coluna "Enviado e-mail" do GRID SM (a data do envio mais recente), em qualquer status: o banco deixa
+    mudar só as colunas do e-mail de uma SM concluída ou cancelada. Não altera a revisão do documento. Devolve a data gravada."""
     agora = datetime.now()
     conexao = doc_lib_conectar(manual=True)
     cursor = conexao.cursor()
@@ -24525,9 +24591,8 @@ def doc_lib_registrar_envio_sm(sm_id, remetente, destinatarios, copias, assunto,
                        "metodo, enviado_por, enviado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                        (sm_id, numero, revisao, "; ".join(destinatarios), "; ".join(copias), remetente, assunto, anexo, metodo,
                         usuario, agora.strftime("%d/%m/%Y - %H:%Mh")))
-        if status not in DOC_LIB_STATUS_DEFINITIVOS_SM:
-            cursor.execute("UPDATE doclib_sm SET email_enviado_em = ?, email_enviado_por = ?, email_enviado_origem = 'Sistema' "
-                           "WHERE id = ?", (agora.strftime("%d/%m/%Y"), usuario, sm_id))
+        cursor.execute("UPDATE doclib_sm SET email_enviado_em = ?, email_enviado_por = ?, email_enviado_origem = 'Sistema' "
+                       "WHERE id = ?", (agora.strftime("%d/%m/%Y"), usuario, sm_id))
         cursor.execute("COMMIT")
         return agora.strftime("%d/%m/%Y")
     except Exception:
@@ -24551,9 +24616,8 @@ def doc_lib_email_enviado_sm(sm_id):
 def doc_lib_definir_email_enviado_sm(selecao, data, usuario):
     """Marcação manual da coluna "Enviado e-mail" do GRID SM (usada quando o envio pelo sistema falhou e o e-mail foi enviado à
     mão). 'selecao' é a lista de (id do documento, linha da tabela); 'data' é dd/mm/aaaa para marcar "Sim, em dd/mm/aaaa" ou None
-    para voltar a "Não". Marcar só vale para SM já emitida e ainda em andamento (Aguarda Conferência, Aprovado para Execução ou
-    Em Execução) que ainda NÃO conste como enviada; para corrigir um registro errado é preciso voltá-la a "Não". SM concluída ou
-    cancelada não muda mais (DocLibRegra). Não altera a revisão do documento. Devolve a quantidade de SM."""
+    para voltar a "Não". Vale para SM em qualquer status, desde que ainda NÃO conste como enviada ao marcar; para corrigir um
+    registro errado é preciso voltá-la a "Não". Não altera a revisão do documento. Devolve a quantidade de SM."""
     pares = list(dict.fromkeys((int(sm_id), int(ordem)) for sm_id, ordem in selecao))
     if not pares:
         raise DocLibRegra("Selecione pelo menos uma SM.")
@@ -24569,11 +24633,6 @@ def doc_lib_definir_email_enviado_sm(selecao, data, usuario):
                 raise DocLibConflito("Uma das SMs selecionadas não existe mais.\n\n"
                                      "Feche e abra novamente o GRID SM para ver a situação atual.")
             numero, status, enviado_em = linha
-            if status in DOC_LIB_STATUS_DEFINITIVOS_SM:
-                raise DocLibRegra(f"A SM {numero} está com status '{status}' e não pode mais ser alterada.")
-            if data and status not in DOC_LIB_STATUS_MARCAR_EMAIL_SM:
-                raise DocLibRegra(f"A SM {numero} está com status '{status}'. Só é possível marcar o e-mail como enviado "
-                                  f"depois que o documento é gerado (a partir de '{STATUS_SM_AGUARDA_CONFERENCIA}').")
             if data and enviado_em:
                 ja_enviadas.append(f"{numero} ({doc_lib_texto_email_enviado(enviado_em)})")
         if ja_enviadas:
@@ -24662,7 +24721,8 @@ def doc_lib_pdf_para_envio_sm(doc, usuario):
 
 
 class DialogoEncaminharSM:
-    """Janela de confirmação do botão Encaminhar SM. Mostra o remetente (a escolher entre EMAIL_ATEIE_REMETENTES), a SM, o anexo,
+    """Janela de confirmação do botão Encaminhar SM (qualquer status da SM; o assunto e o texto do e-mail variam: "para conferência" em
+    Em análise e Aguarda Conferência, "para conhecimento" nos demais). Mostra o remetente (a escolher entre EMAIL_ATEIE_REMETENTES), a SM, o anexo,
     onde ficou a cópia do PDF na pasta Downloads (ou o motivo de não ter sido salva) e a lista de contatos de e-mail da SM, em que
     o usuário marca, para cada contato, "Para" ou "Cc" (um contato não pode estar nos dois). A lista começa com a última escolha
     feita. Um e-mail que não está na lista é digitado em "Novo e-mail" (com nome opcional) e, ao ser adicionado, já fica na lista
@@ -24676,8 +24736,9 @@ class DialogoEncaminharSM:
         self.resultado = None
         self.contatos = []                  # contatos da lista, na ordem exibida
         self.linhas = {}                    # id do contato -> {"para": BooleanVar, "copia": BooleanVar}
-        self.assunto = f"{EMAIL_SM_ASSUNTO}: {doc['numero']}"
-        corpo = EMAIL_SM_TEXTO.format(numeros=doc_lib_texto_numeros([doc["numero"]]))
+        assunto_base, texto_base = doc_lib_assunto_e_texto_envio_sm(doc)
+        self.assunto = f"{assunto_base}: {doc['numero']}"
+        corpo = texto_base.format(numeros=doc_lib_texto_numeros([doc["numero"]]))
 
         self.janela = janela = Toplevel(parent)
         janela.title("Encaminhar SM")
@@ -24710,9 +24771,9 @@ class DialogoEncaminharSM:
         Label(cartao, text=f"{doc['numero']} ({doc['status']})", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10, "bold"),
               anchor="w").grid(row=1, column=1, sticky="w", pady=(11, 0))
         rotulo(2, "Anexo:")
-        Label(cartao, text=(f"{os.path.basename(caminho_pdf)}\n" if caminho_pdf else "") + "PDF da SM, com o aviso "
-              "\"Aguardando a Conferência do documento\"", bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10), wraplength=640,
-              justify="left", anchor="w").grid(row=2, column=1, sticky="w", pady=(11, 0))
+        Label(cartao, text=(f"{os.path.basename(caminho_pdf)}\n" if caminho_pdf else "") + doc_lib_descricao_anexo_sm(doc),
+              bg=SGA_CARD, fg=SGA_TEXTO, font=(SGA_FONTE, 10), wraplength=640, justify="left", anchor="w"
+              ).grid(row=2, column=1, sticky="w", pady=(11, 0))
         rotulo(3, "Cópia salva em:")
         Label(cartao, text=caminho_copia or (f"Não foi possível salvar em Downloads: {erro_copia}" if erro_copia else "(não gerada)"),
               bg=SGA_CARD, fg=SGA_TEXTO if caminho_copia else SGA_VERMELHO, font=(SGA_FONTE, 10), wraplength=640,
@@ -25444,6 +25505,12 @@ class LinhasConferenciaSM:
         hoje = datetime.now().strftime("%d/%m/%Y")
         if modalidade == DOC_LIB_MODALIDADE_SISTEMA_SM:
             usuario = obter_nome_usuario_logado()
+            conferencia = {"modalidade": DOC_LIB_MODALIDADE_SISTEMA_SM}
+            if doc_lib_conferente_e_o_elaborador_sm({"elaborado_ass": self.janela.usuario, "elaborado_por": self.janela.elaborador_nome},
+                                                    conferencia, usuario):         # quem elabora a SM não a confere
+                messagebox.showwarning("Conferência Operação", doc_lib_mensagem_elaborador_sm(conferencia, usuario),
+                                       parent=self.janela.janela)
+                return None
             if doc_lib_ja_conferiu_operacao_sm(self.coletar(), usuario):       # registrada ou ainda na tela, por salvar
                 messagebox.showwarning("Conferência Operação", doc_lib_mensagem_ja_conferiu_sm(usuario),
                                        parent=self.janela.janela)
@@ -26263,8 +26330,7 @@ class JanelaSMAvulso:
         doc_lib_estado_botao(self.btn_cancelar, self.sm_id is not None and not pendente
                              and self.status in DOC_LIB_STATUS_CANCELAVEIS_SM)
         doc_lib_estado_botao(self.btn_referencia, self.sm_id is not None and self.status not in DOC_LIB_STATUS_SEM_REFERENCIA_SM)
-        doc_lib_estado_botao(self.btn_encaminhar, self.sm_id is not None and not pendente and not self.cancelada
-                             and self.status == STATUS_SM_AGUARDA_CONFERENCIA)
+        doc_lib_estado_botao(self.btn_encaminhar, self.sm_id is not None and not pendente)      # qualquer status, com a SM salva
         self._atualizar_prorrogar(pendente)
         doc_lib_estado_botao(self.btn_inverter, "geral" in self._grupos_editaveis() and not any(v.get() for v in self._opcoes.values()))
         if self.sm_id is None:
@@ -26476,12 +26542,13 @@ class JanelaSMAvulso:
 
     def encaminhar(self):
         """Botão Encaminhar SM: depois de confirmar numa janela (remetente entre EMAIL_ATEIE_REMETENTES e, na lista de e-mails da
-        SM, quem recebe em Para e quem recebe em Cc), envia por e-mail, com o PDF da SM anexado, a SM que está no status Aguarda
-        Conferência. O status não muda; o envio fica registrado e a SM passa a "Sim, em dd/mm/aaaa" em "Enviado e-mail" no GRID SM.
-        Uma SM já encaminhada pode ser encaminhada de novo, depois de uma confirmação que mostra os envios anteriores."""
+        SM, quem recebe em Para e quem recebe em Cc), envia por e-mail, com o PDF da SM anexado, a SM salva, em QUALQUER status
+        (para conferência em Em análise e Aguarda Conferência; para conhecimento nos demais). O status não muda; o envio fica
+        registrado e a SM passa a "Sim, em dd/mm/aaaa" em "Enviado e-mail" no GRID SM. Uma SM já encaminhada pode ser encaminhada de
+        novo, depois de uma confirmação que mostra os envios anteriores."""
         titulo = "Encaminhar SM"
         if self.sm_id is None or self._pendente():
-            messagebox.showwarning(titulo, "Salve a SM e gere o documento antes de encaminhá-la.", parent=self.janela)
+            messagebox.showwarning(titulo, "Salve a SM antes de encaminhá-la.", parent=self.janela)
             return
         try:
             doc = doc_lib_carregar_sm(self.sm_id)
@@ -26544,8 +26611,9 @@ class JanelaSMAvulso:
             messagebox.showerror("Erro", f"Não foi possível ler a SM salva: {erro}", parent=self.janela)
             return
 
-        assunto_final = f"{EMAIL_SM_ASSUNTO}: {doc['numero']}"
-        corpo = EMAIL_SM_TEXTO.format(numeros=doc["numero"])
+        assunto_base, texto_base = doc_lib_assunto_e_texto_envio_sm(doc)
+        assunto_final = f"{assunto_base}: {doc['numero']}"
+        corpo = texto_base.format(numeros=doc["numero"])
         manual = caminho_copia or caminho_pdf              # arquivo para enviar à mão se o e-mail falhar
         self.janela.configure(cursor="watch")
         self.janela.update_idletasks()

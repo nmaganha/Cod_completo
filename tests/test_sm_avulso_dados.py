@@ -837,16 +837,16 @@ class TestStatus:
         sm_id = fluxo.ate(APROVADO)
         revisao = fluxo.doc(sm_id)["revisao"]
         fluxo.conferir(sm_id, fluxo.conferencia_manual(nome="Maria da Manutencao"))
-        fluxo.conferir(sm_id, fluxo.conferencia_sistema(), usuario="operador2")
+        fluxo.conferir(sm_id, fluxo.conferencia_sistema(), usuario="operador3")                      # a Operação já foi feita pelo operador2
         doc = fluxo.doc(sm_id)
         assert doc["status"] == APROVADO and doc["revisao"] == revisao + 2
         assert [c["modalidade"] for c in doc["conferencias"]] == ["manual", "sistema", "manual", "sistema"]
         assert doc["conferencias"][2]["nome"] == "Maria da Manutencao"
-        assert doc["conferencias"][3]["ass"] == "operador2"                                  # a Operação grava o login de quem registrou
+        assert doc["conferencias"][3]["ass"] == "operador3"                                  # a Operação grava o login de quem registrou
         conexao = app.doc_lib_conectar()
         historico = conexao.execute("SELECT descricao, usuario FROM doclib_sm_historico WHERE evento = 'conferencia' ORDER BY id").fetchall()
         conexao.close()
-        assert len(historico) == 4 and historico[2][1] == "operador1" and historico[3][1] == "operador2"
+        assert len(historico) == 4 and historico[2][1] == "operador2" and historico[3][1] == "operador3"
 
     def test_aprovada_vai_ate_10_conferencias_no_total(self, app, fluxo):
         sm_id = fluxo.ate(APROVADO)                                                          # já tem 2
@@ -1124,7 +1124,8 @@ class TestBanco:
         conexao.close()
         assert [(h[0], h[1]) for h in historico] == [(None, EM_ANALISE), (EM_ANALISE, AGUARDA), (AGUARDA, APROVADO),
                                                      (APROVADO, EM_EXECUCAO), (EM_EXECUCAO, CONCLUIDO)]
-        assert all(h[2] == "operador1" and h[3] for h in historico)
+        assert [h[2] for h in historico] == ["operador1", "operador1", "operador2", "operador1", "operador1"]   # a conferência é de outra pessoa
+        assert all(h[3] for h in historico)
 
     def test_tabela_de_transicoes_do_banco_acompanha_o_codigo(self, app, fluxo):
         conexao = app.doc_lib_conectar()
