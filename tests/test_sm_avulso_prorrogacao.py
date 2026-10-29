@@ -20,6 +20,16 @@ def outro_usuario_salva(fluxo, sm_id):
     fluxo.alterar(sm_id, normalizacao=[dict(normalizacao[0], data="25/10/2026", hora="17:00")] + normalizacao[1:])
 
 
+def ate_em_execucao_reprogramada(fluxo):
+    """SM que foi reprogramada ainda Aprovada para Execução (Reprogramação-1 em vigor, 27/10/2026 08:00 a 17:00) e já está Em Execução."""
+    sm_id = fluxo.ate(APROVADO)
+    fluxo.alterar(sm_id, **REPROGRAMACAO_1)
+    liberacao = [dict(m, data="27/10/2026", hora=f"08:{i * 10:02d}") for i, m in enumerate(fluxo.doc(sm_id)["liberacao"])]
+    fluxo.alterar(sm_id, liberacao=liberacao, exec_lib_local="Fulano (campo)")
+    assert fluxo.doc(sm_id)["status"] == EM_EXECUCAO
+    return sm_id
+
+
 def prorrogar(app, fluxo, sm_id, data, hora, usuario="operador1"):
     return app.doc_lib_prorrogar_sm(sm_id, data, hora, usuario, fluxo.doc(sm_id)["revisao"])
 
@@ -148,30 +158,30 @@ class TestProrrogacaoNoBanco:
 
 
 class TestPeriodoEmVigorEReprogramacao:
-    def test_depois_de_uma_reprogramacao_a_prorrogacao_vale_para_ela_e_o_contador_e_por_periodo(self, app, fluxo):
-        sm_id = fluxo.ate(EM_EXECUCAO)
-        prorrogar(app, fluxo, sm_id, "25/10/2026", "18:00")                                # P1 da Programação
-        prorrogar(app, fluxo, sm_id, "25/10/2026", "19:00")                                # P2 da Programação
-        fluxo.alterar(sm_id, **REPROGRAMACAO_1)                                            # Reprogramação-1 passa a vigorar
-        resultado = prorrogar(app, fluxo, sm_id, "27/10/2026", "20:00")
+    def test_reprogramada_a_prorrogacao_vale_para_a_reprogramacao_em_vigor(self, app, fluxo):
+        sm_id = ate_em_execucao_reprogramada(fluxo)
+        antes = fluxo.doc(sm_id)
+        resultado = prorrogar(app, fluxo, sm_id, "27/10/2026", "19:00")
+        resultado2 = prorrogar(app, fluxo, sm_id, "27/10/2026", "20:00")
         doc = fluxo.doc(sm_id)
-        assert resultado["periodo"] == "p1" and resultado["numero"] == 1
-        assert (doc["p0_prorrogacoes"], doc["p1_prorrogacoes"]) == (2, 1)
-        assert (doc["p0_hora_termino"], doc["p1_hora_termino"], doc["p1_data_termino"]) == ("19:00", "20:00", "27/10/2026")
-        assert [(p["periodo"], p["numero"]) for p in doc["prorrogacoes"]] == [("p0", 1), ("p0", 2), ("p1", 1)]
+        assert (resultado["periodo"], resultado["numero"], resultado2["numero"]) == ("p1", 1, 2)
+        assert (doc["p0_prorrogacoes"], doc["p1_prorrogacoes"]) == (0, 2)
+        assert (doc["p0_hora_termino"], doc["p0_data_termino"]) == (antes["p0_hora_termino"], antes["p0_data_termino"])
+        assert (doc["p1_hora_termino"], doc["p1_data_termino"]) == ("20:00", "27/10/2026")
+        assert [(p["periodo"], p["numero"]) for p in doc["prorrogacoes"]] == [("p1", 1), ("p1", 2)]
         registro = next(r for r in app.doc_lib_listar_sm() if r["ateie_id"] == sm_id)
         assert registro["prog_termino"] == "27/10/2026 20:00"
 
-    def test_reprogramacao_habilitada_e_vazia_impede_prorrogar_a_anterior(self, app, fluxo):
-        sm_id = fluxo.ate(EM_EXECUCAO)
+    def test_reprogramacao_habilitada_e_vazia_nao_impede_prorrogar_o_periodo_em_vigor(self, app, fluxo):
+        sm_id = fluxo.ate(APROVADO)
         fluxo.alterar(sm_id, reprogramacoes=1)                                             # habilitada, sem datas
-        with pytest.raises(app.DocLibRegra, match="Preencha e salve a Reprogramação-1"):
-            prorrogar(app, fluxo, sm_id, "25/10/2026", "18:00")
+        fluxo.executar(sm_id)
+        assert fluxo.doc(sm_id)["status"] == EM_EXECUCAO
+        assert prorrogar(app, fluxo, sm_id, "25/10/2026", "18:00")["periodo"] == "p0"       # com a SM Em Execução ela não é mais preenchida
 
     def test_periodo_salvo_so_muda_pela_prorrogacao_com_a_sm_em_execucao(self, app, fluxo):
-        sm_id = fluxo.ate(EM_EXECUCAO)
-        fluxo.alterar(sm_id, **REPROGRAMACAO_1)                                            # preencher uma reprogramação nova: permitido
-        with pytest.raises(app.DocLibBloqueado, match="Reprogramação-1 já registrada"):
+        sm_id = ate_em_execucao_reprogramada(fluxo)
+        with pytest.raises(app.DocLibBloqueado, match="Reprogramação-1 já registrada.*botão Prorrogar"):
             fluxo.alterar(sm_id, p1_hora_termino="23:00")                                  # editar o término salvo direto: não
         with pytest.raises(app.DocLibBloqueado, match="Reprogramação-1 já registrada"):
             fluxo.alterar(sm_id, p1_data_inicio="28/10/2026")
@@ -181,18 +191,13 @@ class TestPeriodoEmVigorEReprogramacao:
         prorrogar(app, fluxo, sm_id, "27/10/2026", "23:00")                                # o caminho é o Prorrogar
         assert fluxo.doc(sm_id)["p1_hora_termino"] == "23:00"
 
-    def test_antes_da_execucao_a_reprogramacao_continua_editavel(self, app, fluxo):
-        sm_id = fluxo.ate(APROVADO)
-        fluxo.alterar(sm_id, **REPROGRAMACAO_1)
-        fluxo.alterar(sm_id, p1_hora_termino="23:00")
-        assert fluxo.doc(sm_id)["p1_hora_termino"] == "23:00"
-
-    def test_nova_reprogramacao_em_execucao_continua_possivel(self, app, fluxo):
+    def test_com_a_sm_em_execucao_nao_ha_mais_reprogramacao(self, app, fluxo):
         sm_id = fluxo.ate(EM_EXECUCAO)
-        fluxo.alterar(sm_id, **REPROGRAMACAO_1)
-        fluxo.alterar(sm_id, p2_data_inicio="28/10/2026", p2_hora_inicio="08:00", p2_data_termino="28/10/2026",
-                      p2_hora_termino="12:00", reprogramacoes=2)
-        assert prorrogar(app, fluxo, sm_id, "28/10/2026", "13:00")["periodo"] == "p2"
+        with pytest.raises(app.DocLibBloqueado, match="Reprogramações"):
+            fluxo.alterar(sm_id, **REPROGRAMACAO_1)
+        with pytest.raises(app.DocLibBloqueado, match="Reprogramações"):
+            fluxo.alterar(sm_id, reprogramacoes=1)
+        assert fluxo.doc(sm_id)["reprogramacoes"] == 0 and fluxo.doc(sm_id)["p1_data_inicio"] in (None, "")
 
 
 def spans(caminho):
@@ -236,17 +241,16 @@ class TestPdfComP:
         caminho, _ = fluxo.gerar(sm_id)
         assert not [t for t in spans(caminho) if t[0].startswith("P") and t[0][1:].isdigit()]
 
-    def test_cada_periodo_mostra_o_proprio_termo(self, app, fluxo):
-        sm_id = fluxo.ate(EM_EXECUCAO)
-        prorrogar(app, fluxo, sm_id, "25/10/2026", "18:00")
-        prorrogar(app, fluxo, sm_id, "25/10/2026", "19:00")
-        fluxo.alterar(sm_id, **REPROGRAMACAO_1)
-        prorrogar(app, fluxo, sm_id, "27/10/2026", "20:00")
+    def test_so_o_periodo_prorrogado_leva_o_termo_e_o_numero_acompanha_as_prorrogacoes(self, app, fluxo):
+        sm_id = ate_em_execucao_reprogramada(fluxo)                                      # Reprogramação-1 em vigor
+        prorrogar(app, fluxo, sm_id, "27/10/2026", "18:00")
+        prorrogar(app, fluxo, sm_id, "27/10/2026", "19:00")
         caminho, _ = fluxo.gerar(sm_id)
-        termos = sorted(t[0] for t in spans(caminho) if t[0].startswith("P") and t[0][1:].isdigit())
-        assert termos == ["P1", "P2"]                                                    # Programação: P2; Reprogramação-1: P1
-        posicoes = {t[0]: t[2] for t in spans(caminho) if t[0] in ("P1", "P2")}
-        assert posicoes["P2"][0] < posicoes["P1"][0]                                     # a Programação fica à esquerda da Reprogramação-1
+        trechos = spans(caminho)
+        termos = [t for t in trechos if t[0].startswith("P") and t[0][1:].isdigit()]
+        assert [t[0] for t in termos] == ["P2"]                                           # a Programação (esquerda) não tem prorrogação
+        hora_programacao = next(t for t in trechos if t[0] == "17:00 hs")
+        assert termos[0][2][0] > hora_programacao[2][2]                                   # P2 fica à direita, no quadro da Reprogramação-1
 
     def test_dentro_das_margens_da_pagina(self, app, fluxo):
         sm_id = fluxo.ate(EM_EXECUCAO)
@@ -292,33 +296,41 @@ def resposta_prorrogar(app, monkeypatch):
 
 
 class TestBotaoProrrogarNaJanela:
-    def test_programacao_em_vigor_tem_o_prorrogar_e_as_reprogramacoes_o_habilitar(self, app, banco, em_execucao):
+    def test_programacao_em_vigor_tem_o_prorrogar_e_nenhum_quadro_tem_o_habilitar(self, app, banco, em_execucao):
         janela = em_execucao
         habilitar, prorrogar_p0 = botoes_do_quadro(janela, "p0")
         assert habilitar is None and visivel(prorrogar_p0) and estado(prorrogar_p0) == "normal"
         assert prorrogar_p0.cget("text") == "Prorrogar"
-        for prefixo in ("p1", "p2", "p3"):
+        for prefixo in ("p1", "p2", "p3"):                                                  # Em Execução: não há mais reprogramação
             habilitar, prorrogar_pn = botoes_do_quadro(janela, prefixo)
-            assert visivel(habilitar) and not visivel(prorrogar_pn)
-        assert estado(janela.periodo["p1"]["botao"]) == "normal" and estado(janela.periodo["p2"]["botao"]) == "disabled"
+            assert not visivel(habilitar) and not visivel(prorrogar_pn)
 
-    def test_o_prorrogar_ocupa_o_lugar_do_habilitar_a_cada_reprogramacao(self, app, banco, em_execucao, fluxo):
-        janela = em_execucao
-        janela.habilitar_reprogramacao("p1")                                                # clicar em Habilitar (ainda sem salvar)
+    def test_o_prorrogar_ocupa_o_lugar_do_habilitar_a_cada_reprogramacao(self, app, banco, janelas, fluxo):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
         _, p0 = botoes_do_quadro(janela, "p0")
+        assert visivel(p0) and estado(p0) == "disabled"                                     # Aprovada: ainda não está em andamento
+        janela.habilitar_reprogramacao("p1")                                                # clicar em Habilitar (ainda sem salvar)
         habilitar_p1, prorrogar_p1 = botoes_do_quadro(janela, "p1")
         assert not visivel(p0) and visivel(prorrogar_p1) and not visivel(habilitar_p1)     # trocou de quadro
-        assert estado(prorrogar_p1) == "disabled"                                           # sem dados e sem salvar: nada a prorrogar
+        assert estado(prorrogar_p1) == "disabled"
         assert visivel(janela.periodo["p2"]["botao"]) and estado(janela.periodo["p2"]["botao"]) == "normal"
         for campo, valor in (("data_inicio", "27/10/2026"), ("hora_inicio", "08:00"), ("data_termino", "27/10/2026"),
                              ("hora_termino", "17:00")):
             definir(app, janela.periodo["p1"][campo], valor)
         janela.salvar()
-        assert estado(prorrogar_p1) == "normal" and visivel(prorrogar_p1)                   # preenchida e salva: pode prorrogar
-        assert not visivel(botoes_do_quadro(janela, "p0")[1])
+        assert visivel(prorrogar_p1) and not visivel(botoes_do_quadro(janela, "p0")[1])
         janela.habilitar_reprogramacao("p2")
         assert visivel(botoes_do_quadro(janela, "p2")[1]) and not visivel(prorrogar_p1) and visivel(janela.periodo["p1"]["botao"])
         assert janela.periodo["p1"]["botao"].cget("text") == "Habilitada" and estado(janela.periodo["p1"]["botao"]) == "disabled"
+
+    def test_em_execucao_o_prorrogar_fica_no_quadro_da_reprogramacao_em_vigor_e_fica_ativo(self, app, banco, janelas, fluxo):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(ate_em_execucao_reprogramada(fluxo)))
+        _, p0 = botoes_do_quadro(janela, "p0")
+        habilitar_p1, prorrogar_p1 = botoes_do_quadro(janela, "p1")
+        assert not visivel(p0) and visivel(prorrogar_p1) and estado(prorrogar_p1) == "normal" and not visivel(habilitar_p1)
+        assert all(not visivel(janela.periodo[p]["botao"]) for p in ("p1", "p2", "p3"))
 
     @pytest.mark.parametrize("status, esperado", [(EM_ANALISE, "disabled"), (AGUARDA, "disabled"), (APROVADO, "disabled"),
                                                   (EM_EXECUCAO, "normal"), (CONCLUIDO, "disabled")])
@@ -372,26 +384,22 @@ class TestBotaoProrrogarNaJanela:
         em_execucao.prorrogar()
         assert "foi alterada por outro usuário" in mensagens.avisos[-1][1] and resposta_prorrogar.chamadas == []
 
-    def test_periodo_salvo_fica_travado_em_execucao_e_a_programacao_tambem(self, app, banco, em_execucao, fluxo):
-        janela = em_execucao
+    def test_periodo_salvo_fica_travado_em_execucao_e_a_programacao_tambem(self, app, banco, janelas, fluxo):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(EM_EXECUCAO)))
         assert all(travado(w) for w in janela.periodo["p0"]["widgets"])
-        janela.habilitar_reprogramacao("p1")
-        assert not any(travado(w) for w in janela.periodo["p1"]["widgets"])                  # reprogramação nova: preencher
-        for campo, valor in (("data_inicio", "27/10/2026"), ("hora_inicio", "08:00"), ("data_termino", "27/10/2026"),
-                             ("hora_termino", "17:00")):
-            definir(app, janela.periodo["p1"][campo], valor)
-        janela.salvar()
+        janela.habilitar_reprogramacao("p1")                                                # sem efeito: não há reprogramação em execução
+        assert all(travado(w) for w in janela.periodo["p1"]["widgets"])
+        janela._carregar_documento(fluxo.doc(ate_em_execucao_reprogramada(fluxo)))
         assert all(travado(w) for w in janela.periodo["p1"]["widgets"])                      # salva: só muda pelo Prorrogar
 
     def test_reabrir_mostra_o_p_e_o_botao_no_quadro_certo(self, app, banco, janelas, fluxo, resposta_prorrogar):
-        sm_id = fluxo.ate(EM_EXECUCAO)
+        sm_id = ate_em_execucao_reprogramada(fluxo)
         for hora in ("18:00", "19:00", "20:00"):
-            prorrogar(app, fluxo, sm_id, "25/10/2026", hora)
-        fluxo.alterar(sm_id, **REPROGRAMACAO_1)
-        prorrogar(app, fluxo, sm_id, "27/10/2026", "20:00")
+            prorrogar(app, fluxo, sm_id, "27/10/2026", hora)
         janela = janelas()
         janela._carregar_documento(fluxo.doc(sm_id))
-        assert janela.periodo["p0"]["lbl_prorrogacao"].cget("text") == "P3" and janela.periodo["p1"]["lbl_prorrogacao"].cget("text") == "P1"
+        assert janela.periodo["p1"]["lbl_prorrogacao"].cget("text") == "P3" and janela.periodo["p0"]["lbl_prorrogacao"].cget("text") == ""
         assert janela.periodo["p2"]["lbl_prorrogacao"].cget("text") == "" and visivel(janela.periodo["p1"]["botao_prorrogar"])
         assert not visivel(janela.periodo["p0"]["botao_prorrogar"])
 

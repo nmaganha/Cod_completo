@@ -146,11 +146,10 @@ class TestPdfParaEnvio:
         primeiro, _ = app.doc_lib_pdf_para_envio_sm(fluxo.doc(sm_id), "operador1")
         igual, _ = app.doc_lib_pdf_para_envio_sm(fluxo.doc(sm_id), "operador1")
         assert igual == primeiro
-        fluxo.alterar(sm_id, p1_data_inicio="26/10/2026", p1_hora_inicio="08:00", p1_data_termino="26/10/2026",
-                      p1_hora_termino="17:00", reprogramacoes=1)                                    # reprogramação: nova revisão
+        fluxo.conferir(sm_id, fluxo.conferencia_manual(nome="Ana da Manutencao"))                 # conferência registrada: nova revisão
         novo, _ = app.doc_lib_pdf_para_envio_sm(fluxo.doc(sm_id), "operador1")
         assert novo != primeiro and os.path.isfile(primeiro) and os.path.isfile(novo)
-        assert "26/10/2026" in " ".join("\n".join(p.get_text() for p in pymupdf.open(novo)).split())
+        assert "Ana da Manutencao" in " ".join("\n".join(p.get_text() for p in pymupdf.open(novo)).split())
 
     def test_arquivo_apagado_e_gerado_de_novo(self, app, fluxo):
         sm_id = fluxo.ate(AGUARDA)
@@ -162,8 +161,7 @@ class TestPdfParaEnvio:
     def test_documento_alterado_por_outro_usuario_nao_gera_pdf_orfao(self, app, fluxo, banco):
         sm_id = fluxo.ate(AGUARDA)
         antigo = fluxo.doc(sm_id)
-        fluxo.alterar(sm_id, p1_data_inicio="26/10/2026", p1_hora_inicio="08:00", p1_data_termino="26/10/2026",
-                      p1_hora_termino="17:00", reprogramacoes=1)
+        fluxo.conferir(sm_id, fluxo.conferencia_manual())
         with pytest.raises(app.DocLibConflito):
             app.doc_lib_arquivar_pdf_envio_sm(antigo, "operador1")
         arquivos = [f for _, _, fs in os.walk(str(banco / "doc_lib_arquivo" / "SM" / "Enviados")) for f in fs] \

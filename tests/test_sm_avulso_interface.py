@@ -136,8 +136,10 @@ class TestAberturaEPadroes:
         assert janela.janela.title() == "COG - DOC_LIB. - SM AVULSO"
         assert "Gerar SM Avulso" in janela.btn_gerar.cget("text")
 
-    def test_dica_do_botao_nao_tira_o_efeito_de_hover(self, app, banco, janelas):
+    def test_dica_do_botao_nao_tira_o_efeito_de_hover(self, app, banco, janelas, fluxo):
         janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))                   # só com a SM Aprovada o Habilitar existe
+        janela.btn_inverter.configure(state="normal")
         for botao in (janela.btn_inverter, janela.periodo["p1"]["botao"]):
             assert estado(botao) == "normal"
             fundo, fundo_hover, _ = app.SGA_ESTILOS_BOTAO[botao._doclib_estilo]
@@ -386,10 +388,41 @@ class TestRotulosDaConferencia:
         assert "Conferência Manutenção E uma Conferência Operação" in mensagens.infos[-1][1] and janela.status == AGUARDA
 
 
+def habilitar_visivel(janela, prefixo):
+    botao = janela.periodo[prefixo]["botao"]
+    return botao is not None and bool(botao.winfo_manager())
+
+
+def preencher_reprogramacao(app, janela, prefixo, inicio=("26/10/2026", "09:00"), termino=("26/10/2026", "18:00")):
+    for campo, valor in (("data_inicio", inicio[0]), ("hora_inicio", inicio[1]), ("data_termino", termino[0]),
+                         ("hora_termino", termino[1])):
+        definir(app, janela.periodo[prefixo][campo], valor)
+
+
 class TestReprogramacoes:
-    def test_habilitacao_em_ordem_e_dados_preservados(self, app, banco, janelas):
+    @pytest.mark.parametrize("status, visivel", [(None, False), (EM_ANALISE, False), (AGUARDA, False), (APROVADO, True),
+                                                 (EM_EXECUCAO, False), (CONCLUIDO, False), (CANCELADO, False)])
+    def test_habilitar_so_aparece_com_a_sm_aprovada_para_execucao(self, app, banco, janelas, fluxo, status, visivel):
         janela = janelas()
-        preencher(app, janela)
+        if status == CANCELADO:
+            sm_id = fluxo.ate(EM_EXECUCAO)
+            app.doc_lib_cancelar_sm(sm_id, "operador1", "Cancelada", fluxo.doc(sm_id)["revisao"])
+            janela._carregar_documento(fluxo.doc(sm_id))
+        elif status is not None:
+            janela._carregar_documento(fluxo.doc(fluxo.ate(status)))
+        assert [habilitar_visivel(janela, prefixo) for prefixo in ("p1", "p2", "p3")] == [visivel] * 3
+        assert not habilitar_visivel(janela, "p0")
+
+    def test_em_execucao_so_ha_prorrogacao_nao_reprogramacao(self, app, banco, janelas, fluxo):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(EM_EXECUCAO)))
+        janela.habilitar_reprogramacao("p1")                                           # (mesmo chamando o método, nada acontece)
+        assert janela.reprogramacoes_habilitadas == 0 and all(travado(w) for w in janela.periodo["p1"]["widgets"])
+        assert estado(janela.periodo["p0"]["botao_prorrogar"]) == "normal"
+
+    def test_habilitacao_em_ordem_e_dados_preservados(self, app, banco, janelas, fluxo):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
         p = janela.periodo
         assert estado(p["p1"]["botao"]) == "normal" and estado(p["p2"]["botao"]) == "disabled" \
             and estado(p["p3"]["botao"]) == "disabled"
@@ -398,46 +431,67 @@ class TestReprogramacoes:
         assert janela.reprogramacoes_habilitadas == 0 and travado(p["p3"]["data_inicio"])
         janela.habilitar_reprogramacao("p1")
         assert janela.reprogramacoes_habilitadas == 1 and not travado(p["p1"]["data_inicio"]) and travado(p["p2"]["data_inicio"])
-        assert estado(p["p1"]["botao"]) == "disabled" and p["p1"]["botao"].cget("text") == "Habilitada"
+        assert not habilitar_visivel(janela, "p1") and p["p1"]["botao_prorrogar"].winfo_manager()      # no quadro, o Prorrogar toma o lugar
         assert estado(p["p2"]["botao"]) == "normal" and estado(p["p3"]["botao"]) == "disabled"
         definir(app, p["p1"]["data_inicio"], "26/10/2026")
         janela.habilitar_reprogramacao("p2")
         janela.habilitar_reprogramacao("p3")
         assert janela.reprogramacoes_habilitadas == 3 and all(not travado(p["p3"][c]) for c in ("data_inicio", "hora_termino"))
         assert p["p0"]["data_inicio"].get() == "25/10/2026" and p["p1"]["data_inicio"].get() == "26/10/2026"   # preservados
+        assert p["p1"]["botao"].cget("text") == "Habilitada" and p["p2"]["botao"].cget("text") == "Habilitada"
 
-    def test_reprogramacoes_salvas_e_reabertas(self, app, banco, janelas, mensagens, dialogos):
+    def test_reprogramacao_salva_fica_desabilitada_e_a_mudanca_exige_nova_reprogramacao(self, app, banco, janelas, fluxo, mensagens):
         janela = janelas()
-        preencher(app, janela)
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
+        p = janela.periodo
         janela.habilitar_reprogramacao("p1")
-        for campo, valor in (("data_inicio", "26/10/2026"), ("hora_inicio", "09:00"), ("data_termino", "26/10/2026"),
-                             ("hora_termino", "18:00")):
-            definir(app, janela.periodo["p1"][campo], valor)
+        preencher_reprogramacao(app, janela, "p1")
+        assert not travado(p["p1"]["hora_termino"])                          # antes de salvar ainda se edita
+        janela.salvar()
+        assert not mensagens.avisos and app.doc_lib_carregar_sm(janela.sm_id)["p1_hora_termino"] == "18:00"
+        assert all(travado(w) for w in p["p1"]["widgets"])                   # salva: período desabilitado para edição
+        assert estado(p["p2"]["botao"]) == "normal" and travado(p["p2"]["data_inicio"])
+        janela.habilitar_reprogramacao("p2")                                 # para mudar o período: nova reprogramação
+        assert not travado(p["p2"]["data_inicio"]) and all(travado(w) for w in p["p1"]["widgets"])
+        preencher_reprogramacao(app, janela, "p2", ("27/10/2026", "08:00"), ("27/10/2026", "12:00"))
+        janela.salvar()
+        assert all(travado(w) for w in p["p2"]["widgets"]) and all(travado(w) for w in p["p1"]["widgets"])
+        doc = app.doc_lib_carregar_sm(janela.sm_id)
+        assert (doc["p1_hora_termino"], doc["p2_hora_termino"], doc["reprogramacoes"]) == ("18:00", "12:00", 2)
+
+    def test_reprogramacao_habilitada_e_nao_preenchida_continua_editavel_apos_salvar(self, app, banco, janelas, fluxo, mensagens):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
+        janela.habilitar_reprogramacao("p1")
+        janela.salvar()
+        assert janela.reprogramacoes_habilitadas == 1 and not travado(janela.periodo["p1"]["data_inicio"])
+
+    def test_reprogramacoes_salvas_e_reabertas(self, app, banco, janelas, fluxo, mensagens, dialogos):
+        janela = janelas()
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
+        janela.habilitar_reprogramacao("p1")
+        preencher_reprogramacao(app, janela, "p1")
         janela.habilitar_reprogramacao("p2")
         janela.salvar()
-        assert not mensagens.avisos and janela.status == EM_ANALISE
+        assert not mensagens.avisos and janela.status == APROVADO
         doc = app.doc_lib_carregar_sm(janela.sm_id)
         assert doc["reprogramacoes"] == 2 and doc["p1_hora_termino"] == "18:00" and not doc["p2_data_inicio"]
         outra = janelas()
         outra._carregar_documento(doc)
         assert outra.reprogramacoes_habilitadas == 2 and outra.periodo["p1"]["hora_inicio"].get() == "09:00"
         assert outra.periodo["p0"]["data_inicio"].get() == "25/10/2026"
+        assert all(travado(w) for w in outra.periodo["p1"]["widgets"]) and not travado(outra.periodo["p2"]["data_inicio"])
 
-    def test_reprogramacao_depois_de_gerada_a_sm(self, app, banco, janelas, mensagens, dialogos):
+    def test_reprogramacao_pendente_habilita_salvar_e_nao_deixa_gerar(self, app, banco, janelas, fluxo, mensagens, dialogos):
         janela = janelas()
-        preencher(app, janela)
-        janela.salvar()
-        janela.gerar()
-        assert janela.status == AGUARDA and travado(janela.periodo["p0"]["data_inicio"])
-        assert estado(janela.periodo["p1"]["botao"]) == "normal"             # a reprogramação ainda pode ser habilitada
+        janela._carregar_documento(fluxo.doc(fluxo.ate(APROVADO)))
+        assert travado(janela.periodo["p0"]["data_inicio"])
         janela.habilitar_reprogramacao("p1")
-        for campo, valor in (("data_inicio", "27/10/2026"), ("hora_inicio", "09:00"), ("data_termino", "27/10/2026"),
-                             ("hora_termino", "18:00")):
-            definir(app, janela.periodo["p1"][campo], valor)
+        preencher_reprogramacao(app, janela, "p1", ("27/10/2026", "09:00"), ("27/10/2026", "18:00"))
         janela._atualizar_estado()
         assert estado(janela.btn_salvar) == "normal" and estado(janela.btn_gerar) == "disabled"
         janela.salvar()
-        assert app.doc_lib_carregar_sm(janela.sm_id)["p1_data_inicio"] == "27/10/2026" and janela.status == AGUARDA
+        assert app.doc_lib_carregar_sm(janela.sm_id)["p1_data_inicio"] == "27/10/2026" and janela.status == APROVADO
 
 
 class TestTabelasDeManobras:
