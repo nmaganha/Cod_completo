@@ -1,4 +1,4 @@
-# Código atualizado em 29-10-26 - 2002 - Click_25: (SM_Avulso - e-mail em qualquer status e quem elabora a SM não a confere)
+# Código atualizado em 30-10-26 - Click_26: (Proteção - menu, janelas UG, TR, LT, BARRA, RMT, AERO e UFV e estrutura para receber cada proteção)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -26912,6 +26912,208 @@ def cmd_click25_sm_avulso():
 
 # =======cascate PRIMEIRA PARTE termina aqui
 
+#Click_26
+# ==========cascate PRIMEIRA PARTE inicia aqui ===================================
+# ---------------------------------------------------
+# PROTEÇÃO - LEVANTAMENTO DAS PROTEÇÕES (CLICK_26)
+# UG, TR, LT, BARRA, RMT, AERO e UFV: cada janela lista as funções de proteção do equipamento. Toda proteção
+# aparece como "Em construção" até ser registrada em PROTECAO_CONSTRUIDAS.
+#
+# COMO CONSTRUIR UMA PROTEÇÃO (exemplo: 87G da UG):
+#   1. escreva a função abaixo do bloco "PROTEÇÕES CONSTRUÍDAS", com o decorador @protecao_construida; ele
+#      registra a proteção e a linha dela, na janela do equipamento, passa a mostrar "Disponível" e o botão
+#      "Abrir". A mesma função pode atender mais de uma sigla (empilhe um decorador por sigla, ex.: 50/51 de
+#      RMT, AERO e UFV).
+#   2. a função recebe a área de conteúdo (corpo) da janela da proteção, já com título, rodapé e botão Voltar
+#      prontos, e só precisa montar os campos nela. Botões extras (Salvar, Limpar...) entram no rodapé, à
+#      esquerda do Voltar.
+#
+#       @protecao_construida("UG", "87G")
+#       def protecao_ug_87g(sigla, funcao, corpo, rodape):
+#           Label(corpo, text="Diferencial do gerador", bg=SGA_FUNDO).pack(padx=24, pady=24)
+#
+#   A sigla e a função devem existir em PROTECAO_EQUIPAMENTOS (a lista da janela do equipamento).
+# ---------------------------------------------------
+PROTECAO_SITUACAO_PADRAO = "Em construção"
+PROTECAO_SITUACAO_CONSTRUIDA = "Disponível"
+PROTECAO_COR_EM_CONSTRUCAO = "#CC8400"      # mesmo tom do botão "aviso" do SGA
+PROTECAO_COR_CONSTRUIDA = "#0A7A2E"         # mesmo verde do "Concluído" do SGA
+
+# (sigla, função) -> função construtora da proteção (preenchido pelo decorador @protecao_construida)
+PROTECAO_CONSTRUIDAS = {}
+# (sigla, função) -> janela da proteção aberta no momento (evita abrir duas vezes a mesma proteção)
+_PROTECAO_JANELAS_ABERTAS = {}
+
+# sigla do equipamento -> (nome por extenso, funções de proteção na ordem em que são apresentadas)
+PROTECAO_EQUIPAMENTOS = {
+    "UG": ("Unidade Geradora (UG)",
+           ["12", "21G", "24", "49", "50", "64R", "64s1", "64s2", "67", "81O", "81U", "86", "87G"]),
+    "TR": ("Transformador (TR)",
+           ["26", "49", "50/51", "63", "87", "64R", "64s1", "64s2", "67", "71", "81O", "81U", "86", "87G", "97"]),
+    "LT": ("Linha de Transmissão (LT)",
+           ["21", "27", "50BF", "67", "68", "78", "81O", "81U", "86", "87"]),
+    "BARRA": ("BARRA", ["25", "50BF", "86", "87"]),
+    "RMT": ("RMT", ["50/51", "86", "87"]),
+    "AERO": ("AERO", ["50/51", "86", "87"]),
+    "UFV": ("UFV", ["50/51", "86", "87"]),
+}
+
+
+def protecao_construida(sigla, funcao):
+    """Decorador que registra a função construtora de uma proteção (ver "COMO CONSTRUIR UMA PROTEÇÃO" acima).
+    Pode ser empilhado para a mesma função atender mais de uma sigla."""
+    if sigla not in PROTECAO_EQUIPAMENTOS or funcao not in PROTECAO_EQUIPAMENTOS[sigla][1]:
+        raise ValueError(f"Proteção {funcao} não existe na lista de {sigla} (PROTECAO_EQUIPAMENTOS).")
+    if (sigla, funcao) in PROTECAO_CONSTRUIDAS:
+        raise ValueError(f"A proteção {funcao} de {sigla} já foi registrada.")
+
+    def registrar(construtor):
+        PROTECAO_CONSTRUIDAS[(sigla, funcao)] = construtor
+        return construtor
+    return registrar
+
+
+def abrir_protecao(janela_pai, sigla, funcao):
+    """Abre a janela de uma proteção já construída: título, área de conteúdo (corpo) e rodapé com o botão Voltar
+    ficam prontos aqui; a função registrada com @protecao_construida só monta o conteúdo. Sem construtor
+    registrado, a proteção continua "Em construção"."""
+    construtor = PROTECAO_CONSTRUIDAS.get((sigla, funcao))
+    if construtor is None:
+        messagebox.showinfo(f"Proteção - {sigla} - {funcao}", PROTECAO_SITUACAO_PADRAO, parent=janela_pai)
+        return
+
+    aberta = _PROTECAO_JANELAS_ABERTAS.get((sigla, funcao))
+    if aberta is not None and aberta.winfo_exists():      # já está aberta: só traz para a frente
+        aberta.deiconify()
+        aberta.lift()
+        aberta.focus_force()
+        return
+
+    janela = Toplevel(root)
+    janela.title(f'COG - Proteção - {sigla} - {funcao}')
+    janela.geometry('1000x700')
+    janela.minsize(800, 560)
+    janela.resizable(True, True)
+    janela['bg'] = SGA_FUNDO
+    _PROTECAO_JANELAS_ABERTAS[(sigla, funcao)] = janela
+
+    ui_dialogo(janela, f"{sigla} - Proteção {funcao}", f"Levantamento da proteção {funcao}: "
+                                                      f"{PROTECAO_EQUIPAMENTOS[sigla][0]}")
+    corpo = Frame(janela, bg=SGA_FUNDO)
+    corpo.place(x=0, y=64, relwidth=1.0, relheight=1.0, height=-(64 + 76))
+    rodape = criar_rodape_sga(janela)
+    criar_botao_sga(rodape, "Voltar", janela.destroy, "voltar"
+                    ).place(relx=1.0, x=-24, rely=0.5, anchor="e", width=150, height=42)
+    try:
+        construtor(sigla, funcao, corpo, rodape)
+    except Exception:
+        janela.destroy()                                   # não deixa uma janela pela metade
+        raise
+
+
+def janela_protecao(sigla):
+    """Proteção > UG / TR / LT / BARRA / RMT / AERO / UFV: janela de levantamento das proteções do equipamento,
+    com cada função de proteção e a sua situação ("Em construção" ou "Disponível", com o botão Abrir)."""
+    global current_user
+    if not current_user:
+        messagebox.showwarning("Atenção", "Nenhum usuário está logado. Faça login primeiro.")
+        return
+
+    nome_equipamento, funcoes = PROTECAO_EQUIPAMENTOS[sigla]
+
+    janela = Toplevel(root)
+    janela.title(f'COG - Proteção - {sigla}')
+    janela.geometry('760x720')          # cabe a maior lista (TR, 15 proteções) sem rolagem
+    janela.minsize(640, 480)
+    janela.resizable(True, True)
+    janela['bg'] = SGA_FUNDO
+
+    ui_dialogo(janela, f"{sigla} - Proteção", f"Levantamento das proteções: {nome_equipamento}")
+
+    lista = Frame(janela, bg=SGA_CARD, highlightthickness=1, highlightbackground=SGA_BORDA)
+    lista.place(x=24, y=84, relwidth=1.0, width=-48, relheight=1.0, height=-84 - 76)
+
+    def montar_linha(pai, fundo, cor_faixa, cor_texto, protecao, situacao, fonte_protecao, fonte_situacao,
+                     acao=None):
+        # colunas com largura fixa em pixels: cabeçalho e linhas ficam alinhados qualquer que seja a fonte
+        linha = Frame(pai, bg=fundo)
+        linha.pack(fill=X)
+        linha.grid_columnconfigure(1, minsize=170)
+        linha.grid_columnconfigure(2, weight=1)
+        Frame(linha, bg=cor_faixa, width=5).grid(row=0, column=0, sticky="ns")
+        Label(linha, text=protecao, bg=fundo, fg=cor_texto, font=fonte_protecao, anchor="w"
+              ).grid(row=0, column=1, sticky="w", padx=(14, 0), pady=5)
+        Label(linha, text=situacao, bg=fundo, fg=cor_texto, font=fonte_situacao, anchor="w"
+              ).grid(row=0, column=2, sticky="ew", padx=(0, 14), pady=5)
+        if acao is not None:
+            criar_botao_sga(linha, "Abrir", acao, "primario", fonte=(SGA_FONTE, 9, "bold"), width=8, pady=2
+                            ).grid(row=0, column=3, padx=(0, 14), pady=3)
+        return linha
+
+    # Cabeçalho fixo da lista (não rola junto com as proteções)
+    cabecalho_lista = montar_linha(lista, SGA_AZUL, SGA_AZUL, "white", "Proteção", "Situação",
+                                   (SGA_FONTE, 10, "bold"), (SGA_FONTE, 10, "bold"))
+    cabecalho_lista.place(x=0, y=0, relwidth=1.0, height=36)
+    corpo = Frame(lista, bg=SGA_CARD)
+    corpo.place(x=0, y=36, relwidth=1.0, relheight=1.0, height=-36)
+    inner_lista = criar_area_rolavel(corpo, bg=SGA_CARD)
+
+    for posicao, funcao in enumerate(funcoes):
+        fundo_linha = SGA_CARD if posicao % 2 == 0 else "#F6F8FB"
+        if (sigla, funcao) in PROTECAO_CONSTRUIDAS:
+            montar_linha(inner_lista, fundo_linha, PROTECAO_COR_CONSTRUIDA, SGA_TEXTO, funcao,
+                         PROTECAO_SITUACAO_CONSTRUIDA, (SGA_FONTE, 11, "bold"), (SGA_FONTE, 10, "bold"),
+                         acao=lambda f=funcao: abrir_protecao(janela, sigla, f))
+        else:
+            montar_linha(inner_lista, fundo_linha, PROTECAO_COR_EM_CONSTRUCAO, SGA_TEXTO, funcao,
+                         PROTECAO_SITUACAO_PADRAO, (SGA_FONTE, 11, "bold"), (SGA_FONTE, 10, "italic"))
+        Frame(inner_lista, bg="#E5EAF1", height=1).pack(fill=X)
+
+    # Rodapé: contador de proteções e botão Voltar (mesmo padrão do Doc_Lib.)
+    construidas = sum((sigla, funcao) in PROTECAO_CONSTRUIDAS for funcao in funcoes)
+    rodape = criar_rodape_sga(janela)
+    Label(rodape, text=f"{len(funcoes)} proteção(ões) - {construidas} disponível(is)", bg=SGA_CARD,
+          fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9)).place(x=24, rely=0.5, anchor="w")
+    criar_botao_sga(rodape, "Voltar", janela.destroy, "voltar"
+                    ).place(relx=0.5, rely=0.5, anchor="center", width=150, height=42)
+
+
+# ---------------------------------------------------
+# PROTEÇÕES CONSTRUÍDAS
+# Cada proteção pronta entra aqui, com @protecao_construida (ver "COMO CONSTRUIR UMA PROTEÇÃO" acima).
+# Ainda não há nenhuma: todas aparecem como "Em construção".
+# ---------------------------------------------------
+
+
+def cmd_click26_ug():
+    janela_protecao("UG")
+
+
+def cmd_click26_tr():
+    janela_protecao("TR")
+
+
+def cmd_click26_lt():
+    janela_protecao("LT")
+
+
+def cmd_click26_barra():
+    janela_protecao("BARRA")
+
+
+def cmd_click26_rmt():
+    janela_protecao("RMT")
+
+
+def cmd_click26_aero():
+    janela_protecao("AERO")
+
+
+def cmd_click26_ufv():
+    janela_protecao("UFV")
+
+# =======cascate PRIMEIRA PARTE termina aqui
+
 
 # ---------------------------------------------------
 # FUNÇÕES RELACIONADAS AO LOGIN
@@ -27409,6 +27611,20 @@ fileDOC_LIB.add_separator()
 fileDOC_LIB.add_command(label='Sair', command=root.quit)
 meuMenu.add_cascade(label="DOC_LIB.", menu=fileDOC_LIB)
 # ========cascate SEGUNDA PARTE termina aqui-
+
+# ========cascate Click_26 - SEGUNDA PARTE inicia aqui
+filePROTECAO = Menu(meuMenu, tearoff=0)
+filePROTECAO.add_command(label="UG", command=cmd_click26_ug)
+filePROTECAO.add_command(label="TR", command=cmd_click26_tr)
+filePROTECAO.add_command(label="LT", command=cmd_click26_lt)
+filePROTECAO.add_command(label="BARRA", command=cmd_click26_barra)
+filePROTECAO.add_command(label="RMT", command=cmd_click26_rmt)
+filePROTECAO.add_command(label="AERO", command=cmd_click26_aero)
+filePROTECAO.add_command(label="UFV", command=cmd_click26_ufv)
+filePROTECAO.add_separator()
+filePROTECAO.add_command(label='Sair', command=root.quit)
+meuMenu.add_cascade(label="Proteção.", menu=filePROTECAO)
+# ========cascate SEGUNDA PARTE termina aqui
 
 ADMINMenu = Menu(meuMenu, tearoff=0)
 ADMINMenu.add_command(label="Cadastrar Usuário", command=cmd_click_cadastrar_usuario)
