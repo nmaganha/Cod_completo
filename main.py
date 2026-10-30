@@ -1,4 +1,4 @@
-# Código atualizado em 30-10-26 - Click_26: (Proteção - menu, janelas UG, TR, LT, BARRA, RMT, AERO e UFV e estrutura para receber cada proteção)
+# Código atualizado em 30-10-26 - 0941 - Click_26: (Proteção - menu, janelas UG, TR, LT, BARRA, RMT, AERO e UFV e estrutura para receber cada proteção)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -25864,7 +25864,7 @@ class JanelaSMAvulso:
 
         self.txt_motivo = self._campo_texto(
             "motivo", "4. Motivo", DOC_LIB_LINHAS_MOTIVO_SM,
-            dica=f"Descrever os serviços a ser executado na intervenção.\n(texto livre, no máximo {DOC_LIB_LINHAS_MOTIVO_SM} "
+            dica=f"Descrever o motivo pelo qual a manobra está sendo realizada.\n(texto livre, no máximo {DOC_LIB_LINHAS_MOTIVO_SM} "
                  f"linhas)")
         bloco_rotulo = self.card.grid_slaves(row=self._linha - 2, column=0)[0]
         self.lbl_linhas_motivo = Label(bloco_rotulo, text="", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"))
@@ -25882,21 +25882,14 @@ class JanelaSMAvulso:
         # ---- 6 e 7
         card = self._novo_cartao()
         self._titulo_secao("6. Manobras de Liberação:",
-                           "Até 30 manobras. A data e a hora de cada manobra são controle interno (só nesta tela, não vão para o\n"
-                           "documento impresso) e são preenchidas depois da conferência da SM. A sequência de número maior não pode\n"
-                           "ter data e hora anteriores às de número menor (2A não antes de 1A); com o mesmo número a letra não conta.\n"
-                           "As manobras não podem ser lançadas com mais de 3 horas de antecedência do início programado.\n"
-                           "Depois de salvos os horários e os executantes (item 7), este item fica bloqueado.")
+                           "Limite de 30 linhas para as manobras de liberação. No campo Sequência, colocar apenas o número arábico, as letras serão inseridas automaticamente.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.tab_lib = LinhasManobrasSM(self, quadro, "lib", "Manobras de Liberação")
         self.chk_lib_emergencia = self._opcao_sem_manobras("liberacao", "6")
         self._separador()
         self._titulo_secao("7. Executantes da Liberação:",
-                           "Preenchido depois da conferência da SM, ao lançar os horários das manobras e da liberação. "
-                           "Ao salvar, a SM passa a Em Execução\ne os itens 6 e 7 ficam bloqueados. Com a opção \"Sem necessidade "
-                           "de manobras de normalização\" (item 8), a SM passa direto a Concluído.\n"
-                           "Com a opção \"Manobras executadas em emergência...\" (item 6), este item não é preenchido.")
+                           "Preenchido antes de iniciar as manobras de liberação.")
         self.ent_exec_lib_local = self._campo_entrada_sm("exec_lib_local", "7.1 No local", 70, geral=False)
         self.ent_exec_lib_remoto = self._campo_entrada_sm("exec_lib_remoto", "7.2 Remotamente", 70, geral=False)
 
@@ -25910,10 +25903,7 @@ class JanelaSMAvulso:
         self.btn_inverter.pack(side=RIGHT, ipadx=8, ipady=2)
         DicaBotaoSM(self.btn_inverter, "Gera a normalização a partir da liberação: ordem inversa e ação com o antônimo")
         self._linha_larga(topo, pady=(10, 2))
-        Label(card, text="Até 30 manobras. O botão Inverter Manobras monta a normalização a partir da liberação (ordem "
-                         "inversa e ação com o antônimo operacional); ação sem inversão segura é mantida e marcada para "
-                         "conferência. Depois de gerada, a normalização continua editável. Datas e horas seguem o número da "
-                         "sequência (número maior nunca antes de número menor); com o mesmo número a letra não conta.",
+        Label(card, text="Limite de 30 linhas para as manobras de normalização. No campo Sequência, colocar apenas o número arábico, as letras serão inseridas automaticamente.",
               bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left", wraplength=1050
               ).grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 2))
         self._linha += 1
@@ -25923,10 +25913,7 @@ class JanelaSMAvulso:
         self.chk_nor_sem_manobras = self._opcao_sem_manobras("normalizacao", "8")
         self._separador()
         self._titulo_secao("9. Executantes da Normalização:",
-                           "Preenchido ao lançar os horários das manobras e da normalização. Ao salvar, a SM passa a Concluído "
-                           "(só com todas as manobras\nde liberação e de normalização datadas). Com a opção \"Manobras executadas em "
-                           "emergência...\" (item 6), a SM conclui por aqui, direto de Aprovado para Execução.\n"
-                           "Com a opção \"Sem necessidade de manobras de normalização\" (item 8), este item não é preenchido.")
+                           "Preenchido antes de iniciar as manobras de normalização.")
         self.ent_exec_nor_local = self._campo_entrada_sm("exec_nor_local", "9.1 No local", 70, geral=False)
         self.ent_exec_nor_remoto = self._campo_entrada_sm("exec_nor_remoto", "9.2 Remotamente", 70, geral=False)
 
@@ -25956,14 +25943,8 @@ class JanelaSMAvulso:
         self._alvos["elaborado_data"] = (self.ent_elaborado_data, rot)
 
         self._titulo_secao("12. Conferência:",
-                           "Com até 10 linhas. Pode ser registrada já com a SM salva (Em análise), antes de gerar o documento, ou depois de "
-                           "gerado (Aguarda Conferência);\n"
-                           "registrada a primeira, os dados gerais não podem mais ser alterados. A SM só passa a Aprovado para Execução com "
-                           "pelo menos uma Conferência Manutenção\n"
-                           "(profissional da Manutenção, via fonia) E uma Conferência Operação (profissional autenticado no sistema); só "
-                           "uma delas não aprova.\n"
-                           "Com a SM Aprovada para Execução outras pessoas ainda podem registrar a conferência, até 10 no total. A "
-                           "conferência salva não muda mais.")
+                           "Limite de 10 linhas de conferência, sendo necessário apenas duas conferências (Uma da Manutençao e outra da Operação) "
+                           "para alterar o status para Aprovado para Execução.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.conferencias = LinhasConferenciaSM(self, quadro)
@@ -27623,7 +27604,7 @@ filePROTECAO.add_command(label="AERO", command=cmd_click26_aero)
 filePROTECAO.add_command(label="UFV", command=cmd_click26_ufv)
 filePROTECAO.add_separator()
 filePROTECAO.add_command(label='Sair', command=root.quit)
-meuMenu.add_cascade(label="Proteção.", menu=filePROTECAO)
+meuMenu.add_cascade(label="PROTEÇÃO", menu=filePROTECAO)
 # ========cascate SEGUNDA PARTE termina aqui
 
 ADMINMenu = Menu(meuMenu, tearoff=0)
