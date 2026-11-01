@@ -318,10 +318,12 @@ class TestJanelaComConferenciaEmAnalise:
         assert not travado(janela.ent_exec_lib_local) and travado(janela.ent_exec_nor_local)        # liberação aberta, normalização ainda não
         assert not travado(janela.tab_lib.linhas[0]["data"]) and travado(janela.tab_nor.linhas[0]["data"])
 
-    def test_dica_dos_botoes_explica_quando_ficam_inativos(self, app, banco, janelas):
+    def test_dica_do_item_12_explica_as_conferencias_que_aprovam(self, app, banco, janelas):
+        """A dica do item 12 diz quantas conferências bastam para aprovar. O texto "pode ser registrada já com a SM salva" não está
+        mais na tela: o botão ativo com a SM salva em Em análise é testado nesta classe."""
         from test_sm_avulsa_interface import _todos_os_widgets
         textos = [w.cget("text") for w in _todos_os_widgets(janelas().janela) if w.winfo_class() == "Label"]
-        assert any("Pode ser registrada já com a SM salva (Em análise), antes de gerar o documento" in t for t in textos)
+        assert any("apenas duas conferências (Uma da Manutençao e outra da Operação)" in t for t in textos)
 
 
 # ======================================================================================================================
