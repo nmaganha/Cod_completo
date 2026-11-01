@@ -1,4 +1,4 @@
-"""SM Avulso (Doc_Lib. - Click_25): Encaminhar SM por e-mail (status Aguarda Conferência), lista de contatos Para e Cc, registro dos
+"""SM Avulsa (Doc_Lib. - Click_25): Encaminhar SM por e-mail (status Aguarda Conferência), lista de contatos Para e Cc, registro dos
 envios, PDF anexado, botão da janela e coluna Enviado e-mail do GRID SM."""
 import os
 import sqlite3
@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from test_sm_avulso_interface import definir, dialogos, estado, janelas  # noqa: F401  (fixtures e atalhos da janela da SM)
+from test_sm_avulsa_interface import definir, dialogos, estado, janelas  # noqa: F401  (fixtures e atalhos da janela da SM)
 
 pymupdf = pytest.importorskip("pymupdf")
 

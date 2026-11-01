@@ -1,4 +1,4 @@
-"""SM Avulso: criação e reserva simultâneas por VÁRIOS PROCESSOS (várias estações usando o mesmo banco) sem número duplicado."""
+"""SM Avulsa: criação e reserva simultâneas por VÁRIOS PROCESSOS (várias estações usando o mesmo banco) sem número duplicado."""
 import os
 import subprocess
 import sys

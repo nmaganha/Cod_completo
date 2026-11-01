@@ -1,9 +1,9 @@
-"""SM Avulso (Doc_Lib. - Click_25): botão Prorrogar (término do período em vigor, P1, P2...), no banco, na janela e no PDF."""
+"""SM Avulsa (Doc_Lib. - Click_25): botão Prorrogar (término do período em vigor, P1, P2...), no banco, na janela e no PDF."""
 import sqlite3
 
 import pytest
 
-from test_sm_avulso_interface import definir, dialogos, estado, janelas, travado  # noqa: F401  (fixtures e atalhos da janela da SM)
+from test_sm_avulsa_interface import definir, dialogos, estado, janelas, travado  # noqa: F401  (fixtures e atalhos da janela da SM)
 
 pymupdf = pytest.importorskip("pymupdf")
 

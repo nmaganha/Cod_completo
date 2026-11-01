@@ -1,4 +1,4 @@
-# Código atualizado em 30-10-26 - 0941 - Click_26: (Proteção - menu, janelas UG, TR, LT, BARRA, RMT, AERO e UFV e estrutura para receber cada proteção)
+# Código atualizado em 01-11-26 - 1439 - Click_25: (SM_Avulsa: Adicionar Equipamento e 3.1 Local em lista, Condições de Segurança com Nenhuma/Nenhum, 40 manobras nos itens 6 e 8 e novo nome SM_Avulsa)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -12063,7 +12063,7 @@ def cmd_click24():
 # ---------------------------------------------------
 # Doc_Lib. - BIBLIOTECA DE DOCUMENTOS (CLICK_25)
 # ATEIE - Autorização para Trabalhos em Equipamentos de Interligação Energizados
-# AI - Autorização para Impedimento, MO - Mensagem Operativa e SM_Avulso - Sequência de Manobras
+# AI - Autorização para Impedimento, MO - Mensagem Operativa e SM_Avulsa - Sequência de Manobras
 # ---------------------------------------------------
 
 # Mesmo banco de dados já usado no restante do aplicativo (login, SGA, demais módulos).
@@ -12466,7 +12466,7 @@ def garantir_banco_doc_lib():
 
     _garantir_tabelas_doc_lib_ai(cursor)         # tabelas do AI (Click_25)
     _garantir_tabelas_doc_lib_mo(cursor)         # tabelas da MO (Click_25)
-    _garantir_tabelas_doc_lib_sm(cursor)         # tabelas da SM Avulso (Click_25)
+    _garantir_tabelas_doc_lib_sm(cursor)         # tabelas da SM Avulsa (Click_25)
 
     conexao.commit()
     conexao.close()
@@ -12654,7 +12654,7 @@ def _doc_lib_ultimo_numero(cursor, tipo, ano):
     elif tipo == "MO":                  # a MO também tem a sua numeração (um número por documento)
         cursor.execute("SELECT MAX(sequencia) FROM doclib_mo WHERE ano = ?", (ano,))
         ultimo = max(ultimo, cursor.fetchone()[0] or 0)
-    elif tipo == "SM":                  # a SM Avulso tem a sua numeração (um número por documento)
+    elif tipo == "SM":                  # a SM Avulsa tem a sua numeração (um número por documento)
         cursor.execute("SELECT MAX(sequencia) FROM doclib_sm WHERE ano = ?", (ano,))
         ultimo = max(ultimo, cursor.fetchone()[0] or 0)
     return ultimo
@@ -22347,15 +22347,15 @@ class JanelaMO:
 
 
 # =====================================================================================================================
-# SM AVULSO - SEQUÊNCIA DE MANOBRAS (Doc_Lib. - Click_25)
+# SM AVULSA - SEQUÊNCIA DE MANOBRAS (Doc_Lib. - Click_25)
 # =====================================================================================================================
-# A SM Avulso segue os mesmos conceitos e critérios da MO (salvar, editar, gerar o documento, que passa a ser protegido,
+# A SM Avulsa segue os mesmos conceitos e critérios da MO (salvar, editar, gerar o documento, que passa a ser protegido,
 # cancelamento com justificativa, SM-Reservado, SM-Referência, GRID), com as diferenças do documento:
 #   - cada documento tem UM número (0001/26, crescente e reiniciado a cada ano), mostrado no alto e à direita da janela;
 #   - campos: 1 SM Nº, 2 Período programado (2.1 Programação e 2.2 a 2.4 Reprogramações 1 a 3), 3 Equipamento(s) a impedir
-#     (3 linhas x 6 colunas), 4 Motivo (até 6 linhas), 5 Condições de Segurança (5 campos obrigatórios), 6 Manobras de
+#     (de 1 a 5 linhas x 6 colunas; o impresso mantém 3), 4 Motivo (até 6 linhas), 5 Condições de Segurança (5 campos obrigatórios), 6 Manobras de
 #     Liberação, 7 Executantes, 8 Manobras de Normalização, 9 Executantes, 10 Observações, 11 Elaborado por e 12 Conferência;
-#   - Manobras de Liberação e de Normalização: até 30 linhas cada; a Sequência é um número arábico digitado mais uma letra
+#   - Manobras de Liberação e de Normalização: até 40 linhas cada; a Sequência é um número arábico digitado mais uma letra
 #     calculada (1A, 1B, 2A...); a data e a hora de cada manobra são de controle interno (só na tela, NÃO vão para o PDF) e
 #     seguem o número arábico: número maior nunca antes de número menor, e a letra não conta (2C pode ser anterior a 2A);
 #   - botão "Inverter Manobras": gera a Normalização a partir da Liberação (ordem inversa e ação com o antônimo operacional;
@@ -22363,7 +22363,7 @@ class JanelaMO:
 #   - 12 Conferência (até 10 linhas): conferência MANUAL (profissional da Manutenção, via fonia) e conferência PELO SISTEMA
 #     (profissional autenticado, Operação). A SM só é aprovada com pelo menos UMA de cada modalidade; uma só não aprova.
 # Status da SM, na ordem do fluxo: Em análise (salva, documento ainda não gerado; único status com edição geral), Aguarda
-# Conferência (botão Gerar SM Avulso), Aprovado para Execução (conferência manual + conferência pelo sistema), Em Execução
+# Conferência (botão Gerar SM Avulsa), Aprovado para Execução (conferência manual + conferência pelo sistema), Em Execução
 # (Executantes da Liberação salvos, com todas as manobras de liberação datadas), Concluído (Executantes da Normalização
 # salvos, com todas as manobras de normalização datadas), Cancelado e Reservado.
 # Regras de segurança aplicadas também na camada de persistência (doc_lib_salvar_sm e triggers do SQLite):
@@ -22380,7 +22380,7 @@ DOC_LIB_COR_STATUS[STATUS_SM_AGUARDA_CONFERENCIA] = DOC_LIB_COR_STATUS[STATUS_AT
 DOC_LIB_TRANSICOES_SM = {
     STATUS_ATEIE_RESERVADO: (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_CANCELADO),
     # as conferências podem ser registradas já com a SM salva (Em análise): com as duas primeiras ela vai direto a Aprovado, e o
-    # documento é emitido (Gerar SM Avulso) depois; quem gera o documento antes passa por Aguarda Conferência
+    # documento é emitido (Gerar SM Avulsa) depois; quem gera o documento antes passa por Aguarda Conferência
     STATUS_ATEIE_EM_ANALISE: (STATUS_SM_AGUARDA_CONFERENCIA, STATUS_ATEIE_APROVADO_EXECUCAO, STATUS_ATEIE_CANCELADO),
     STATUS_SM_AGUARDA_CONFERENCIA: (STATUS_ATEIE_APROVADO_EXECUCAO, STATUS_ATEIE_CANCELADO),
     # Aprovado vai direto a Concluído quando uma das duas etapas dispensa manobras (checkbuttons do item 6 ou do item 8)
@@ -22393,7 +22393,7 @@ DOC_LIB_TRANSICOES_SM = {
 DOC_LIB_STATUS_CANCELAVEIS_SM = tuple(origem for origem, destinos in DOC_LIB_TRANSICOES_SM.items()
                                       if STATUS_ATEIE_CANCELADO in destinos)
 DOC_LIB_STATUS_DEFINITIVOS_SM = (STATUS_ATEIE_CONCLUIDO, STATUS_ATEIE_CANCELADO)
-# status em que "Gerar SM Avulso" ainda EMITE o documento (marca emitido): a SM conferida em Em análise pode ser executada antes de o
+# status em que "Gerar SM Avulsa" ainda EMITE o documento (marca emitido): a SM conferida em Em análise pode ser executada antes de o
 # documento ser gerado; Concluída e Cancelada não mudam mais (o PDF só é registrado)
 DOC_LIB_STATUS_EMISSIVEIS_SM = (STATUS_ATEIE_EM_ANALISE, STATUS_ATEIE_APROVADO_EXECUCAO, STATUS_ATEIE_EM_EXECUCAO)
 # o botão SM-Referência vale para qualquer SM, menos a que ainda está Reservada (só tem o número)
@@ -22424,9 +22424,10 @@ EMAIL_SM_TEXTO_CONHECIMENTO = ("Prezados,\n\n"
 # Lista de e-mails da SM na primeira vez em que o banco é preparado; depois disso a lista vale a do banco, que o usuário
 # completa na janela do Encaminhar SM. (nome, e-mail)
 DOC_LIB_CONTATOS_INICIAIS_SM = [("", "nmaganha@alupar.com.br"), ("", "jbarros@alupar.com.br")]
-DOC_LIB_LIMITE_MANOBRAS_SM = 30                    # linhas de cada tabela de manobras (Liberação e Normalização)
+DOC_LIB_LIMITE_MANOBRAS_SM = 40                    # linhas de cada tabela de manobras (Liberação e Normalização)
 DOC_LIB_LIMITE_CONFERENCIAS_SM = 10                # linhas da Conferência
-DOC_LIB_LINHAS_EQUIPAMENTOS_SM = 3                 # linhas da tabela 3 Equipamento(s) a impedir
+DOC_LIB_LINHAS_EQUIPAMENTOS_SM = 3                 # linhas da tabela 3 no documento impresso (as não usadas saem em branco)
+DOC_LIB_LIMITE_EQUIPAMENTOS_SM = 5                 # máximo de linhas da tabela 3 (botão Adicionar Equipamento da janela)
 DOC_LIB_LIMITE_LOCAL_MANOBRA_SM = 6                # caracteres do campo Local das manobras
 DOC_LIB_LIMITE_SEQUENCIA_SM = 99                   # maior número arábico aceito na Sequência
 DOC_LIB_LINHAS_MOTIVO_SM = 6                       # o Motivo comporta no máximo 6 linhas (medidas como no PDF)
@@ -22468,6 +22469,10 @@ _DOC_LIB_DESLIGAMENTOS_SM = [
 DOC_LIB_CARACTERIZACOES_SM = (["Sem desligamento de UG/LT", "Sem desligamento de Aerogerador/RMT/LT"]
                               + [f"Com desligamento {texto}" for texto in _DOC_LIB_DESLIGAMENTOS_SM]
                               + [f"Com risco desligamento {texto}" for texto in _DOC_LIB_DESLIGAMENTOS_SM])
+# 3.1 Local: lista de seleção, gravada exatamente como aparece aqui (a ordem é a da lista)
+DOC_LIB_LOCAIS_SM = [
+    "COG", "UHE MGP", "UHE SJO", "UHE FGO", "PCH QUE", "PCH LAV", "PCH VIE", "CGE PTM", "CGE JDT", "UFV PTM", "EOL VHZ",
+    "EOL SCA", "EOL PTM", "EOL UBA", "EOL GOB", "EOL SAJ", "EOL SRE", "SE MCP", "SE IGU", "SE RSD", "SE SCA", "SE CLA", "SE JDD"]
 # 3.5 Local da Execução dos Serviços: lista de seleção, gravada exatamente como aparece aqui
 DOC_LIB_LOCAIS_EXECUCAO_SM = [
     "COG-P", "COG-R", "UHE MGP", "UHE SJO", "UHE FGO", "PCH LAV", "PCH QUE", "PCH VIE", "CGE PTM", "CGE JDT", "UFV PTM",
@@ -22483,6 +22488,10 @@ DOC_LIB_CONDICOES_SM = [("cond_chaves_abertas", "5.1", "Chaves abertas e bloquea
                         ("cond_loto_com", "5.4.1", "Com bloqueio por LOTO"),
                         ("cond_loto_sem", "5.4.2", "Sem bloqueio por LOTO")]
 DOC_LIB_CAMPOS_CONDICOES_SM = tuple(campo for campo, _, _ in DOC_LIB_CONDICOES_SM)
+# Texto que a janela da SM já traz em cada Condição de Segurança (SM nova ou reservada que está sendo preenchida). O usuário pode
+# editá-lo; o campo continua obrigatório (a validação e o banco não aceitam o campo vazio). 5.3 é masculino: "Nenhum".
+DOC_LIB_PADRAO_CONDICOES_SM = {"cond_chaves_abertas": "Nenhuma", "cond_chaves_fechadas": "Nenhuma", "cond_disjuntores": "Nenhum",
+                               "cond_loto_com": "Nenhuma", "cond_loto_sem": "Nenhuma"}
 DOC_LIB_CAMPOS_EXEC_LIBERACAO_SM = ("exec_lib_local", "exec_lib_remoto")          # 7.1 No local e 7.2 Remotamente
 DOC_LIB_CAMPOS_EXEC_NORMALIZACAO_SM = ("exec_nor_local", "exec_nor_remoto")      # 9.1 No local e 9.2 Remotamente
 # campos de texto do cabeçalho da SM que só mudam na edição geral (status Em análise); o Elaborado por (nome e Ass.) é
@@ -22521,7 +22530,7 @@ def _doc_lib_sem_acento(texto):
 # SEQUÊNCIA DAS MANOBRAS (1A, 1B, 2A...), DURAÇÃO E INVERSÃO DAS MANOBRAS
 # ---------------------------------------------------
 def doc_lib_letra_sequencia_sm(indice):
-    """Letra da ocorrência (0 = A, 1 = B ... 25 = Z, 26 = AA, 27 = AB...): chega a 30 ocorrências de um mesmo número."""
+    """Letra da ocorrência (0 = A, 1 = B ... 25 = Z, 26 = AA, 27 = AB...): chega a 40 ocorrências de um mesmo número."""
     indice += 1
     letras = ""
     while indice > 0:
@@ -22660,11 +22669,65 @@ def doc_lib_inverter_manobras_sm(liberacao):
 # ---------------------------------------------------
 # BANCO DE DADOS DA SM
 # ---------------------------------------------------
+def _doc_lib_ddl_equipamentos_sm(tabela):
+    """CREATE TABLE da tabela 3 (Equipamento(s) a impedir) com o nome informado: ordem de 1 ao máximo de linhas."""
+    return f'''CREATE TABLE {tabela} (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
+                        ordem INTEGER NOT NULL CHECK (ordem BETWEEN 1 AND {DOC_LIB_LIMITE_EQUIPAMENTOS_SM}),
+                        local TEXT,
+                        instalacao TEXT,
+                        equipamento TEXT,
+                        caracterizacao TEXT,
+                        local_execucao TEXT,
+                        tempo_retorno TEXT,
+                        UNIQUE (sm_id, ordem))'''
+
+
+def _doc_lib_ddl_manobras_sm(tabela):
+    """CREATE TABLE das manobras (Liberação e Normalização) com o nome informado: ordem de 1 ao máximo de linhas."""
+    return f'''CREATE TABLE {tabela} (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
+                        tipo TEXT NOT NULL CHECK (tipo IN ('L', 'N')),
+                        ordem INTEGER NOT NULL CHECK (ordem BETWEEN 1 AND {DOC_LIB_LIMITE_MANOBRAS_SM}),
+                        data TEXT,
+                        hora TEXT,
+                        numero INTEGER CHECK (numero IS NULL OR numero BETWEEN 1 AND {DOC_LIB_LIMITE_SEQUENCIA_SM}),
+                        local TEXT CHECK (length(coalesce(local, '')) <= {DOC_LIB_LIMITE_LOCAL_MANOBRA_SM}),
+                        acao TEXT,
+                        conferir INTEGER NOT NULL DEFAULT 0 CHECK (conferir IN (0, 1)),
+                        UNIQUE (sm_id, tipo, ordem))'''
+
+
+def _doc_lib_garantir_tabela_com_limite_sm(cursor, tabela, criar_ddl, limite):
+    """Cria a tabela (se não existir) com o limite de linhas atual no CHECK da coluna ordem. Se ela já existe com um limite
+    MENOR (banco criado por versão anterior; o SQLite não altera um CHECK), é refeita com o limite novo: copia todas as linhas,
+    troca as tabelas e mantém o contador de ids. Tudo na transação aberta pela cópia: se algo falhar, nada é trocado."""
+    existente = cursor.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (tabela,)).fetchone()
+    if existente is None:
+        cursor.execute(criar_ddl(tabela))
+        return
+    limite_atual = re.search(r"ordem\s+BETWEEN\s+1\s+AND\s+(\d+)", existente[0] or "", re.IGNORECASE)
+    if limite_atual is None or int(limite_atual.group(1)) >= limite:
+        return
+    nova = f"{tabela}_nova"
+    colunas = ", ".join(linha[1] for linha in cursor.execute(f"PRAGMA table_info({tabela})").fetchall())
+    contador = cursor.execute("SELECT seq FROM sqlite_sequence WHERE name = ?", (tabela,)).fetchone()
+    cursor.execute(f"DROP TABLE IF EXISTS {nova}")           # sobra de uma tentativa interrompida
+    cursor.execute(criar_ddl(nova))
+    cursor.execute(f"INSERT INTO {nova} ({colunas}) SELECT {colunas} FROM {tabela}")
+    cursor.execute(f"DROP TABLE {tabela}")
+    cursor.execute(f"ALTER TABLE {nova} RENAME TO {tabela}")
+    if contador:
+        cursor.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?", (contador[0], tabela))
+
+
 def _garantir_tabelas_doc_lib_sm(cursor):
-    """Cria as tabelas da SM Avulso (se não existirem). Um documento = uma linha de doclib_sm, com o seu número:
+    """Cria as tabelas da SM Avulsa (se não existirem). Um documento = uma linha de doclib_sm, com o seu número:
       doclib_sm              - a SM inteira (período, motivo, condições, executantes, observações, elaborador, status)
-      doclib_sm_equipamentos - as 3 linhas da tabela 3 (Equipamento(s) a impedir)
-      doclib_sm_manobras     - as manobras de Liberação (tipo L) e de Normalização (tipo N), até 30 de cada
+      doclib_sm_equipamentos - as linhas da tabela 3 (Equipamento(s) a impedir): de 3 a 5, conforme os equipamentos informados
+      doclib_sm_manobras     - as manobras de Liberação (tipo L) e de Normalização (tipo N), até 40 de cada
       doclib_sm_conferencias - as conferências (até 10), com a modalidade (manual ou sistema) gravada de forma explícita
       doclib_sm_historico    - cada mudança de status e cada correção de data/hora de manobra (usuário e momento)
       doclib_sm_transicoes   - as transições de status permitidas (o trigger do banco confere cada UPDATE de status)
@@ -22713,29 +22776,11 @@ def _garantir_tabelas_doc_lib_sm(cursor):
                         reservado_em TEXT,
                         UNIQUE (ano, sequencia),
                         CHECK (status IN ('{STATUS_ATEIE_RESERVADO}', '{STATUS_ATEIE_CANCELADO}') OR ({condicoes_preenchidas})))''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS doclib_sm_equipamentos (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
-                        ordem INTEGER NOT NULL CHECK (ordem BETWEEN 1 AND 3),
-                        local TEXT,
-                        instalacao TEXT,
-                        equipamento TEXT,
-                        caracterizacao TEXT,
-                        local_execucao TEXT,
-                        tempo_retorno TEXT,
-                        UNIQUE (sm_id, ordem))''')
-    cursor.execute(f'''CREATE TABLE IF NOT EXISTS doclib_sm_manobras (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
-                        tipo TEXT NOT NULL CHECK (tipo IN ('L', 'N')),
-                        ordem INTEGER NOT NULL CHECK (ordem BETWEEN 1 AND {DOC_LIB_LIMITE_MANOBRAS_SM}),
-                        data TEXT,
-                        hora TEXT,
-                        numero INTEGER CHECK (numero IS NULL OR numero BETWEEN 1 AND {DOC_LIB_LIMITE_SEQUENCIA_SM}),
-                        local TEXT CHECK (length(coalesce(local, '')) <= {DOC_LIB_LIMITE_LOCAL_MANOBRA_SM}),
-                        acao TEXT,
-                        conferir INTEGER NOT NULL DEFAULT 0 CHECK (conferir IN (0, 1)),
-                        UNIQUE (sm_id, tipo, ordem))''')
+    # os limites de linhas (equipamentos e manobras) ficam no CHECK da coluna ordem: em banco criado por versão anterior, com
+    # limite menor, a tabela é refeita com o limite atual e os dados gravados são mantidos
+    _doc_lib_garantir_tabela_com_limite_sm(cursor, "doclib_sm_equipamentos", _doc_lib_ddl_equipamentos_sm,
+                                           DOC_LIB_LIMITE_EQUIPAMENTOS_SM)
+    _doc_lib_garantir_tabela_com_limite_sm(cursor, "doclib_sm_manobras", _doc_lib_ddl_manobras_sm, DOC_LIB_LIMITE_MANOBRAS_SM)
     cursor.execute(f'''CREATE TABLE IF NOT EXISTS doclib_sm_conferencias (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         sm_id INTEGER NOT NULL REFERENCES doclib_sm(id),
@@ -23122,10 +23167,23 @@ def _doc_lib_texto_multilinha_sm(valor):
     return str(valor or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
+def doc_lib_ajustar_linhas_equipamentos_sm(equipamentos):
+    """Tabela 3 com o número de linhas do documento: no mínimo DOC_LIB_LINHAS_EQUIPAMENTOS_SM (3, as que faltam entram em branco,
+    como no formulário impresso) e no máximo DOC_LIB_LIMITE_EQUIPAMENTOS_SM (5). Linhas totalmente vazias no fim, além das 3
+    primeiras, saem: só imprime 4 ou 5 linhas quem de fato informou 4 ou 5 equipamentos."""
+    linhas = [dict(item) for item in list(equipamentos or [])[:DOC_LIB_LIMITE_EQUIPAMENTOS_SM]]
+    while len(linhas) > DOC_LIB_LINHAS_EQUIPAMENTOS_SM and not any(
+            _doc_lib_txt(linhas[-1].get(campo)) for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM):
+        linhas.pop()
+    while len(linhas) < DOC_LIB_LINHAS_EQUIPAMENTOS_SM:
+        linhas.append({campo: "" for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM})
+    return linhas
+
+
 def doc_lib_normalizar_sm(dados):
     """Devolve uma cópia dos dados no padrão que é validado e gravado: datas dd/mm/aaaa, horas HH:MM, Tempo de Retorno HH:MM,
-    textos sem espaços nas pontas, tabelas de manobras sem as linhas totalmente vazias, listas completas de equipamentos
-    (3 linhas) e as reprogramações habilitadas (as que têm dados e a anterior a elas). Valores inválidos ficam como foram
+    textos sem espaços nas pontas, tabelas de manobras sem as linhas totalmente vazias, listas de equipamentos com 3 a 5 linhas
+    (ver doc_lib_ajustar_linhas_equipamentos_sm) e as reprogramações habilitadas (as que têm dados e a anterior a elas). Valores inválidos ficam como foram
     digitados (a validação os aponta). As opções do item 6 e do item 8 (etapa sem manobras) prevalecem sobre o que estiver digitado
     na tabela: ela vira uma só linha com o dizer da opção e os executantes da etapa saem."""
     novo = {chave: valor for chave, valor in dados.items()}
@@ -23139,17 +23197,16 @@ def doc_lib_normalizar_sm(dados):
             novo[chave] = normalizador(novo[chave]) or novo[chave]
     novo["elaborado_data"] = doc_lib_normalizar_data(novo["elaborado_data"]) or novo["elaborado_data"]
     equipamentos = []
-    for item in list(dados.get("equipamentos") or [])[:DOC_LIB_LINHAS_EQUIPAMENTOS_SM]:
+    for item in list(dados.get("equipamentos") or [])[:DOC_LIB_LIMITE_EQUIPAMENTOS_SM]:
         item = {campo: _doc_lib_txt(item.get(campo)) for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM}
         for campo in DOC_LIB_CAMPOS_CAIXA_ALTA_EQUIPAMENTO_SM:           # 3.1, 3.2 e 3.3: sempre em caixa alta
             item[campo] = " ".join(item[campo].upper().split())
+        item["local"] = _doc_lib_opcao_da_lista_sm(item["local"], DOC_LIB_LOCAIS_SM)
         item["caracterizacao"] = _doc_lib_opcao_da_lista_sm(item["caracterizacao"], DOC_LIB_CARACTERIZACOES_SM)
         item["local_execucao"] = _doc_lib_opcao_da_lista_sm(item["local_execucao"], DOC_LIB_LOCAIS_EXECUCAO_SM)
         item["tempo_retorno"] = doc_lib_normalizar_tempo_retorno_sm(item["tempo_retorno"])
         equipamentos.append(item)
-    while len(equipamentos) < DOC_LIB_LINHAS_EQUIPAMENTOS_SM:
-        equipamentos.append({campo: "" for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM})
-    novo["equipamentos"] = equipamentos
+    novo["equipamentos"] = doc_lib_ajustar_linhas_equipamentos_sm(equipamentos)
     for _, chave, _, _ in _DOC_LIB_TABELAS_MANOBRAS_SM:
         linhas = []
         for item in dados.get(chave) or []:
@@ -23274,18 +23331,25 @@ def doc_lib_validar_sm(dados, atual=None):
 
     # ---- 3 a 5: campos da edição geral
     if geral:
-        for linha in range(1, DOC_LIB_LINHAS_EQUIPAMENTOS_SM + 1):
-            item = dados["equipamentos"][linha - 1]
+        equipamentos = dados["equipamentos"][:DOC_LIB_LIMITE_EQUIPAMENTOS_SM]
+        if len(dados["equipamentos"]) > DOC_LIB_LIMITE_EQUIPAMENTOS_SM:
+            erro("equip:%d:local" % (DOC_LIB_LIMITE_EQUIPAMENTOS_SM + 1),
+                 f"Equipamento(s) a impedir: no máximo {DOC_LIB_LIMITE_EQUIPAMENTOS_SM} equipamentos "
+                 f"(a tabela tem {len(dados['equipamentos'])}).")
+        for linha, item in enumerate(equipamentos, start=1):
             if linha > 1 and all(vazio(item.get(campo)) for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM):
-                continue                                        # as linhas 2 e 3 são opcionais, mas só por inteiro
+                continue                                        # da 2ª linha em diante são opcionais, mas só por inteiro
             for campo, numero, titulo in DOC_LIB_COLUNAS_EQUIPAMENTO_SM:
                 chave = f"equip:{linha}:{campo}"
                 descricao = f"Equipamento(s) a impedir, linha {linha}, {numero} {titulo}"
                 if vazio(item.get(campo)):
                     erro(chave, f"{descricao}: " + ("selecione Indisponível ou informe o tempo (HH:MM)."
                                                     if campo == "tempo_retorno" else
-                                                    "selecione uma opção da lista." if campo in ("caracterizacao", "local_execucao")
+                                                    "selecione uma opção da lista."
+                                                    if campo in ("local", "caracterizacao", "local_execucao")
                                                     else "preencha o campo."))
+                elif campo == "local" and item[campo] not in DOC_LIB_LOCAIS_SM:
+                    erro(chave, f"{descricao}: selecione uma das opções da lista.")
                 elif campo == "caracterizacao" and item[campo] not in DOC_LIB_CARACTERIZACOES_SM:
                     erro(chave, f"{descricao}: selecione uma das opções da lista.")
                 elif campo == "local_execucao" and item[campo] not in DOC_LIB_LOCAIS_EXECUCAO_SM:
@@ -23414,7 +23478,7 @@ def doc_lib_grupos_editaveis_sm(status, doc=None):
     """Grupos de campos que o status deixa alterar, considerando as opções do item 6 e do item 8, as conferências e a emissão
     do documento. Em análise (documento ainda não gerado) aceita também a conferência, mas só até a primeira ser registrada: dali
     em diante os dados gerais ficam protegidos. Com a SM Aprovada os horários e os executantes são lançados gerado o documento ou
-    não: a emissão (Gerar SM Avulso) não é pré-requisito da execução. Com a opção de emergência
+    não: a emissão (Gerar SM Avulsa) não é pré-requisito da execução. Com a opção de emergência
     (liberação dispensada) a SM Aprovada para Execução recebe os horários e os executantes da NORMALIZAÇÃO, no lugar dos da
     liberação, e conclui por aí; com a opção sem normalização ela recebe os da liberação e conclui por aí."""
     doc = doc or {}
@@ -23451,8 +23515,7 @@ def _doc_lib_grupos_sm(doc):
         return pares if any(pares_ != ("", "") for pares_ in pares) else ()        # nada informado = vazio, qualquer que seja o nº de linhas
 
     equipamentos = [tuple(_doc_lib_txt(item.get(campo)) for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM)
-                    for item in doc.get("equipamentos") or []]
-    equipamentos += [("",) * len(DOC_LIB_COLUNAS_EQUIPAMENTO_SM)] * (DOC_LIB_LINHAS_EQUIPAMENTOS_SM - len(equipamentos))
+                    for item in doc_lib_ajustar_linhas_equipamentos_sm(doc.get("equipamentos"))]      # de 3 a 5 linhas
     return {"geral": (tuple(txt(campo) for campo in DOC_LIB_CAMPOS_GERAIS_SM), tuple(equipamentos),
                       estrutura("liberacao"), estrutura("normalizacao"),
                       tuple(1 if doc.get(campo) else 0 for campo in DOC_LIB_CAMPOS_FLAGS_SM)),
@@ -23528,7 +23591,7 @@ def doc_lib_pendencias_transicao_sm(doc, destino):
 
 
 def doc_lib_erros_geracao_sm(doc):
-    """Erros que impedem gerar o documento (Gerar SM Avulso) de uma SM salva: validação completa e nenhuma manobra de
+    """Erros que impedem gerar o documento (Gerar SM Avulsa) de uma SM salva: validação completa e nenhuma manobra de
     normalização ainda marcada para conferência manual pelo botão Inverter Manobras (a ação foi mantida porque a inversão
     não era segura e, depois da geração, o texto não pode mais ser corrigido)."""
     erros = doc_lib_validar_sm(doc, doc)
@@ -23555,7 +23618,7 @@ _DOC_LIB_MSG_CONFLITO_SM = ("Esta SM foi alterada por outro usuário depois de a
 
 
 def _doc_lib_gravar_filhos_sm(cursor, sm_id, dados):
-    """Grava as 3 linhas de equipamentos e as manobras (edição geral: as tabelas são refeitas por inteiro)."""
+    """Grava as linhas de equipamentos (de 3 a 5) e as manobras (edição geral: as tabelas são refeitas por inteiro)."""
     cursor.execute("DELETE FROM doclib_sm_equipamentos WHERE sm_id = ?", (sm_id,))
     for ordem, item in enumerate(dados["equipamentos"], start=1):
         cursor.execute("INSERT INTO doclib_sm_equipamentos (sm_id, ordem, local, instalacao, equipamento, caracterizacao, "
@@ -24219,9 +24282,8 @@ def doc_lib_gerar_pdf_sm(doc, caminho, gerado_por=""):
         for indice, linha in enumerate(linhas):
             pdf.text(x + (largura - pdf.get_string_width(linha)) / 2.0, topo + indice * 3.6, linha)
     estado["y"] += ALTURA_CABECALHO
-    equipamentos = list(doc.get("equipamentos") or [])
-    equipamentos += [{}] * (DOC_LIB_LINHAS_EQUIPAMENTOS_SM - len(equipamentos))
-    for item in equipamentos:
+    # sempre 3 linhas, como no formulário (as não usadas ficam em branco); 4 ou 5 só quando foram informados 4 ou 5 equipamentos
+    for item in doc_lib_ajustar_linhas_equipamentos_sm(doc.get("equipamentos")):
         celulas = [linhas_de(str(item.get(campo) or "").upper() if campo in DOC_LIB_CAMPOS_CAIXA_ALTA_EQUIPAMENTO_SM
                              else item.get(campo), largura - 2.0, 8.5)
                    for (campo, _, _), largura in zip(DOC_LIB_COLUNAS_EQUIPAMENTO_SM, larguras)]
@@ -25140,7 +25202,7 @@ class JanelaListaSM(JanelaListaAteie):
 
     @staticmethod
     def _criar_documento():
-        return JanelaSMAvulso()
+        return JanelaSMAvulsa()
 
     @staticmethod
     def _listar():
@@ -25180,7 +25242,7 @@ class DicaBotaoSM(ToolTipSGA):
 
 
 class LinhasManobrasSM:
-    """Tabela de manobras (Liberação ou Normalização) da janela da SM, com de 1 a 30 linhas: mostra só as linhas necessárias
+    """Tabela de manobras (Liberação ou Normalização) da janela da SM, com de 1 a 40 linhas (DOC_LIB_LIMITE_MANOBRAS_SM): mostra só as linhas necessárias
     e o botão Adicionar manobra até o limite. Cada linha tem:
       - Data e hora da manobra: controle interno do COG (só na tela, NÃO vai para o PDF), preenchida depois da conferência;
         número arábico maior não pode ter data e hora anteriores às de número menor (a letra não conta);
@@ -25193,7 +25255,7 @@ class LinhasManobrasSM:
     COLUNAS = (("Data e hora (controle interno)", 252), ("Sequência", 96), ("Local", 92), ("Ação", 120), ("", 196))
 
     def __init__(self, janela, pai, prefixo, nome, limite=DOC_LIB_LIMITE_MANOBRAS_SM):
-        self.janela = janela              # JanelaSMAvulso (calendário, marcas de erro e rolagem)
+        self.janela = janela              # JanelaSMAvulsa (calendário, marcas de erro e rolagem)
         self.prefixo = prefixo            # "lib" ou "nor": prefixo das chaves de erro (lib:3:acao)
         self.nome = nome
         self.limite = limite
@@ -25525,7 +25587,7 @@ class LinhasConferenciaSM:
             primeira = linha["area"] if modalidade == DOC_LIB_MODALIDADE_SISTEMA_SM else linha["nome"]
             primeira.focus_set()
             self.janela.rolar_ate(primeira)
-            self.janela._atualizar_estado()                 # Salvar habilita e Gerar SM Avulso desabilita na hora
+            self.janela._atualizar_estado()                 # Salvar habilita e Gerar SM Avulsa desabilita na hora
         return linha
 
     def adicionar_linha(self, modalidade, valores, registrada):
@@ -25612,8 +25674,8 @@ class LinhasConferenciaSM:
         self.lbl_contador.configure(text=f"{len(self.linhas)} de {self.limite} conferências")
 
 
-class JanelaSMAvulso:
-    """Janela da SM Avulso (Doc_Lib. - Click_25): cadastro, edição, salvamento e geração da Sequência de Manobras. Segue o
+class JanelaSMAvulsa:
+    """Janela da SM Avulsa (Doc_Lib. - Click_25): cadastro, edição, salvamento e geração da Sequência de Manobras. Segue o
     mesmo conceito da janela da MO (JanelaMO), com os campos da SM: 1 SM Nº (no alto e à direita, automático), 2 Período
     programado (programação e três reprogramações, habilitadas em ordem), 3 Equipamento(s) a impedir, 4 Motivo, 5 Condições
     de Segurança, 6 Manobras de Liberação, 7 Executantes, 8 Manobras de Normalização (com o botão Inverter Manobras),
@@ -25628,8 +25690,8 @@ class JanelaSMAvulso:
     reprogramações (até a conclusão), as conferências (Aguarda Conferência), a data e hora das manobras e os executantes.
 
     Estados dos botões:
-      - janela nova ........ Voltar e Salvar habilitados; Editar e Gerar SM Avulso desabilitados
-      - depois de Salvar ... campos travados; Editar e Gerar SM Avulso habilitados; Salvar desabilitado
+      - janela nova ........ Voltar e Salvar habilitados; Editar e Gerar SM Avulsa desabilitados
+      - depois de Salvar ... campos travados; Editar e Gerar SM Avulsa habilitados; Salvar desabilitado
       - depois de Editar ... campos liberados; Gerar desabilitado até um novo Salvar
       - depois de Gerar .... SM emitida (Aguarda Conferência): só os campos de acompanhamento do status podem ser preenchidos
       - SM-Referência ...... habilitado em qualquer SM já salva, menos a Reservada: abre uma SM nova com os dados da aberta
@@ -25700,7 +25762,7 @@ class JanelaSMAvulso:
         self.txt_condicoes = {}       # campo de condição -> Text
 
         self.janela = Toplevel(root)
-        self.janela.title('COG - DOC_LIB. - SM AVULSO')
+        self.janela.title('COG - DOC_LIB. - SM AVULSA')
         self.janela.geometry('1280x860')
         self.janela.minsize(1180, 640)        # largura mínima: cabem os 8 botões do rodapé
         self.janela.resizable(True, True)
@@ -25716,6 +25778,8 @@ class JanelaSMAvulso:
         self._montar_rodape()
         doc_lib_definir_entrada(self.ent_elaborado_area, DOC_LIB_AREA_ELABORADOR_SM)
         doc_lib_definir_entrada(self.ent_elaborado_data, datetime.now().strftime("%d/%m/%Y"))
+        for campo, texto in self.txt_condicoes.items():          # 5 Condições de Segurança: Nenhuma (5.3: Nenhum), editáveis
+            self._definir_texto(texto, DOC_LIB_PADRAO_CONDICOES_SM[campo])
         if referencia:
             self._aplicar_referencia(referencia)
         self._aplicar_bloqueios()
@@ -25735,7 +25799,7 @@ class JanelaSMAvulso:
 
     def _ao_alterar_tratativas(self):
         """Depois da emissão (ou numa SM reservada), alterar um campo de acompanhamento atualiza os botões na hora (Salvar
-        habilita e Gerar SM Avulso desabilita até salvar)."""
+        habilita e Gerar SM Avulsa desabilita até salvar)."""
         if self.emitido or self.reservado:
             try:
                 self._atualizar_estado()
@@ -25745,7 +25809,7 @@ class JanelaSMAvulso:
     # ------------------------------------------------------------------ montagem da janela
 
     def _montar_cabecalho(self):
-        faixa = ui_dialogo(self.janela, "SM Avulso - Sequência de Manobras.", "Sequência de Manobras do COG-Alupar")
+        faixa = ui_dialogo(self.janela, "SM Avulsa - Sequência de Manobras.", "Sequência de Manobras do COG-Alupar")
         doc_lib_criar_botao(faixa, "GRID SM", self.abrir_salvo, "neutro"
                             ).place(relx=1.0, x=-24, rely=0.5, anchor="e", width=170, height=34)
         self.lbl_status = Label(faixa, text="", bg=SGA_AZUL, fg="#B8CCE8", font=(SGA_FONTE, 9, "bold"))
@@ -25857,8 +25921,9 @@ class JanelaSMAvulso:
         self._separador()
 
         self._titulo_secao("3. Equipamento(s) a impedir:",
-                           "Três linhas. A primeira é obrigatória; as outras, se usadas, devem ser preenchidas por inteiro. "
-                           "3.1 a 3.3 em caixa alta; 3.4 e 3.5 por seleção na lista; 3.6 Indisponível ou Tempo de Retorno em HH:MM.")
+                           f"Uma linha; Adicionar Equipamento inclui outras (até {DOC_LIB_LIMITE_EQUIPAMENTOS_SM}). A primeira é obrigatória; "
+                           f"as outras, se usadas, devem ser preenchidas por inteiro. 3.1, 3.4 e 3.5 por seleção na lista; "
+                           f"3.2 e 3.3 em caixa alta.")
         self._montar_equipamentos()
         self._separador()
 
@@ -25873,7 +25938,8 @@ class JanelaSMAvulso:
         self._atualizar_contador_motivo()
 
         self._titulo_secao("5. Condições de Segurança:",
-                           "Os cinco campos são obrigatórios: se não houver, escreva Nenhuma (ou Nenhum).")
+                           "Os cinco campos são obrigatórios e já vêm preenchidos com Nenhuma (5.3: Nenhum). "
+                           "Edite o texto se houver condição a informar.")
         for campo, numero, titulo in DOC_LIB_CONDICOES_SM:
             if campo == "cond_loto_com":
                 self._titulo_secao("5.4. Outras condições:")
@@ -25882,7 +25948,7 @@ class JanelaSMAvulso:
         # ---- 6 e 7
         card = self._novo_cartao()
         self._titulo_secao("6. Manobras de Liberação:",
-                           "Limite de 30 linhas para as manobras de liberação. No campo Sequência, colocar apenas o número arábico, as letras serão inseridas automaticamente.")
+                           f"Limite de {DOC_LIB_LIMITE_MANOBRAS_SM} linhas para as manobras de liberação. No campo Sequência, colocar apenas o número arábico, as letras serão inseridas automaticamente.")
         quadro = Frame(card, bg=SGA_CARD)
         self._linha_larga(quadro)
         self.tab_lib = LinhasManobrasSM(self, quadro, "lib", "Manobras de Liberação")
@@ -25903,7 +25969,7 @@ class JanelaSMAvulso:
         self.btn_inverter.pack(side=RIGHT, ipadx=8, ipady=2)
         DicaBotaoSM(self.btn_inverter, "Gera a normalização a partir da liberação: ordem inversa e ação com o antônimo")
         self._linha_larga(topo, pady=(10, 2))
-        Label(card, text="Limite de 30 linhas para as manobras de normalização. No campo Sequência, colocar apenas o número arábico, as letras serão inseridas automaticamente.",
+        Label(card, text=f"Limite de {DOC_LIB_LIMITE_MANOBRAS_SM} linhas para as manobras de normalização. No campo Sequência, colocar apenas o número arábico, as letras serão inseridas automaticamente.",
               bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9), anchor="w", justify="left", wraplength=1050
               ).grid(row=self._linha, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 2))
         self._linha += 1
@@ -26002,10 +26068,13 @@ class JanelaSMAvulso:
         self.periodo[prefixo] = dados
 
     def _montar_equipamentos(self):
-        """Tabela 3: 3 linhas x 6 colunas. 3.1 Local, 3.2 Instalação e 3.3 Equipamento são texto livre sempre em caixa alta;
-        3.4 Caracterização e 3.5 Local da Execução dos Serviços são listas de seleção; 3.6 Tempo de Retorno à Operação segue o
-        AI: a opção Indisponível ou o tempo em HH:MM."""
+        """Tabela 3: 6 colunas e de 1 a 5 linhas. A janela mostra só a 1ª linha; o botão Adicionar Equipamento mostra a seguinte,
+        até DOC_LIB_LIMITE_EQUIPAMENTOS_SM (as 5 linhas são montadas de uma vez e as demais ficam ocultas, por isso os índices da
+        tabela não mudam). 3.1 Local, 3.4 Caracterização e 3.5 Local da Execução dos Serviços são listas de seleção; 3.2 Instalação
+        e 3.3 Equipamento são texto livre sempre em caixa alta; 3.6 Tempo de Retorno à Operação segue o AI: a opção Indisponível ou
+        o tempo em HH:MM. O documento impresso mantém 3 linhas (as não usadas ficam em branco)."""
         quadro = Frame(self.card, bg=SGA_CARD)
+        self.quadro_equip = quadro
         minimos = (100, 120, 170, 290, 190, 150)         # largura mínima (px) de cada coluna
         pesos = (1, 1, 2, 3, 2, 0)
         quebras = (150, 150, 230, 280, 220, 140)           # largura (px) em que cada cabeçalho quebra de linha
@@ -26014,8 +26083,10 @@ class JanelaSMAvulso:
             quadro.grid_columnconfigure(coluna, weight=peso, minsize=minimo)
             Label(quadro, text=f"{numero} {titulo}", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9, "bold"),
                   anchor="w", justify="left", wraplength=quebra).grid(row=0, column=coluna, sticky="w", padx=4)
-        listas = {"caracterizacao": DOC_LIB_CARACTERIZACOES_SM, "local_execucao": DOC_LIB_LOCAIS_EXECUCAO_SM}
-        for linha in range(1, DOC_LIB_LINHAS_EQUIPAMENTOS_SM + 1):
+        listas = {"local": DOC_LIB_LOCAIS_SM, "caracterizacao": DOC_LIB_CARACTERIZACOES_SM,
+                  "local_execucao": DOC_LIB_LOCAIS_EXECUCAO_SM}
+        self.celulas_equip = []            # widgets de cada linha (para ocultar e mostrar a linha inteira)
+        for linha in range(1, DOC_LIB_LIMITE_EQUIPAMENTOS_SM + 1):
             campos = {}
             self.tempo_modo.append(StringVar(value=""))          # "indisponivel", "tempo" ou "" (nada escolhido)
             for coluna, (campo, numero, titulo) in enumerate(DOC_LIB_COLUNAS_EQUIPAMENTO_SM):
@@ -26036,7 +26107,53 @@ class JanelaSMAvulso:
                 campos[campo] = widget
                 self._alvos[f"equip:{linha}:{campo}"] = (widget, None)
             self.equip.append(campos)
+            self.celulas_equip.append(quadro.grid_slaves(row=linha))
+        barra = Frame(quadro, bg=SGA_CARD)
+        barra.grid(row=DOC_LIB_LIMITE_EQUIPAMENTOS_SM + 1, column=0, columnspan=len(DOC_LIB_COLUNAS_EQUIPAMENTO_SM), sticky="w",
+                   padx=4, pady=(6, 2))
+        self.btn_adicionar_equip = doc_lib_criar_botao(barra, "Adicionar Equipamento", self.adicionar_equipamento, "primario",
+                                                       fonte=(SGA_FONTE, 9, "bold"))
+        self.btn_adicionar_equip.pack(side=LEFT, ipadx=6)
+        self.lbl_contador_equip = Label(barra, text="", bg=SGA_CARD, fg=SGA_TEXTO_SUAVE, font=(SGA_FONTE, 9))
+        self.lbl_contador_equip.pack(side=LEFT, padx=10)
+        self.equip_visiveis = DOC_LIB_LIMITE_EQUIPAMENTOS_SM
+        self._mostrar_linhas_equip(1)
         self._linha_larga(quadro)
+
+    def _mostrar_linhas_equip(self, quantas):
+        """Mostra as primeiras 'quantas' linhas da tabela 3 (de 1 ao limite) e oculta as demais, sem apagar o que elas contêm."""
+        quantas = max(1, min(DOC_LIB_LIMITE_EQUIPAMENTOS_SM, int(quantas)))
+        for indice, celulas in enumerate(self.celulas_equip, start=1):
+            for celula in celulas:
+                if indice <= quantas:
+                    celula.grid()                    # volta ao lugar de antes (grid_remove guarda a posição)
+                else:
+                    celula.grid_remove()
+        self.equip_visiveis = quantas
+        self.lbl_contador_equip.configure(text=f"{quantas} de {DOC_LIB_LIMITE_EQUIPAMENTOS_SM} equipamentos")
+        self._atualizar_botao_equip()
+
+    def _atualizar_botao_equip(self):
+        """Adicionar Equipamento: só na edição geral e enquanto a tabela tem menos de 5 linhas."""
+        doc_lib_estado_botao(self.btn_adicionar_equip,
+                             "geral" in self._grupos_editaveis() and self.equip_visiveis < DOC_LIB_LIMITE_EQUIPAMENTOS_SM)
+
+    def adicionar_equipamento(self):
+        """Botão Adicionar Equipamento: mostra a próxima linha da tabela 3 (até 5) e leva o cursor ao 3.1 Local dela."""
+        if "geral" not in self._grupos_editaveis() or self.equip_visiveis >= DOC_LIB_LIMITE_EQUIPAMENTOS_SM:
+            return
+        self._mostrar_linhas_equip(self.equip_visiveis + 1)
+        novo = self.equip[self.equip_visiveis - 1]["local"]
+        self.rolar_ate(novo)
+        novo.focus_set()
+
+    def _ajustar_linhas_equip(self, equipamentos):
+        """Depois de carregar equipamentos na tabela: mostra até a última linha preenchida (no mínimo a 1ª)."""
+        ultima = 0
+        for indice, item in enumerate(equipamentos or [], start=1):
+            if any(_doc_lib_txt(item.get(campo)) for campo, _, _ in DOC_LIB_COLUNAS_EQUIPAMENTO_SM):
+                ultima = indice
+        self._mostrar_linhas_equip(max(1, ultima))
 
     def _montar_tempo_retorno(self, quadro, linha, coluna):
         """3.6 de uma linha, como o campo 6 do AI: a opção Indisponível ou a opção do tempo com o campo HH:MM. Devolve o campo do
@@ -26114,7 +26231,7 @@ class JanelaSMAvulso:
         self.btn_voltar = doc_lib_criar_botao(rodape, "Voltar", self.voltar, "voltar")
         self.btn_salvar = doc_lib_criar_botao(rodape, "Salvar", self.salvar, "sucesso")
         self.btn_editar = doc_lib_criar_botao(rodape, "Editar", self.editar, "aviso")
-        self.btn_gerar = doc_lib_criar_botao(rodape, "Gerar SM Avulso", self.gerar, "primario")
+        self.btn_gerar = doc_lib_criar_botao(rodape, "Gerar SM Avulsa", self.gerar, "primario")
         self.btn_reservar = doc_lib_criar_botao(rodape, "SM-Reservado", self.reservar, "aviso")
         self.btn_cancelar = doc_lib_criar_botao(rodape, "Cancelar SM", self.cancelar_sm, "perigo")
         self.btn_referencia = doc_lib_criar_botao(rodape, "SM-Referência", self.referencia, "primario")
@@ -26275,6 +26392,7 @@ class JanelaSMAvulso:
             doc_lib_bloquear_widget(widget, not geral)
         for indice in range(len(self.equip)):
             self._ajustar_tempo(indice)
+        self._atualizar_botao_equip()
         self.tab_lib.travar(estrutura=not geral, datas="datas_lib" not in grupos)
         self.tab_nor.travar(estrutura=not geral, datas="datas_nor" not in grupos)
         sem_lib, sem_nor = self._opcoes["liberacao"].get(), self._opcoes["normalizacao"].get()
@@ -26332,6 +26450,9 @@ class JanelaSMAvulso:
     def _alvo_da_chave(self, chave):
         """(widget, rótulo) do campo identificado pela chave devolvida pela validação ('lib:2:acao', 'conf:1:nome'...)."""
         if chave in self._alvos:
+            partes = chave.split(":")
+            if partes[0] == "equip" and int(partes[1]) > self.equip_visiveis:
+                self._mostrar_linhas_equip(int(partes[1]))         # linha oculta com pendência: passa a aparecer
             return self._alvos[chave]
         partes = chave.split(":")
         if len(partes) == 3 and partes[1].isdigit():
@@ -26387,11 +26508,12 @@ class JanelaSMAvulso:
             item = (doc.get("equipamentos") or [])[indice] if indice < len(doc.get("equipamentos") or []) else {}
             for campo in linha:
                 self._equip_definir(indice, campo, item.get(campo))
+        self._ajustar_linhas_equip(doc.get("equipamentos"))
         self._definir_texto(self.txt_motivo, doc.get("motivo") or "")
         self._definir_texto(self.txt_observacoes, doc.get("observacoes") or "")
-        for campo, texto in self.txt_condicoes.items():
-            self._definir_texto(texto, doc.get(campo) or "")
         reservada = doc_lib_documento_reservado_sm(doc)
+        for campo, texto in self.txt_condicoes.items():          # SM reservada em preenchimento: já vem com Nenhuma/Nenhum
+            self._definir_texto(texto, doc.get(campo) or (DOC_LIB_PADRAO_CONDICOES_SM[campo] if reservada else ""))
         doc_lib_definir_entrada(self.ent_elaborado_area, doc.get("elaborado_area") or (DOC_LIB_AREA_ELABORADOR_SM if reservada else ""))
         doc_lib_definir_entrada(self.ent_elaborado_data, doc.get("elaborado_data") or
                                 (datetime.now().strftime("%d/%m/%Y") if reservada else ""))
@@ -26421,10 +26543,11 @@ class JanelaSMAvulso:
             item = referencia["equipamentos"][indice] if indice < len(referencia["equipamentos"]) else {}
             for campo in linha:
                 self._equip_definir(indice, campo, item.get(campo))
+        self._ajustar_linhas_equip(referencia["equipamentos"])
         self._definir_texto(self.txt_motivo, referencia["motivo"])
         self._definir_texto(self.txt_observacoes, referencia["observacoes"])
         for campo, texto in self.txt_condicoes.items():
-            self._definir_texto(texto, referencia[campo])
+            self._definir_texto(texto, referencia[campo] or DOC_LIB_PADRAO_CONDICOES_SM[campo])
         self._mostrar_opcoes(referencia)
         self.tab_lib.preencher(referencia["liberacao"])
         self.tab_nor.preencher(referencia["normalizacao"])
@@ -26492,13 +26615,13 @@ class JanelaSMAvulso:
                              f"Enquanto a SM estiver Aprovada para Execução outras pessoas ainda podem registrar a conferência.")
             if doc["status"] != STATUS_ATEIE_CONCLUIDO and doc["status"] != STATUS_ATEIE_CANCELADO:
                 mensagem += ("\n\nGere o documento novamente para que o PDF mostre as alterações." if doc["emitido"]
-                             else "\n\nUse 'Gerar SM Avulso' para emitir o documento (PDF).")
+                             else "\n\nUse 'Gerar SM Avulsa' para emitir o documento (PDF).")
         elif not era_nova and not era_reservada and len(doc["conferencias"]) > conferencias_antes:
             mensagem = f"Conferência registrada ({len(doc['conferencias'])} de {DOC_LIB_LIMITE_CONFERENCIAS_SM}).\n\nStatus: {doc['status']}"
             if doc["status"] == STATUS_ATEIE_APROVADO_EXECUCAO:
                 mensagem += ("\n\nA SM está aprovada para execução com as duas conferências (Manutenção e Operação); as demais "
                              "são facultativas. Os horários das manobras de liberação e os executantes (itens 6 e 7) já podem "
-                             "ser lançados. Use 'Gerar SM Avulso' para emitir o documento (PDF).")
+                             "ser lançados. Use 'Gerar SM Avulsa' para emitir o documento (PDF).")
             else:
                 mensagem += ("\n\nA SM só passa a Aprovado para Execução com uma Conferência Manutenção E uma Conferência "
                              "Operação. Os dados gerais já não podem ser alterados.")
@@ -26508,7 +26631,7 @@ class JanelaSMAvulso:
             if numero_previsto and numero_previsto != doc["numero"]:
                 mensagem += (f"\n\nA numeração foi atualizada porque outro usuário emitiu números enquanto esta SM era "
                              f"preenchida: {numero_previsto} passou a {doc['numero']}.")
-            mensagem += "\n\nUse 'Gerar SM Avulso' para emitir o PDF e enviar a SM para conferência."
+            mensagem += "\n\nUse 'Gerar SM Avulsa' para emitir o PDF e enviar a SM para conferência."
         messagebox.showinfo("Sucesso", mensagem, parent=self.janela)
 
     def editar(self):
@@ -26625,7 +26748,7 @@ class JanelaSMAvulso:
         messagebox.showinfo(titulo, resumo, parent=self.janela)
 
     def gerar(self):
-        """Botão Gerar SM Avulso: gera o PDF a partir da versão salva (revalida antes), arquiva e oferece abrir/imprimir. A
+        """Botão Gerar SM Avulsa: gera o PDF a partir da versão salva (revalida antes), arquiva e oferece abrir/imprimir. A
         primeira geração EMITE a SM: ela vai de Em análise para Aguarda Conferência e os dados gerais ficam protegidos.
         Nos demais status só gera o PDF de novo, com o que foi salvo."""
         if self.sm_id is None or self._pendente():
@@ -26656,7 +26779,7 @@ class JanelaSMAvulso:
                 return
             status_depois = doc_lib_calcular_status_sm(doc, True)
             if not messagebox.askyesno(
-                    "Gerar SM Avulso",
+                    "Gerar SM Avulsa",
                     f"Ao gerar o documento a SM será considerada EMITIDA, com status '{status_depois}'.\n\nA partir daí "
                     "os dados gerais da SM não poderão mais ser alterados (só as reprogramações, a conferência, a data e "
                     "hora das manobras e os executantes).\n\nDeseja gerar o documento?", parent=self.janela):
@@ -26701,7 +26824,7 @@ class JanelaSMAvulso:
             "SM-Reservado",
             f"{len(numeros)} número(s) de SM reservado(s):\n\n{', '.join(numeros)}\n\n"
             f"As SMs reservadas aparecem no GRID SM com status 'Reservado'. Para imprimir o formulário em branco, abra a "
-            f"SM reservada no GRID e use 'Gerar SM Avulso'.", parent=self.janela)
+            f"SM reservada no GRID e use 'Gerar SM Avulsa'.", parent=self.janela)
 
     def cancelar_sm(self):
         """Cancela a SM (com justificativa), em qualquer status menos Concluído. O número cancelado fica registrado e nunca é
@@ -26787,7 +26910,7 @@ class JanelaSMAvulso:
                                            f"como referência.", parent=self.janela)
             return
         geometria = self.janela.geometry()
-        nova = JanelaSMAvulso(referencia=doc_lib_dados_referencia_sm(doc))
+        nova = JanelaSMAvulsa(referencia=doc_lib_dados_referencia_sm(doc))
         try:
             nova.janela.geometry(geometria)          # a nova SM abre no mesmo lugar e no mesmo tamanho desta janela
         except TclError:
@@ -26876,8 +26999,8 @@ def cmd_click25_mo():
     JanelaMO()
 
 
-def cmd_click25_sm_avulso():
-    """Doc_Lib. > SM_Avulso: cadastro, edição, salvamento e geração da SM Avulso (Sequência de Manobras)."""
+def cmd_click25_sm_avulsa():
+    """Doc_Lib. > SM_Avulsa: cadastro, edição, salvamento e geração da SM Avulsa (Sequência de Manobras)."""
     if not current_user:
         messagebox.showwarning("Atenção", "Nenhum usuário está logado. Faça login primeiro.")
         return
@@ -26889,7 +27012,7 @@ def cmd_click25_sm_avulso():
     except sqlite3.Error as erro:
         messagebox.showerror("Erro", f"Não foi possível preparar o banco de dados do Doc_Lib.: {erro}")
         return
-    JanelaSMAvulso()
+    JanelaSMAvulsa()
 
 # =======cascate PRIMEIRA PARTE termina aqui
 
@@ -27587,7 +27710,7 @@ fileDOC_LIB = Menu(meuMenu, tearoff=0)
 fileDOC_LIB.add_command(label="ATEIE", command=cmd_click25_ateie)
 fileDOC_LIB.add_command(label="AI", command=cmd_click25_ai)
 fileDOC_LIB.add_command(label="MO", command=cmd_click25_mo)
-fileDOC_LIB.add_command(label="SM_Avulso", command=cmd_click25_sm_avulso)
+fileDOC_LIB.add_command(label="SM_Avulsa", command=cmd_click25_sm_avulsa)
 fileDOC_LIB.add_separator()
 fileDOC_LIB.add_command(label='Sair', command=root.quit)
 meuMenu.add_cascade(label="DOC_LIB.", menu=fileDOC_LIB)

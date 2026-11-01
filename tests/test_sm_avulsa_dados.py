@@ -1,4 +1,4 @@
-"""SM Avulso (Doc_Lib. - Click_25): numeração, reserva, validações, status, conferência, persistência e triggers."""
+"""SM Avulsa (Doc_Lib. - Click_25): numeração, reserva, validações, status, conferência, persistência e triggers."""
 import concurrent.futures
 import copy
 import sqlite3
@@ -267,14 +267,14 @@ class TestCamposObrigatorios:
                     **valores)
 
     def test_tres_linhas_de_equipamento_sao_persistidas_na_ordem(self, app, fluxo):
-        linhas = [self.linha_equip(local=f"L{i}", instalacao=f"I{i}", equipamento=f"E{i}",
+        linhas = [self.linha_equip(local=app.DOC_LIB_LOCAIS_SM[i], instalacao=f"I{i}", equipamento=f"E{i}",
                                    caracterizacao=app.DOC_LIB_CARACTERIZACOES_SM[i], local_execucao=app.DOC_LIB_LOCAIS_EXECUCAO_SM[i],
                                    tempo_retorno=f"0{i}:15") for i in (1, 2, 3)]
         doc = fluxo.doc(fluxo.salvar(equipamentos=linhas))
         assert [(item["local"], item["caracterizacao"], item["local_execucao"], item["tempo_retorno"])
                 for item in doc["equipamentos"]] == \
-            [("L1", "Sem desligamento de Aerogerador/RMT/LT", "COG-R", "01:15"), ("L2", "Com desligamento da UG-1", "UHE MGP", "02:15"),
-             ("L3", "Com desligamento da UG-2", "UHE SJO", "03:15")]
+            [("UHE MGP", "Sem desligamento de Aerogerador/RMT/LT", "COG-R", "01:15"), ("UHE SJO", "Com desligamento da UG-1", "UHE MGP", "02:15"),
+             ("UHE FGO", "Com desligamento da UG-2", "UHE SJO", "03:15")]
 
     def test_local_instalacao_e_equipamento_ficam_sempre_em_caixa_alta(self, app, fluxo):
         doc = fluxo.doc(fluxo.salvar(equipamentos=[self.linha_equip(local="se mcp", instalacao="  pátio   230 kV ",
@@ -402,10 +402,10 @@ class TestManobras:
     def test_linha_sem_numero_valido_nao_recebe_letra_nem_conta(self, app):
         assert app.doc_lib_identificar_sequencias_sm(["", "1", "x", "0", "100", "1"]) == ["", "1A", "", "", "", "1B"]
 
-    def test_letras_passam_de_z_ate_o_limite_de_30(self, app):
-        letras = app.doc_lib_identificar_sequencias_sm(["7"] * 30)
-        assert letras[0] == "7A" and letras[25] == "7Z" and letras[26] == "7AA" and letras[29] == "7AD"
-        assert len(set(letras)) == 30
+    def test_letras_passam_de_z_ate_o_limite_de_40(self, app):
+        letras = app.doc_lib_identificar_sequencias_sm(["7"] * 40)
+        assert letras[0] == "7A" and letras[25] == "7Z" and letras[26] == "7AA" and letras[29] == "7AD" and letras[39] == "7AN"
+        assert len(set(letras)) == 40
 
     def test_letras_acompanham_inclusao_exclusao_e_troca_de_ordem(self, app):
         base = ["1", "1", "2"]
@@ -419,16 +419,18 @@ class TestManobras:
         assert [m["identificacao"] for m in doc["liberacao"]] == ["1A", "1B", "2A"]
         assert [m["identificacao"] for m in doc["normalizacao"]] == ["1A", "2A", "2B"]
 
-    def test_limite_de_30_linhas(self, app, fluxo):
-        trinta = [{"numero": str(i), "local": "SE", "acao": f"Abrir {i}"} for i in range(1, 31)]
-        doc = fluxo.doc(fluxo.salvar(liberacao=trinta, normalizacao=trinta))
-        assert len(doc["liberacao"]) == 30 and len(doc["normalizacao"]) == 30
-        trinta_e_uma = trinta + [{"numero": "31", "local": "SE", "acao": "Abrir 31"}]
-        assert any("máximo 30" in mensagem for _, mensagem in app.doc_lib_validar_sm(
-            app.doc_lib_normalizar_sm(fluxo.dados(liberacao=trinta_e_uma)), None))
+    def test_limite_de_40_linhas(self, app, fluxo):
+        quarenta = [{"numero": str(i), "local": "SE", "acao": f"Abrir {i}"} for i in range(1, 41)]
+        doc = fluxo.doc(fluxo.salvar(liberacao=quarenta, normalizacao=quarenta))
+        assert app.DOC_LIB_LIMITE_MANOBRAS_SM == 40
+        assert len(doc["liberacao"]) == 40 and len(doc["normalizacao"]) == 40
+        for chave in ("liberacao", "normalizacao"):                                    # itens 6 e 8
+            quarenta_e_uma = quarenta + [{"numero": "41", "local": "SE", "acao": "Abrir 41"}]
+            assert any("máximo 40" in mensagem for _, mensagem in app.doc_lib_validar_sm(
+                app.doc_lib_normalizar_sm(fluxo.dados(**{chave: quarenta_e_uma})), None))
         conexao = app.doc_lib_conectar()
-        with pytest.raises(sqlite3.IntegrityError):                                   # o banco também recusa a 31ª
-            conexao.execute("INSERT INTO doclib_sm_manobras (sm_id, tipo, ordem) VALUES (1, 'L', 31)")
+        with pytest.raises(sqlite3.IntegrityError):                                   # o banco também recusa a 41ª
+            conexao.execute("INSERT INTO doclib_sm_manobras (sm_id, tipo, ordem) VALUES (1, 'L', 41)")
         conexao.close()
 
     def test_exige_ao_menos_uma_manobra_em_cada_tabela(self, app, fluxo):

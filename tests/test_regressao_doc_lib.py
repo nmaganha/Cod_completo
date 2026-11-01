@@ -1,4 +1,4 @@
-"""Regressão do Doc_Lib. (Click_25): ATEIE, AI e MO continuam funcionando depois da inclusão da SM Avulso.
+"""Regressão do Doc_Lib. (Click_25): ATEIE, AI e MO continuam funcionando depois da inclusão da SM Avulsa.
 
 Cada documento é percorrido pelas mesmas funções do aplicativo (salvar, gerar o PDF, De acordo, reserva, cancelamento, GRID e
 janela). A SM compartilha com eles o banco, a tabela de numeração (por tipo) e o GRID; aqui se confere que nada disso mudou."""
@@ -154,7 +154,7 @@ class TestConvivenciaComAsDemaisJanelas:
         assert app.doc_lib_numeros_previstos(1, "MO") == ["0002/26"]
         assert app.doc_lib_numeros_previstos(1, "SM") == ["0003/26"]
 
-    @pytest.mark.parametrize("nome_classe", ["JanelaAteie", "JanelaAI", "JanelaMO", "JanelaSMAvulso"])
+    @pytest.mark.parametrize("nome_classe", ["JanelaAteie", "JanelaAI", "JanelaMO", "JanelaSMAvulsa"])
     def test_as_quatro_janelas_abrem(self, app, banco, nome_classe):
         janela = getattr(app, nome_classe)()
         app.root.update()
@@ -173,7 +173,7 @@ class TestConvivenciaComAsDemaisJanelas:
         finally:
             janela.janela.destroy()
 
-    @pytest.mark.parametrize("comando", ["cmd_click25_ateie", "cmd_click25_ai", "cmd_click25_mo", "cmd_click25_sm_avulso"])
+    @pytest.mark.parametrize("comando", ["cmd_click25_ateie", "cmd_click25_ai", "cmd_click25_mo", "cmd_click25_sm_avulsa"])
     def test_comandos_do_menu_exigem_login_e_abrem_a_janela(self, app, banco, comando, mensagens, monkeypatch):
         antes = set(app.root.winfo_children())
         monkeypatch.setattr(app, "current_user", None)
