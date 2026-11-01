@@ -64,8 +64,8 @@ def _abrir_equipamento(app, sigla):
 def test_cascade_protecao_fica_entre_doc_lib_e_admin(app):
     menu = app.meuMenu
     rotulos = [menu.entrycget(i, "label") for i in range(menu.index("end") + 1) if menu.type(i) == "cascade"]
-    assert "Proteção." in rotulos
-    assert rotulos.index("DOC_LIB.") + 1 == rotulos.index("Proteção.") == rotulos.index("ADMIN") - 1
+    assert "PROTEÇÃO" in rotulos                  # maiúsculas, como os demais menus (DOC_LIB., SGA, ADMIN)
+    assert rotulos.index("DOC_LIB.") + 1 == rotulos.index("PROTEÇÃO") == rotulos.index("ADMIN") - 1
     sub = app.filePROTECAO
     itens = [sub.entrycget(i, "label") for i in range(sub.index("end") + 1) if sub.type(i) == "command"]
     assert itens == ["UG", "TR", "LT", "BARRA", "RMT", "AERO", "UFV", "Sair"]

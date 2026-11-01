@@ -330,10 +330,12 @@ class TestOrdemDosHorariosPelaJanela:
         janela.salvar()
         assert "Manobras de Normalização, linha 2 (sequência 2A)" in mensagens.avisos[-1][1]
 
-    def test_dicas_dos_itens_6_e_8_explicam_a_regra(self, app, banco, janelas):
+    def test_dicas_dos_itens_6_e_8_explicam_a_sequencia(self, app, banco, janelas):
+        """A dica dos itens 6 e 8 diz o limite de linhas e que as letras da Sequência são automáticas. A regra da ordem dos
+        horários (a letra não conta) não está mais escrita na tela: ela é aplicada e testada pelas validações desta classe."""
         janela = janelas()
         fontes = [w.cget("text") for w in _todos_os_widgets(janela.janela) if w.winfo_class() == "Label"]
-        assert sum("a letra não conta" in texto for texto in fontes) == 2
+        assert sum("colocar apenas o número arábico, as letras serão inseridas automaticamente" in texto for texto in fontes) == 2
 
 
 def _todos_os_widgets(raiz):
@@ -408,9 +410,11 @@ class TestConferenciaComASmAprovada:
         assert estado(janela.conferencias.btn_manual) == "disabled" and estado(janela.conferencias.btn_sistema) == "disabled"
         assert janela.conferencias.adicionar_nova("manual") is None
 
-    def test_dica_do_item_12_informa_que_a_aprovada_ainda_aceita_conferencias(self, app, banco, janelas):
+    def test_dica_do_item_12_informa_o_limite_e_as_duas_conferencias_que_aprovam(self, app, banco, janelas):
+        """A dica do item 12 diz o limite de 10 linhas e que bastam duas conferências (Manutenção e Operação). Que a SM aprovada
+        ainda aceita conferências (até 10 no total) não está mais escrito na tela: o comportamento é testado nesta classe."""
         textos = [w.cget("text") for w in _todos_os_widgets(janelas().janela) if w.winfo_class() == "Label"]
-        assert any("Com a SM Aprovada para Execução outras pessoas ainda podem registrar a conferência, até 10 no total" in x for x in textos)
+        assert any("Limite de 10 linhas de conferência" in x and "apenas duas conferências" in x for x in textos)
 
 
 class TestAntecedenciaDaLiberacaoPelaJanela:
@@ -430,10 +434,12 @@ class TestAntecedenciaDaLiberacaoPelaJanela:
         janela.salvar()
         assert fluxo.doc(janela.sm_id)["liberacao"][0]["hora"] == "05:00"
 
-    def test_dica_do_item_6_informa_a_antecedencia(self, app, banco, janelas):
+    def test_dica_do_item_6_informa_o_limite_de_linhas(self, app, banco, janelas):
+        """A dica do item 6 diz o limite de linhas (40). A regra das 3 horas de antecedência não está mais escrita na tela: ela é
+        avisada na mensagem de erro ao salvar (teste anterior desta classe)."""
         janela = janelas()
         textos = [w.cget("text") for w in _todos_os_widgets(janela.janela) if w.winfo_class() == "Label"]
-        assert any("mais de 3 horas de antecedência do início programado" in texto for texto in textos)
+        assert any("Limite de 40 linhas para as manobras de liberação" in texto for texto in textos)
 
 
 class TestRotulosDaConferencia:
