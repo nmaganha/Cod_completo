@@ -1,7 +1,7 @@
-# SM Avulso (Doc_Lib. - Click_25) - Sequência de Manobras
+# SM Avulsa (Doc_Lib. - Click_25) - Sequência de Manobras
 
-Documento novo do menu **DOC_LIB. > SM_Avulso**, implementado em `main.py` na seção
-"SM AVULSO - SEQUÊNCIA DE MANOBRAS", logo antes de "JANELAS DO MENU Doc_Lib. (CLICK_25)".
+Documento novo do menu **DOC_LIB. > SM_Avulsa**, implementado em `main.py` na seção
+"SM AVULSA - SEQUÊNCIA DE MANOBRAS", logo antes de "JANELAS DO MENU Doc_Lib. (CLICK_25)".
 Segue os padrões da MO (numeração, reserva, status, GRID, referência, PDF) e reaproveita os componentes do Doc_Lib.
 
 ## Onde está cada coisa
@@ -13,18 +13,18 @@ Segue os padrões da MO (numeração, reserva, status, GRID, referência, PDF) e
 | Normalização e validação | `doc_lib_normalizar_sm`, `doc_lib_validar_sm`, `doc_lib_erros_geracao_sm` |
 | Gravação (uma transação) | `doc_lib_salvar_sm`, `doc_lib_cancelar_sm`, `doc_lib_reservar_sm`, `doc_lib_registrar_geracao_sm` |
 | Sequência 1A/1B/2A e inversão | `doc_lib_identificar_sequencias_sm`, `doc_lib_inverter_acao_sm`, `doc_lib_inverter_manobras_sm` |
-| SM-Referência | `doc_lib_dados_referencia_sm` e o botão em `JanelaSMAvulso.referencia` |
+| SM-Referência | `doc_lib_dados_referencia_sm` e o botão em `JanelaSMAvulsa.referencia` |
 | PDF | `PDFSM`, `doc_lib_gerar_pdf_sm`, `doc_lib_registrar_e_arquivar_sm` |
 | Ordem dos horários das manobras | `doc_lib_conflitos_horarios_sm` (chamada por `doc_lib_validar_sm`) |
 | Antecedência da liberação (3 h) | `DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM`, `doc_lib_inicio_vigente_sm` (usadas por `doc_lib_validar_sm`) |
-| Prorrogar | `doc_lib_prefixo_vigente_sm`, `doc_lib_validar_prorrogacao_sm`, `doc_lib_dados_prorrogacao_sm`, `doc_lib_prorrogar_sm`, `DialogoProrrogarSM`, `JanelaSMAvulso.prorrogar` / `_aplicar_periodos` / `_atualizar_prorrogar` |
-| Encaminhar SM por e-mail | `doc_lib_listar_contatos_sm`, `doc_lib_incluir_contato_sm`, `doc_lib_salvar_padroes_contatos_sm`, `doc_lib_enderecos_envio_sm`, `doc_lib_validar_envio_sm`, `doc_lib_pdf_para_envio_sm`, `doc_lib_registrar_envio_sm`, `doc_lib_definir_email_enviado_sm`, `DialogoEncaminharSM`, `JanelaSMAvulso.encaminhar` |
-| Telas | `JanelaSMAvulso`, `LinhasManobrasSM`, `LinhasConferenciaSM`, `JanelaListaSM` (GRID SM) |
+| Prorrogar | `doc_lib_prefixo_vigente_sm`, `doc_lib_validar_prorrogacao_sm`, `doc_lib_dados_prorrogacao_sm`, `doc_lib_prorrogar_sm`, `DialogoProrrogarSM`, `JanelaSMAvulsa.prorrogar` / `_aplicar_periodos` / `_atualizar_prorrogar` |
+| Encaminhar SM por e-mail | `doc_lib_listar_contatos_sm`, `doc_lib_incluir_contato_sm`, `doc_lib_salvar_padroes_contatos_sm`, `doc_lib_enderecos_envio_sm`, `doc_lib_validar_envio_sm`, `doc_lib_pdf_para_envio_sm`, `doc_lib_registrar_envio_sm`, `doc_lib_definir_email_enviado_sm`, `DialogoEncaminharSM`, `JanelaSMAvulsa.encaminhar` |
+| Telas | `JanelaSMAvulsa`, `LinhasManobrasSM`, `LinhasConferenciaSM`, `JanelaListaSM` (GRID SM) |
 
 Alterações em código **compartilhado** (todas aditivas; o comportamento de ATEIE, AI e MO não muda):
 1. `_doc_lib_ultimo_numero`: ramo `tipo == "SM"` (numeração própria, como a MO);
 2. `garantir_banco_doc_lib`: chama `_garantir_tabelas_doc_lib_sm`;
-3. `cmd_click25_sm_avulso` deixou de ser "Página em Construção".
+3. `cmd_click25_sm_avulsa` deixou de ser "Página em Construção".
 
 O envio usa, sem alteração, `doc_lib_enviar_email`, `EMAIL_ATEIE_REMETENTES`, `config_email_ateie.json` e
 `doc_lib_copiar_para_downloads` (os mesmos do ATEIE, do AI e da MO).
@@ -41,7 +41,7 @@ O e-mail da SM sai no status **Aguarda Conferência** (ver "Encaminhar SM por e-
 |---|---|
 | (nova) -> Em análise | primeiro Salvar (consome o número) |
 | Reservado -> Em análise | preencher e salvar a SM reservada (mantém o número) |
-| Em análise -> Aguarda Conferência | botão **Gerar SM Avulso** (documento emitido; dados gerais protegidos) |
+| Em análise -> Aguarda Conferência | botão **Gerar SM Avulsa** (documento emitido; dados gerais protegidos) |
 | Aguarda -> Aprovado | salvar ao menos **uma Conferência Manutenção E uma Conferência Operação** válidas (com a SM já Aprovada outras pessoas ainda podem conferir: decisão 22) |
 | Em análise -> Aprovado (direto) | as mesmas duas conferências registradas com a SM salva e **antes** de gerar o documento (decisão 23) |
 | Aprovado -> Em Execução | salvar os Executantes da Liberação, com **todas** as manobras de liberação datadas (a partir daí os itens 6 e 7 ficam bloqueados) |
@@ -97,8 +97,21 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
    é digitável com a opção do tempo escolhida (clicar nele a escolhe) e é limpo e travado com Indisponível. O tempo vai de 00:00
    a 23:59 e é normalizado ao sair do campo (`2:30`, `0230` e `2h30` viram `02:30`). Isto **substitui** a decisão da primeira
    entrega (duração com horas até 99): a regra agora é a mesma do AI. No banco e no PDF fica o texto `Indisponível` ou o `HH:MM`.
-10. **Equipamento(s) a impedir**: a 1ª linha é obrigatória; a 2ª e a 3ª são opcionais, mas só por inteiro.
-    - **3.1 Local, 3.2 Instalação e 3.3 Equipamento**: texto livre sempre em **caixa alta** (convertido ao digitar, ao salvar, ao
+10. **Equipamento(s) a impedir**: a 1ª linha é obrigatória; da 2ª em diante (até a 5ª) são opcionais, mas só por inteiro.
+    - **Uma linha e o botão Adicionar Equipamento** (alteração de 01/11/2026): a janela abre com **uma linha** e o botão logo abaixo dela
+      mostra a linha seguinte, **até 5** (contador "n de 5 equipamentos"; com 5 o botão fica desabilitado). O botão só atua na edição
+      geral (SM nova, reservada ou Em análise em edição) e fica desabilitado com a SM salva, gerada ou em qualquer outro status.
+      Uma linha adicionada e deixada em branco não impede salvar nem é gravada; se for preenchida pela metade, a validação a aponta
+      (a linha oculta com pendência passa a aparecer). Ao abrir uma SM gravada, a janela mostra até a última linha preenchida.
+      Não há botão para remover linha: para desistir de uma, basta apagar o que foi digitado nela.
+    - **Documento impresso inalterado**: o PDF mantém **3 linhas** (com 1 ou 2 equipamentos, as linhas restantes saem em branco, como no
+      formulário). Só com 4 ou 5 equipamentos informados a tabela impressa passa a ter 4 ou 5 linhas. Linhas totalmente vazias no fim,
+      além das 3 primeiras, não são gravadas (`doc_lib_ajustar_linhas_equipamentos_sm`); linha vazia no meio mantém a posição.
+    - **3.1 Local**: lista de seleção com as **23 opções** informadas (`DOC_LIB_LOCAIS_SM`): COG, UHE MGP, UHE SJO, UHE FGO, PCH QUE,
+      PCH LAV, PCH VIE, CGE PTM, CGE JDT, UFV PTM, EOL VHZ, EOL SCA, EOL PTM, EOL UBA, EOL GOB, EOL SAJ, EOL SRE, SE MCP, SE IGU, SE RSD,
+      SE SCA, SE CLA e SE JDD (no pedido, "SE CLA E SE JDD" foi lido como duas opções). Somente de escolha: não aceita texto livre
+      (a validação de `doc_lib_salvar_sm` recusa o que não está na lista; minúsculas e espaços repetidos viram a opção da lista).
+    - **3.2 Instalação e 3.3 Equipamento**: texto livre sempre em **caixa alta** (convertido ao digitar, ao salvar, ao
       carregar e ao imprimir; espaços repetidos são reduzidos).
     - **3.4 Caracterização**: lista de seleção com as **44 opções** informadas (`DOC_LIB_CARACTERIZACOES_SM`): 2 sem desligamento,
       21 "Com desligamento ..." e 21 "Com risco desligamento ...". Escolheu-se uma lista única, e não o seletor combinado,
@@ -106,19 +119,24 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
     - **3.5 Local da Execução dos Serviços**: lista de seleção com as **30 opções** informadas (`DOC_LIB_LOCAIS_EXECUCAO_SM`), também sem texto livre.
     - Os textos das listas foram mantidos **exatamente** como recebidos, inclusive "Com risco desligamento ..." sem "do/da" no início e a
       ausência de "UG-3 e 4" nos grupos de duas unidades. Se forem ajustados, basta editar as duas constantes.
-    - SM antiga com texto livre em 3.4/3.5 (anterior a esta alteração) abre normalmente para consulta, mas exige escolher a opção
-      da lista ao editar uma SM Em análise.
-11. **Condições de segurança**: os cinco campos nascem em branco e são obrigatórios (escrever "Nenhuma" se não houver). O `CHECK` do
-    banco recusa qualquer SM (fora Reservado e Cancelado) com uma delas vazia.
+    - SM antiga com texto livre em 3.1, 3.4 ou 3.5 (anterior às listas) abre normalmente para consulta, mas exige escolher a opção
+      da lista ao editar uma SM Em análise. SM já aprovada ou em execução segue o seu caminho normal (a tabela 3 não é revalidada).
+11. **Condições de segurança**: os cinco campos são obrigatórios. Desde 01/11/2026 a **janela já os traz preenchidos**: **Nenhuma** em
+    5.1, 5.2, 5.4.1 e 5.4.2 e **Nenhum** em 5.3 (`DOC_LIB_PADRAO_CONDICOES_SM`), editáveis durante a elaboração da SM. Valem para a SM
+    nova e para a SM reservada que está sendo preenchida; a SM-Referência herda os textos da SM de origem (se vierem vazios, voltam ao
+    padrão) e uma SM já gravada mostra o que foi gravado. O padrão é só da janela: apagar um campo continua sendo recusado
+    ("preencha o campo") e o `CHECK` do banco recusa qualquer SM (fora Reservado e Cancelado) com uma delas vazia. A SM reservada
+    continua gravada em branco no banco.
 12. **Motivo**: no máximo 6 linhas **medidas como no PDF** (cerca de 600 caracteres); Condições (3 linhas) e Observações (6) têm só
     capacidade visual com rolagem, e o PDF imprime tudo, quebrando de página se preciso.
 13. **Manobras**: número arábico 1-99, Local obrigatório de até 6 caracteres **em caixa alta** (itens 6 e 8), Ação obrigatória, pelo
-    menos uma linha em cada tabela; linhas totalmente vazias são descartadas ao salvar. A letra é calculada pela ordem (1A, 1B, 2A;
-    passa de Z para AA..AD).
+    menos uma linha em cada tabela, **até 40 linhas em cada uma** (eram 30 até 01/11/2026; `DOC_LIB_LIMITE_MANOBRAS_SM`: tela,
+    validação, banco e PDF acompanham a constante); linhas totalmente vazias são descartadas ao salvar. A letra é calculada pela ordem
+    (1A, 1B, 2A; passa de Z para AA..AN com 40 manobras de um mesmo número).
 14. **Inverter Manobras**: só inverte a ação em que o **único** verbo conhecido é a **primeira palavra**, sem outro verbo no
     infinitivo e sem negação, condição, verificação ou estado já descrito. Pares: abrir/fechar, bloquear/desbloquear, ligar/desligar,
     energizar/desenergizar, extrair/inserir, conectar/desconectar, habilitar/desabilitar, ativar/desativar, aterrar/desaterrar,
-    travar/destravar. Nas demais, o original é mantido e a linha fica marcada (alerta laranja); **Gerar SM Avulso** só é aceito
+    travar/destravar. Nas demais, o original é mantido e a linha fica marcada (alerta laranja); **Gerar SM Avulsa** só é aceito
     depois de conferir ou editar cada uma. Pede confirmação antes de substituir uma normalização já preenchida.
 15. **Encaminhar SM por e-mail** (a primeira entrega não tinha e-mail; agora o envio é para conferência, com destinatários internos):
     - **Quando**: botão **Encaminhar SM** no rodapé da janela da SM, ativo com a SM salva e sem alterações pendentes, em **qualquer status**
@@ -228,7 +246,7 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
     - com a SM salva, registrar a **Conferência Manutenção** e a **Conferência Operação** (uma de cada área) leva a SM **direto a Aprovado para
       Execução**, ainda com o documento não gerado (a barra de status mostra "documento ainda não gerado"). As conferências seguintes, se houver,
       são facultativas: dão permissão aos demais integrantes das equipes; **as manobras podem ser executadas só com as duas primeiras**;
-    - **Gerar SM Avulso** emite o documento (PDF) quando o usuário quiser, sem mudar o status. **Gerar o documento não é pré-requisito da
+    - **Gerar SM Avulsa** emite o documento (PDF) quando o usuário quiser, sem mudar o status. **Gerar o documento não é pré-requisito da
       execução**: com a SM Aprovada para Execução os horários das manobras de liberação e os executantes (itens 6 e 7) já ficam abertos, tenha o
       documento sido gerado ou não, e o caminho segue normalmente (Em Execução, Concluído). Gerar com a SM Aprovada ou Em Execução apenas emite
       o documento (marca como emitido e gera o PDF); com a SM já Concluída ou Cancelada só se gera o PDF. A reprogramação (Habilitar), novas
@@ -263,6 +281,16 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
     como "NOVA ATEIE" e "NOVA MO", mesma posição, ao lado de Abrir): ele fecha o GRID e abre a tela inicial de emissão de uma SM em
     branco, no lugar e no tamanho da janela que abriu o GRID. Ganhou testes que o comparam com os dos outros documentos e conferem a troca
     de janela.
+27. **Ajuste de 01/11/2026**: (a) item 3 com uma linha e o botão Adicionar Equipamento (até 5), 3.1 Local em lista e impresso com 3 linhas
+    (decisão 10); (b) Condições de Segurança já preenchidas com Nenhuma/Nenhum (decisão 11); (c) limite de 40 manobras nos itens 6 e 8
+    (decisão 13); (d) o termo **SM_Avulso** passou a **SM_Avulsa** em todo o código: menu Doc_Lib., título da janela, botão **Gerar SM
+    Avulsa**, mensagens, classe `JanelaSMAvulsa`, função `cmd_click25_sm_avulsa`, este documento (antes `SM_Avulso.md`) e os arquivos de
+    teste (`test_sm_avulsa_*.py`). Nada do que fica gravado no banco ou nos PDFs já gerados usa o nome, então nenhum dado muda.
+    O limite de linhas dos itens 3, 6 e 8 está no `CHECK` da coluna `ordem` (equipamentos 3 para 5; manobras 30 para 40) e o SQLite não altera
+    `CHECK`; por isso `garantir_banco_doc_lib` (chamada ao abrir o Doc_Lib.) **refaz as duas tabelas sozinha**, uma única vez, mantendo todas as
+    linhas, os ids e o contador (`_doc_lib_garantir_tabela_com_limite_sm`). Foi testada com uma cópia do `dados_turno.db` do repositório
+    (16 SM, 36 linhas de equipamentos e 105 manobras: mesmos dados antes e depois, `integrity_check` ok). Recomenda-se uma cópia do
+    `dados_turno.db` antes de abrir a versão nova pela primeira vez.
 
 ## Banco de dados
 
@@ -272,7 +300,7 @@ Tabelas novas, criadas por `garantir_banco_doc_lib` sem tocar nos dados existent
 com trigger contra as duas juntas e contra a mudança depois de gerado o documento).
 
 Proteções no banco (valem mesmo para quem alterar o `dados_turno.db` direto): `UNIQUE(numero)` e `UNIQUE(ano, sequencia)`;
-`CHECK` do status, das condições, de 1 a 30 manobras, do Local (6 caracteres) e da modalidade; triggers que recusam transição de
+`CHECK` do status, das condições, de 1 a 5 equipamentos, de 1 a 40 manobras, do Local (6 caracteres) e da modalidade; triggers que recusam transição de
 status fora de `doclib_sm_transicoes`, qualquer alteração em SM concluída ou cancelada, mudança do número, exclusão da SM e
 alteração ou exclusão de conferência registrada, e que gravam o histórico de status. Toda gravação é uma transação
 (`BEGIN IMMEDIATE`) com conferência de revisão (`DocLibConflito` se outra pessoa salvou antes).
@@ -290,15 +318,16 @@ xvfb-run -a python -m pytest tests  # Linux sem tela (o conftest também inicia 
 
 | Arquivo | O que cobre |
 |---|---|
-| `test_sm_avulso_dados.py` | numeração, reserva, reinício anual, criação simultânea (threads), programação/reprogramações, campos obrigatórios, listas 3.4/3.5, caixa alta, Indisponível/hh:mm, manobras, bloqueio dos itens 6 e 7, inversão, status, conferência, cancelamento, triggers, SM-Referência, listagem |
-| `test_sm_avulso_concorrencia.py` | 4 processos separados salvando e reservando ao mesmo tempo no mesmo banco |
-| `test_sm_avulso_interface.py` | janela real (Tk): número no alto à direita, padrões, listas de seleção, opção Indisponível/hh:mm, caixa alta ao digitar, reprogramações em ordem, tabelas de manobras, bloqueio dos itens 6 e 7, rótulos Manutenção/Operação, validações, fluxo completo até Concluído, inversão, referência, reserva, GRID, menu |
-| `test_sm_avulso_email.py` | lista de contatos (incluir, repetido, inválido, ordem, última escolha), regras de status do envio, PDF para envio (arquivo, aviso, reaproveitamento, revisão), registro dos envios e imutabilidade, banco antigo, marcação manual no GRID, janela de envio (Para/Cc, novo e-mail, excluir, confirmar), botão da janela da SM, fluxo de envio com falha, reenvio e SM alterada durante o envio |
-| `test_sm_avulso_prorrogacao.py` | Prorrogar: regras no banco (só Em Execução, novo término posterior, P1 a P5, conflito de revisão, imutabilidade), período em vigor e reprogramação, trava do período salvo, botão no quadro certo e alternando com o Habilitar, janela do Prorrogar, P no PDF (fonte menor, ao lado do término, margens) |
-| `test_sm_avulso_sem_manobras.py` | opções dos itens 6 e 8: dados, exclusão mútua (validação e banco), imutabilidade depois de gerado, status direto a Concluído, 3 h, referência, PDF, janela (checkbuttons, aviso, restauração, bloqueios, itens 7 e 9, altura da célula Ação) |
-| `test_sm_avulso_conferencia_antecipada.py` | conferência com a SM Em análise: aprovação direta, proteção dos dados gerais, emissão depois, execução só com as duas primeiras conferências, trigger do banco, janela (botões, Editar, mensagens, status) |
-| `test_sm_avulso_elaborador.py` | quem elabora não confere (Operação por login, Manutenção por nome), trigger, janela e o botão NOVA SM do GRID SM |
-| `test_sm_avulso_pdf.py` | conteúdo, caixa alta, Indisponível, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
+| `test_sm_avulsa_dados.py` | numeração, reserva, reinício anual, criação simultânea (threads), programação/reprogramações, campos obrigatórios, listas 3.4/3.5, caixa alta, Indisponível/hh:mm, manobras, bloqueio dos itens 6 e 7, inversão, status, conferência, cancelamento, triggers, SM-Referência, listagem |
+| `test_sm_avulsa_concorrencia.py` | 4 processos separados salvando e reservando ao mesmo tempo no mesmo banco |
+| `test_sm_avulsa_interface.py` | janela real (Tk): número no alto à direita, padrões, listas de seleção, opção Indisponível/hh:mm, caixa alta ao digitar, reprogramações em ordem, tabelas de manobras, bloqueio dos itens 6 e 7, rótulos Manutenção/Operação, validações, fluxo completo até Concluído, inversão, referência, reserva, GRID, menu |
+| `test_sm_avulsa_email.py` | lista de contatos (incluir, repetido, inválido, ordem, última escolha), regras de status do envio, PDF para envio (arquivo, aviso, reaproveitamento, revisão), registro dos envios e imutabilidade, banco antigo, marcação manual no GRID, janela de envio (Para/Cc, novo e-mail, excluir, confirmar), botão da janela da SM, fluxo de envio com falha, reenvio e SM alterada durante o envio |
+| `test_sm_avulsa_prorrogacao.py` | Prorrogar: regras no banco (só Em Execução, novo término posterior, P1 a P5, conflito de revisão, imutabilidade), período em vigor e reprogramação, trava do período salvo, botão no quadro certo e alternando com o Habilitar, janela do Prorrogar, P no PDF (fonte menor, ao lado do término, margens) |
+| `test_sm_avulsa_sem_manobras.py` | opções dos itens 6 e 8: dados, exclusão mútua (validação e banco), imutabilidade depois de gerado, status direto a Concluído, 3 h, referência, PDF, janela (checkbuttons, aviso, restauração, bloqueios, itens 7 e 9, altura da célula Ação) |
+| `test_sm_avulsa_conferencia_antecipada.py` | conferência com a SM Em análise: aprovação direta, proteção dos dados gerais, emissão depois, execução só com as duas primeiras conferências, trigger do banco, janela (botões, Editar, mensagens, status) |
+| `test_sm_avulsa_elaborador.py` | quem elabora não confere (Operação por login, Manutenção por nome), trigger, janela e o botão NOVA SM do GRID SM |
+| `test_sm_avulsa_pdf.py` | conteúdo, caixa alta, Indisponível, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
+| `test_sm_avulsa_ajustes_click25.py` | ajuste de 01/11/2026: lista do 3.1 Local, de 1 a 5 equipamentos (dados, banco, referência e PDF com 3, 4 e 5 linhas), botão Adicionar Equipamento na janela, padrões Nenhuma/Nenhum das condições, 40 manobras (tela, dados, banco, PDF), migração do banco antigo (limites 3 e 30) e o termo SM_Avulsa |
 | `test_regressao_doc_lib.py` | ATEIE, AI e MO (salvar, gerar, De acordo, reserva, MO-Referência, janelas, menu, GRID) e numerações independentes |
 
 ## Limites desta entrega

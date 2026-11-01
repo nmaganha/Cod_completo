@@ -1,10 +1,10 @@
-"""SM Avulso (Doc_Lib. - Click_25): conferência registrada já com a SM salva (Em análise), antes de gerar o documento. Duas
+"""SM Avulsa (Doc_Lib. - Click_25): conferência registrada já com a SM salva (Em análise), antes de gerar o documento. Duas
 conferências, uma de cada área, levam a SM direto a Aprovado para Execução; o documento é emitido depois."""
 import sqlite3
 
 import pytest
 
-from test_sm_avulso_interface import definir, dialogos, estado, janelas, travado  # noqa: F401
+from test_sm_avulsa_interface import definir, dialogos, estado, janelas, travado  # noqa: F401
 
 pymupdf = pytest.importorskip("pymupdf")
 
@@ -206,7 +206,7 @@ class TestEmissaoDepoisDaAprovacao:
 # janela
 # ======================================================================================================================
 def preencher_e_salvar(app, janela):
-    from test_sm_avulso_interface import preencher
+    from test_sm_avulsa_interface import preencher
     preencher(app, janela)
     janela.salvar()
     assert janela.sm_id is not None and janela.status == EM_ANALISE
@@ -241,7 +241,7 @@ class TestJanelaComConferenciaEmAnalise:
         janela.salvar()
         assert not mensagens.avisos and janela.status == APROVADO and not janela.emitido
         texto = mensagens.infos[-1][1]
-        assert "Conferência registrada (2 de 10)" in texto and "Gerar SM Avulso" in texto
+        assert "Conferência registrada (2 de 10)" in texto and "Gerar SM Avulsa" in texto
         assert estado(janela.btn_editar) == "disabled" and estado(janela.btn_gerar) == "normal"
         assert all(linha["registrada"] for linha in conferencias.linhas)
         assert estado(conferencias.btn_manual) == "normal"                                           # as demais são facultativas
@@ -256,7 +256,7 @@ class TestJanelaComConferenciaEmAnalise:
         janela.gerar()
         assert janela.emitido and janela.status == APROVADO and dialogos["gerado"]
         assert not travado(janela.ent_exec_lib_local) and not travado(janela.tab_lib.linhas[0]["data"])
-        assert mensagens.perguntas[-1][0] == "Gerar SM Avulso" and "'Aprovado para Execução'" in mensagens.perguntas[-1][1]
+        assert mensagens.perguntas[-1][0] == "Gerar SM Avulsa" and "'Aprovado para Execução'" in mensagens.perguntas[-1][1]
 
     def test_lancar_horarios_e_executantes_pela_janela_com_a_sm_aprovada_sem_gerar(self, app, banco, janelas, mensagens, dialogos, monkeypatch):
         janela = janelas()
@@ -319,7 +319,7 @@ class TestJanelaComConferenciaEmAnalise:
         assert not travado(janela.tab_lib.linhas[0]["data"]) and travado(janela.tab_nor.linhas[0]["data"])
 
     def test_dica_dos_botoes_explica_quando_ficam_inativos(self, app, banco, janelas):
-        from test_sm_avulso_interface import _todos_os_widgets
+        from test_sm_avulsa_interface import _todos_os_widgets
         textos = [w.cget("text") for w in _todos_os_widgets(janelas().janela) if w.winfo_class() == "Label"]
         assert any("Pode ser registrada já com a SM salva (Em análise), antes de gerar o documento" in t for t in textos)
 

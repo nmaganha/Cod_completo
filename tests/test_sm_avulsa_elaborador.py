@@ -1,9 +1,9 @@
-"""SM Avulso (Doc_Lib. - Click_25): quem elabora a SM (item 11) não a confere; GRID SM com o botão NOVA SM."""
+"""SM Avulsa (Doc_Lib. - Click_25): quem elabora a SM (item 11) não a confere; GRID SM com o botão NOVA SM."""
 import sqlite3
 
 import pytest
 
-from test_sm_avulso_interface import definir, dialogos, estado, janelas, preencher  # noqa: F401
+from test_sm_avulsa_interface import definir, dialogos, estado, janelas, preencher  # noqa: F401
 
 EM_ANALISE, AGUARDA, APROVADO = "Em análise", "Aguarda Conferência", "Aprovado para Execução"
 EM_EXECUCAO, CONCLUIDO, CANCELADO, RESERVADO = "Em Execução", "Concluído", "Cancelado", "Reservado"
@@ -142,7 +142,7 @@ class TestGridSmNovaSm:
         fluxo.ate(AGUARDA)
         janela = janelas()
         janela._carregar_documento(fluxo.doc(1))
-        janelas_sm = lambda: [w for w in app.root.winfo_children() if w.winfo_class() == "Toplevel" and w.title() == "COG - DOC_LIB. - SM AVULSO"]
+        janelas_sm = lambda: [w for w in app.root.winfo_children() if w.winfo_class() == "Toplevel" and w.title() == "COG - DOC_LIB. - SM AVULSA"]
         antes = set(janelas_sm())
         grid = app.JanelaListaSM(janela.janela)
         app.root.update()

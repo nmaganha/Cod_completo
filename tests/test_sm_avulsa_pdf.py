@@ -1,4 +1,4 @@
-"""SM Avulso (Doc_Lib. - Click_25): documento impresso (PDF) - conteúdo, quebras, paginação, alinhamento e arquivamento."""
+"""SM Avulsa (Doc_Lib. - Click_25): documento impresso (PDF) - conteúdo, quebras, paginação, alinhamento e arquivamento."""
 import glob
 import os
 import re
@@ -288,10 +288,10 @@ class TestTextosSemEspacoOuExtremos:
         assert texto.count("X") == 400 and texto.count("Y") == 400 and texto.count("Z") == 600
 
     def test_sm_com_tudo_no_limite_gera_o_documento(self, app, fluxo, pdf):
-        trinta = [{"numero": str(i), "local": "SE MCP", "acao": f"Abrir equipamento {i} " * 8} for i in range(1, 31)]
+        trinta = [{"numero": str(i), "local": "SE MCP", "acao": f"Abrir equipamento {i} " * 8} for i in range(1, 41)]
         sm_id = fluxo.salvar(liberacao=trinta, normalizacao=trinta, motivo="\n".join(f"linha {i}" for i in range(1, 7)),
                              cond_chaves_abertas="a\nb\nc", observacoes="o\n" * 30,
-                             equipamentos=[{"local": f"L{i}", "instalacao": "I" * 40, "equipamento": "E" * 60,
+                             equipamentos=[{"local": app.DOC_LIB_LOCAIS_SM[i], "instalacao": "I" * 40, "equipamento": "E" * 60,
                                             "caracterizacao": "Com risco desligamento das UG-1, 2, 3 e 4",
                                             "local_execucao": "EOL Ventos de Horizonte", "tempo_retorno": "23:59"} for i in (1, 2, 3)])
         fluxo.gerar(sm_id)

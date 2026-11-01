@@ -77,7 +77,7 @@ def mensagens(app, monkeypatch):
 
 
 class FluxoSM:
-    """Atalhos para percorrer o ciclo de vida de uma SM Avulso nos testes (usa as mesmas funções do aplicativo)."""
+    """Atalhos para percorrer o ciclo de vida de uma SM Avulsa nos testes (usa as mesmas funções do aplicativo)."""
     OPERADOR = "operador1"                       # quem elabora as SM dos testes
     CONFERENTE = "operador2"                     # quem as confere (a mesma pessoa não elabora e confere)
 

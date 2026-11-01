@@ -1,10 +1,10 @@
-"""SM Avulso (Doc_Lib. - Click_25): opções "sem manobras" dos itens 6 (manobras executadas em emergência ou manutenção da
+"""SM Avulsa (Doc_Lib. - Click_25): opções "sem manobras" dos itens 6 (manobras executadas em emergência ou manutenção da
 configuração vigente) e 8 (sem necessidade de manobras de normalização): dados, status, banco, PDF e janela."""
 import sqlite3
 
 import pytest
 
-from test_sm_avulso_interface import definir, dialogos, estado, janelas, liberado, preencher, travado  # noqa: F401
+from test_sm_avulsa_interface import definir, dialogos, estado, janelas, liberado, preencher, travado  # noqa: F401
 
 pymupdf = pytest.importorskip("pymupdf")
 
@@ -421,7 +421,7 @@ class TestJanelaComAsOpcoes:
 
     def test_referencia_herda_a_opcao_marcada(self, app, banco, janelas, fluxo):
         origem = fluxo.doc(fluxo.salvar(lib_emergencia=1))
-        nova = app.JanelaSMAvulso(referencia=app.doc_lib_dados_referencia_sm(origem))
+        nova = app.JanelaSMAvulsa(referencia=app.doc_lib_dados_referencia_sm(origem))
         try:
             app.root.update()
             assert nova._opcoes["liberacao"].get() and nova.tab_lib.texto_fixo == TEXTO_LIB

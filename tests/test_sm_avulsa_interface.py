@@ -1,4 +1,4 @@
-"""SM Avulso (Doc_Lib. - Click_25): janela, tabelas, botões, bloqueios por status, GRID e menu (Tk real, em tela virtual)."""
+"""SM Avulsa (Doc_Lib. - Click_25): janela, tabelas, botões, bloqueios por status, GRID e menu (Tk real, em tela virtual)."""
 from datetime import datetime
 
 import pytest
@@ -16,7 +16,7 @@ def janelas(app, mensagens):
     abertas = []
 
     def abrir(**kwargs):
-        janela = app.JanelaSMAvulso(**kwargs)
+        janela = app.JanelaSMAvulsa(**kwargs)
         abertas.append(janela)
         app.root.update()
         return janela
@@ -64,8 +64,9 @@ def preencher_equipamento(app, janela, indice, caracterizacao="Sem desligamento 
                           tempo="2:30", local="SE MCP", instalacao="Pátio 230 kV", equipamento="DJ 52-1"):
     """Linha da tabela 3 preenchida como o usuário faz: texto nos três primeiros campos, escolha nas duas listas e, no 3.6,
     a opção Indisponível ou a opção do tempo com o HH:MM digitado."""
-    for campo, valor in (("local", local), ("instalacao", instalacao), ("equipamento", equipamento)):
+    for campo, valor in (("instalacao", instalacao), ("equipamento", equipamento)):
         definir(app, janela.equip[indice][campo], valor)
+    janela.equip[indice]["local"].set(local)
     janela.equip[indice]["caracterizacao"].set(caracterizacao)
     janela.equip[indice]["local_execucao"].set(local_execucao)
     if tempo == "Indisponível":
@@ -133,8 +134,8 @@ class TestAberturaEPadroes:
 
     def test_titulo_e_botao_grid(self, app, banco, janelas):
         janela = janelas()
-        assert janela.janela.title() == "COG - DOC_LIB. - SM AVULSO"
-        assert "Gerar SM Avulso" in janela.btn_gerar.cget("text")
+        assert janela.janela.title() == "COG - DOC_LIB. - SM AVULSA"
+        assert "Gerar SM Avulsa" in janela.btn_gerar.cget("text")
 
     def test_dica_do_botao_nao_tira_o_efeito_de_hover(self, app, banco, janelas, fluxo):
         janela = janelas()
@@ -154,14 +155,15 @@ class TestAberturaEPadroes:
 class TestTabelaEquipamentos:
     def test_caracterizacao_e_local_da_execucao_sao_listas_de_selecao(self, app, banco, janelas):
         janela = janelas()
-        for indice in range(3):
-            caracterizacao, local = janela.equip[indice]["caracterizacao"], janela.equip[indice]["local_execucao"]
-            assert caracterizacao.winfo_class() == "TCombobox" and local.winfo_class() == "TCombobox"
-            assert estado(caracterizacao) == "readonly" and estado(local) == "readonly"          # não aceitam texto livre
+        for indice in range(app.DOC_LIB_LIMITE_EQUIPAMENTOS_SM):
+            local, caracterizacao, execucao = (janela.equip[indice][campo] for campo in ("local", "caracterizacao", "local_execucao"))
+            assert {local.winfo_class(), caracterizacao.winfo_class(), execucao.winfo_class()} == {"TCombobox"}
+            assert {estado(local), estado(caracterizacao), estado(execucao)} == {"readonly"}      # não aceitam texto livre
+            assert list(local.cget("values")) == app.DOC_LIB_LOCAIS_SM and len(app.DOC_LIB_LOCAIS_SM) == 23
             assert list(caracterizacao.cget("values")) == app.DOC_LIB_CARACTERIZACOES_SM and len(app.DOC_LIB_CARACTERIZACOES_SM) == 44
-            assert list(local.cget("values")) == app.DOC_LIB_LOCAIS_EXECUCAO_SM and len(app.DOC_LIB_LOCAIS_EXECUCAO_SM) == 30
-            assert caracterizacao.get() == "" and local.get() == ""
-        for campo in ("local", "instalacao", "equipamento"):
+            assert list(execucao.cget("values")) == app.DOC_LIB_LOCAIS_EXECUCAO_SM and len(app.DOC_LIB_LOCAIS_EXECUCAO_SM) == 30
+            assert local.get() == "" and caracterizacao.get() == "" and execucao.get() == ""
+        for campo in ("instalacao", "equipamento"):
             assert janela.equip[0][campo].winfo_class() == "Entry"
 
     def test_escolha_da_lista_e_coletada_e_gravada(self, app, banco, janelas, mensagens, dialogos):
@@ -228,7 +230,7 @@ class TestTabelaEquipamentos:
 
     def test_campos_de_texto_ficam_em_caixa_alta_enquanto_se_digita(self, app, banco, janelas):
         janela = janelas()
-        for campo in ("local", "instalacao", "equipamento"):
+        for campo in ("instalacao", "equipamento"):
             entrada = janela.equip[0][campo]
             entrada.focus_force()
             janela.janela.update()
@@ -567,14 +569,15 @@ class TestReprogramacoes:
 
 
 class TestTabelasDeManobras:
-    def test_comeca_com_uma_linha_e_vai_ate_trinta(self, app, banco, janelas):
-        tabela = janelas().tab_lib
+    @pytest.mark.parametrize("nome", ["tab_lib", "tab_nor"])         # itens 6 e 8
+    def test_comeca_com_uma_linha_e_vai_ate_quarenta(self, app, banco, janelas, nome):
+        tabela = getattr(janelas(), nome)
         assert len(tabela.linhas) == 1 and estado(tabela.btn_adicionar) == "normal"
-        for _ in range(29):
+        for _ in range(39):
             tabela._ao_adicionar()
-        assert len(tabela.linhas) == 30 and estado(tabela.btn_adicionar) == "disabled"
-        assert tabela.adicionar_linha() is None and len(tabela.linhas) == 30
-        assert tabela.lbl_contador.cget("text") == "30 de 30 manobras"
+        assert len(tabela.linhas) == 40 and estado(tabela.btn_adicionar) == "disabled"
+        assert tabela.adicionar_linha() is None and len(tabela.linhas) == 40
+        assert tabela.lbl_contador.cget("text") == "40 de 40 manobras"
 
     def test_letra_automatica_acompanha_numero_inclusao_exclusao_e_ordem(self, app, banco, janelas):
         tabela = janelas().tab_lib
@@ -686,11 +689,11 @@ class TestSalvarEValidacoes:
         assert janela.status == EM_ANALISE and janela.numero == "0001/26" and janela.lbl_numero.cget("text") == "0001/26"
         assert "SM salva com sucesso" in mensagens.infos[-1][1]
         assert habilitados(janela) == {"voltar", "editar", "gerar", "reservar", "cancelar", "referencia"}
-        assert travado(janela.equip[0]["local"]) and travado(janela.periodo["p0"]["data_inicio"])
+        assert estado(janela.equip[0]["local"]) == "disabled" and travado(janela.periodo["p0"]["data_inicio"])
         assert estado(janela.txt_motivo) == "disabled" and estado(janela.tab_lib.btn_adicionar) == "disabled"
         assert estado(janela.btn_inverter) == "disabled" and travado(janela.ent_exec_lib_local)
         janela.editar()
-        assert not travado(janela.equip[0]["local"]) and habilitados(janela) >= {"salvar"} and "gerar" not in habilitados(janela)
+        assert liberado(janela.equip[0]["local"]) and habilitados(janela) >= {"salvar"} and "gerar" not in habilitados(janela)
         assert estado(janela.btn_inverter) == "normal"
 
     def test_dados_salvos_sao_recuperados_na_reabertura(self, app, banco, janelas, mensagens):
@@ -924,8 +927,8 @@ class TestReferenciaReservaGridEMenu:
         origem = janelas()
         origem._carregar_documento(fluxo.doc(origem_id))
         criadas = []
-        original = app.JanelaSMAvulso
-        monkeypatch.setattr(app, "JanelaSMAvulso", lambda **kw: criadas.append(original(**kw)) or criadas[-1])
+        original = app.JanelaSMAvulsa
+        monkeypatch.setattr(app, "JanelaSMAvulsa", lambda **kw: criadas.append(original(**kw)) or criadas[-1])
         assert estado(origem.btn_referencia) == "normal"
         origem.referencia()
         nova = criadas[0]
@@ -970,7 +973,7 @@ class TestReferenciaReservaGridEMenu:
         reservada = app.doc_lib_listar_sm()[-1]
         outra = janelas()
         outra._carregar_documento(app.doc_lib_carregar_sm(reservada["ateie_id"]))
-        assert outra.status == RESERVADO and outra.reservado and not travado(outra.equip[0]["local"])
+        assert outra.status == RESERVADO and outra.reservado and liberado(outra.equip[0]["local"])
         assert outra.ent_elaborado_area.get() == "COG"
         preencher(app, outra)
         outra.salvar()
@@ -1024,23 +1027,23 @@ class TestReferenciaReservaGridEMenu:
     def test_menu_doc_lib_tem_as_quatro_opcoes_e_abre_a_sm(self, app, banco, janelas, monkeypatch, mensagens):
         menu = app.fileDOC_LIB
         rotulos = [menu.entrycget(i, "label") for i in range(menu.index("end") + 1) if menu.type(i) == "command"]
-        assert rotulos[:4] == ["ATEIE", "AI", "MO", "SM_Avulso"]
+        assert rotulos[:4] == ["ATEIE", "AI", "MO", "SM_Avulsa"]
         abertas = []
-        monkeypatch.setattr(app, "JanelaSMAvulso", lambda: abertas.append(1))
+        monkeypatch.setattr(app, "JanelaSMAvulsa", lambda: abertas.append(1))
         monkeypatch.setattr(app, "current_user", None)
-        app.cmd_click25_sm_avulso()
+        app.cmd_click25_sm_avulsa()
         assert not abertas and "login" in mensagens.avisos[-1][1]
         monkeypatch.setattr(app, "current_user", "operador1 em 24/10/2026 - 10:00h")
-        app.cmd_click25_sm_avulso()
+        app.cmd_click25_sm_avulsa()
         assert abertas == [1]
 
     def test_comando_do_menu_abre_a_janela_real(self, app, banco, mensagens):
         antes = set(app.root.winfo_children())
-        app.cmd_click25_sm_avulso()
+        app.cmd_click25_sm_avulsa()
         app.root.update()
         novas = [w for w in app.root.winfo_children() if w not in antes and w.winfo_class() == "Toplevel"]
         try:
-            assert any(w.title() == "COG - DOC_LIB. - SM AVULSO" for w in novas)
+            assert any(w.title() == "COG - DOC_LIB. - SM AVULSA" for w in novas)
         finally:
             for w in novas:
                 w.destroy()
