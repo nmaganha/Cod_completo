@@ -1,4 +1,4 @@
-# Código atualizado em 01-11-26 - 1439 - Click_25: (SM_Avulsa: Adicionar Equipamento e 3.1 Local em lista, Condições de Segurança com Nenhuma/Nenhum, 40 manobras nos itens 6 e 8 e novo nome SM_Avulsa)
+# Código atualizado em 01-11-26 - 1749 - Click_25: (SM_Avulsa: Adicionar Equipamento e 3.1 Local em lista, Condições de Segurança com Nenhuma/Nenhum, 40 manobras nos itens 6 e 8 e novo nome SM_Avulsa)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -22471,8 +22471,8 @@ DOC_LIB_CARACTERIZACOES_SM = (["Sem desligamento de UG/LT", "Sem desligamento de
                               + [f"Com risco desligamento {texto}" for texto in _DOC_LIB_DESLIGAMENTOS_SM])
 # 3.1 Local: lista de seleção, gravada exatamente como aparece aqui (a ordem é a da lista)
 DOC_LIB_LOCAIS_SM = [
-    "COG", "UHE MGP", "UHE SJO", "UHE FGO", "PCH QUE", "PCH LAV", "PCH VIE", "CGE PTM", "CGE JDT", "UFV PTM", "EOL VHZ",
-    "EOL SCA", "EOL PTM", "EOL UBA", "EOL GOB", "EOL SAJ", "EOL SRE", "SE MCP", "SE IGU", "SE RSD", "SE SCA", "SE CLA", "SE JDD"]
+    "COG", "UHE MGP", "UHE SJO", "UHE FGO", "PCH QUE", "PCH LAV", "PCH VIE", "CGE PTM", "CGE JDT", "SE MCP",
+    "SE IGU", "SE RSD", "SE SCA", "SE CLA", "SE JDD"]
 # 3.5 Local da Execução dos Serviços: lista de seleção, gravada exatamente como aparece aqui
 DOC_LIB_LOCAIS_EXECUCAO_SM = [
     "COG-P", "COG-R", "UHE MGP", "UHE SJO", "UHE FGO", "PCH LAV", "PCH QUE", "PCH VIE", "CGE PTM", "CGE JDT", "UFV PTM",
