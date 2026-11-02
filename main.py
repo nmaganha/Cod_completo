@@ -1,4 +1,4 @@
-# Código atualizado em 01-11-26 - 1749 - Click_25: (SM_Avulsa: Adicionar Equipamento e 3.1 Local em lista, Condições de Segurança com Nenhuma/Nenhum, 40 manobras nos itens 6 e 8 e novo nome SM_Avulsa)
+# Código atualizado em 02-11-26 - 1041 - Click_25: (SM_Avulsa: Adicionar Equipamento e 3.1 Local em lista, Condições de Segurança com Nenhuma/Nenhum, 40 manobras nos itens 6 e 8 e novo nome SM_Avulsa)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -13903,7 +13903,7 @@ def doc_lib_gerar_pdf_ateie(doc, caminho, gerado_por="", para_envio=False):
                    data_preenchimento="", hora_preenchimento="", notificacoes=[], pessoal=[],
                    observacoes=doc.get("observacoes") or DOC_LIB_TEXTO_PADRAO_OBSERVACOES,
                    intervencoes=[dict(item, **em_branco) for item in doc.get("intervencoes") or []])
-    pdf = PDFAteie(f"Gerado pelo sistema COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}")
+    pdf = PDFAteie(f"Gerado pelo SIGO - COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}")
     pdf.add_page()
     X0, X1 = PDFAteie.X0, PDFAteie.X1
     LARGURA = X1 - X0
@@ -18093,7 +18093,7 @@ def doc_lib_gerar_pdf_ai(doc, caminho, gerado_por="", para_envio=False):
                    solicitado_por="", solicitado_por_usuario="", data_preenchimento="", hora_preenchimento="",
                    notificacoes=[], pessoal=[],
                    intervencoes=[dict(item, **em_branco) for item in doc.get("intervencoes") or []])
-    pdf = PDFAI(f"Gerado pelo sistema COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}")
+    pdf = PDFAI(f"Gerado pelo SIGO - COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}")
     pdf.add_page()
     X0, X1 = PDFAI.X0, PDFAI.X1
     LARGURA = X1 - X0
@@ -20772,7 +20772,7 @@ def doc_lib_gerar_pdf_mo(doc, caminho, gerado_por="", para_envio=False):
     cancelada = doc.get("status") == STATUS_ATEIE_CANCELADO
     if reservada:
         doc = dict(doc, **{campo: "" for campo in DOC_LIB_CAMPOS_MO + DOC_LIB_CAMPOS_DE_ACORDO_MO}, informativa=0)
-    pdf = PDFMO(f"Gerado pelo sistema COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}",
+    pdf = PDFMO(f"Gerado pelo SIGO - COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}",
                 numero=doc.get("numero") or "", cancelada=cancelada)
     pdf.add_page()
     X0, X1 = PDFMO.X0, PDFMO.X1
@@ -22401,8 +22401,8 @@ DOC_LIB_STATUS_SEM_REFERENCIA_SM = (STATUS_ATEIE_RESERVADO,)
 DOC_LIB_TEXTO_SM_RESERVADA = "SM RESERVADA"        # exibido no GRID SM, em Motivo, enquanto a SM está reservada
 # Checkbuttons do item 6 e do item 8: a etapa dispensa as manobras e o dizer passa a ser a única linha da tabela (coluna Ação).
 # Não existe SM sem manobras de liberação e de normalização: as duas opções nunca ficam marcadas ao mesmo tempo.
-DOC_LIB_TEXTO_LIB_EMERGENCIA_SM = "Manobras executadas em emergência ou manutenção da configuração vigente"
-DOC_LIB_TEXTO_NOR_SEM_MANOBRAS_SM = "Sem necessidade de manobras de normalização, pois a configuração será mantida como se encontra"
+DOC_LIB_TEXTO_LIB_EMERGENCIA_SM = "Manobras executadas em caráter de emergência ou manutenção da configuração vigente"
+DOC_LIB_TEXTO_NOR_SEM_MANOBRAS_SM = "Dispensam-se manobras de normalização, pois a configuração atual será mantida."
 DOC_LIB_CAMPOS_FLAGS_SM = ("lib_emergencia", "nor_sem_manobras")
 # tabela de manobras -> (campo da opção, dizer)
 DOC_LIB_OPCAO_SEM_MANOBRAS_SM = {"liberacao": ("lib_emergencia", DOC_LIB_TEXTO_LIB_EMERGENCIA_SM),
@@ -24148,7 +24148,7 @@ def doc_lib_gerar_pdf_sm(doc, caminho, gerado_por=""):
     aguardando = not reservada and not cancelada and (
         (bool(doc.get("emitido")) and doc.get("status") == STATUS_SM_AGUARDA_CONFERENCIA)
         or doc.get("status") == STATUS_ATEIE_EM_ANALISE)         # SM salva e ainda sem as duas conferências (e-mail para conferência)
-    pdf = PDFSM(f"Gerado pelo sistema COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}",
+    pdf = PDFSM(f"Gerado pelo SIGO - COG-Alupar em {agora.strftime('%d/%m/%Y às %H:%M')} por {gerado_por}",
                 numero=doc.get("numero") or "", cancelada=cancelada,
                 aviso="Aguardando a Conferência do documento" if aguardando else "")
     pdf.add_page()
@@ -27051,11 +27051,11 @@ _PROTECAO_JANELAS_ABERTAS = {}
 # sigla do equipamento -> (nome por extenso, funções de proteção na ordem em que são apresentadas)
 PROTECAO_EQUIPAMENTOS = {
     "UG": ("Unidade Geradora (UG)",
-           ["12", "21G", "24", "49", "50", "64R", "64s1", "64s2", "67", "81O", "81U", "86", "87G"]),
+           ["12", "21G", "24", "40", "46", "49", "50", "59", "60", "64R", "64S1", "64S2", "81O", "81U", "86", "87G"]),
     "TR": ("Transformador (TR)",
-           ["26", "49", "50/51", "63", "87", "64R", "64s1", "64s2", "67", "71", "81O", "81U", "86", "87G", "97"]),
+           ["26", "49", "50/51", "63", "87", "71", "86", "87T", "VAP"]),
     "LT": ("Linha de Transmissão (LT)",
-           ["21", "27", "50BF", "67", "68", "78", "81O", "81U", "86", "87"]),
+           ["21", "27", "50BF", "59", "67", "68", "78", "81O", "81U", "86", "87L"]),
     "BARRA": ("BARRA", ["25", "50BF", "86", "87"]),
     "RMT": ("RMT", ["50/51", "86", "87"]),
     "AERO": ("AERO", ["50/51", "86", "87"]),
