@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 
 import pytest
 
@@ -56,6 +57,26 @@ def banco(app, tmp_path, monkeypatch):
     monkeypatch.setattr(app, "current_user", "operador1 em 24/10/2026 - 10:00h")
     app.garantir_banco_doc_lib()
     return tmp_path
+
+
+class RelogioSM:
+    """Relógio das regras de tempo da Reprogramação da SM (doc_lib_agora_sm). Os dados de teste usam datas fixas de outubro de
+    2026; por isso o relógio nasce em 24/10/2026 10:00, antes da programação padrão (25/10/2026 08:00 a 17:00), e não depende
+    da data real da máquina. Para outro momento: relogio.definir(datetime(...))."""
+
+    def __init__(self):
+        self.agora = datetime(2026, 10, 24, 10, 0)
+
+    def definir(self, momento):
+        self.agora = momento
+
+
+@pytest.fixture(autouse=True)
+def relogio(app, monkeypatch):
+    """Fixa o relógio da SM em todos os testes (ver RelogioSM)."""
+    relogio_fixo = RelogioSM()
+    monkeypatch.setattr(app, "doc_lib_agora_sm", lambda: relogio_fixo.agora)
+    return relogio_fixo
 
 
 @pytest.fixture()

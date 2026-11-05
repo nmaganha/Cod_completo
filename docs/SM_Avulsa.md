@@ -16,7 +16,8 @@ Segue os padrões da MO (numeração, reserva, status, GRID, referência, PDF) e
 | SM-Referência | `doc_lib_dados_referencia_sm` e o botão em `JanelaSMAvulsa.referencia` |
 | PDF | `PDFSM`, `doc_lib_gerar_pdf_sm`, `doc_lib_registrar_e_arquivar_sm` |
 | Ordem dos horários das manobras | `doc_lib_conflitos_horarios_sm` (chamada por `doc_lib_validar_sm`) |
-| Antecedência da liberação (3 h) | `DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM`, `doc_lib_inicio_vigente_sm` (usadas por `doc_lib_validar_sm`) |
+| Janela da liberação (3 h antes e 3 h depois do início) | `DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM`, `DOC_LIB_ATRASO_MAXIMO_LIBERACAO_SM`, `doc_lib_inicio_vigente_sm` (usadas por `doc_lib_validar_sm`) |
+| Regras de tempo da Reprogramação (início no passado; período vencido há mais de 6 h) | `doc_lib_erros_prazo_reprogramacao_sm`, `DOC_LIB_VENCIMENTO_MAXIMO_REPROGRAMACAO_SM`, `doc_lib_agora_sm` (usadas por `doc_lib_validar_sm` e por `JanelaSMAvulsa.habilitar_reprogramacao`) |
 | Prorrogar | `doc_lib_prefixo_vigente_sm`, `doc_lib_validar_prorrogacao_sm`, `doc_lib_dados_prorrogacao_sm`, `doc_lib_prorrogar_sm`, `DialogoProrrogarSM`, `JanelaSMAvulsa.prorrogar` / `_aplicar_periodos` / `_atualizar_prorrogar` |
 | Encaminhar SM por e-mail | `doc_lib_listar_contatos_sm`, `doc_lib_incluir_contato_sm`, `doc_lib_salvar_padroes_contatos_sm`, `doc_lib_enderecos_envio_sm`, `doc_lib_validar_envio_sm`, `doc_lib_pdf_para_envio_sm`, `doc_lib_registrar_envio_sm`, `doc_lib_definir_email_enviado_sm`, `DialogoEncaminharSM`, `JanelaSMAvulsa.encaminhar` |
 | Telas | `JanelaSMAvulsa`, `LinhasManobrasSM`, `LinhasConferenciaSM`, `JanelaListaSM` (GRID SM) |
@@ -198,18 +199,21 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
       novo para o PDF mostrar a prorrogação;
     - o período **já salvo** não é editado direto (nem a Programação, que já era protegida, nem uma reprogramação salva): com a SM Em
       Execução o término só muda pelo Prorrogar. O GRID SM mostra o término vigente.
-20. **Antecedência das manobras de liberação**: a data e hora de cada manobra de liberação não pode ser **anterior a 3 horas do início
-    programado**. O "programado" é o início do período em vigor (se houve reprogramação preenchida, vale o início dela). Exemplo: programado
-    para 10/10/2026 14:00, a primeira manobra pode ser lançada a partir de 10/10/2026 11:00 (exatamente 3 horas antes é aceito; 10:59
-    é recusado). A regra atravessa a meia-noite. Detalhes:
+20. **Janela de tempo das manobras de liberação (de 3 horas antes a 3 horas depois do início)**: a data e hora de cada manobra de
+    liberação não pode ser **anterior a 3 horas do início programado** (`DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM`) **nem posterior a 3 horas
+    do início programado** (`DOC_LIB_ATRASO_MAXIMO_LIBERACAO_SM`, acrescentada em 05/11/2026). O "programado" é o início do período em vigor
+    (se houve reprogramação preenchida, vale o início dela). Exemplo: programado para 10/10/2026 14:00, as manobras podem ser lançadas de
+    10/10/2026 11:00 a 10/10/2026 17:00 (exatamente 3 horas antes ou depois é aceito; 10:59 e 17:01 são recusados). A regra atravessa a
+    meia-noite. Passou do limite de 3 horas depois, a SM precisa ser **reprogramada** antes de lançar o horário (ver decisão 28). Detalhes:
     - vale enquanto a liberação pode ser lançada (SM **Aprovada para Execução**). Depois de registrada a liberação ela fica bloqueada e
       não é conferida de novo: uma reprogramação posterior não invalida manobras já executadas;
-    - se uma reprogramação for salva com a liberação já lançada em Aprovado e as manobras ficarem a mais de 3 horas do novo início, a
-      gravação é recusada até as datas serem corrigidas **na mesma gravação**;
-    - não há limite do outro lado (manobra depois do início) nem regra equivalente para a normalização; também não vale com a opção "Manobras
-      executadas em emergência..." do item 6 (não há manobras de liberação a datar);
-    - a mensagem aponta a linha ("linha 1 (sequência 1A)"), o início programado e o primeiro horário permitido, e as caixas de data e
-      hora ficam em vermelho. A dica do item 6 informa a regra.
+    - se uma reprogramação for salva com a liberação já lançada em Aprovado e as manobras ficarem fora da janela do novo início (a mais de 3
+      horas antes ou depois dele), a gravação é recusada até as datas serem corrigidas **na mesma gravação**;
+    - não há regra equivalente para a normalização; também não vale com a opção "Manobras executadas em emergência..." do item 6 (não há
+      manobras de liberação a datar);
+    - a mensagem aponta a linha ("linha 1 (sequência 1A)"), o início programado e o primeiro (ou o último) horário permitido, e as caixas de
+      data e hora ficam em vermelho. A regra não está escrita na dica do item 6 da tela (a dica diz só o limite de linhas): ela é avisada na
+      mensagem ao salvar.
 21. **Opções "sem manobras" (itens 6 e 8)**: dois checkbuttons, um logo abaixo de cada tabela, antes dos executantes:
     - item 6: **"Manobras executadas em emergência ou manutenção da configuração vigente"** (liberação dispensada);
     - item 8: **"Sem necessidade de manobras de normalização, pois a configuração será mantida como se encontra"** (normalização dispensada).
@@ -291,6 +295,24 @@ os executantes). Com uma das opções "sem manobras" os grupos de Aprovado mudam
     linhas, os ids e o contador (`_doc_lib_garantir_tabela_com_limite_sm`). Foi testada com uma cópia do `dados_turno.db` do repositório
     (16 SM, 36 linhas de equipamentos e 105 manobras: mesmos dados antes e depois, `integrity_check` ok). Recomenda-se uma cópia do
     `dados_turno.db` antes de abrir a versão nova pela primeira vez.
+28. **Regras de tempo da Reprogramação (itens 2.2 a 2.4), de 05/11/2026**: a Reprogramação **nova** (a que difere da gravada) só é aceita se:
+    - **o início não é anterior ao momento atual**: não se programa uma sequência de manobras para um período passado. Início igual ao
+      momento atual (no minuto) é aceito; um minuto antes é recusado, inclusive em outro dia. Vale o **início**: um período que começou e
+      ainda não terminou também é recusado, porque a sequência estaria sendo programada para começar no passado;
+    - **o período em vigor não venceu há mais de 6 horas**: o "período programado" é o que está em vigor antes da reprogramação (a
+      Programação para a Reprogramação-1, a Reprogramação-1 para a 2, a 2 para a 3) e o vencimento é o **término** dele. Exatamente 6 horas
+      depois do término ainda é aceito; 6 horas e 1 minuto é recusado (`DOC_LIB_VENCIMENTO_MAXIMO_REPROGRAMACAO_SM`). A mensagem informa o
+      término, o momento atual e o limite (término + 6 horas). Vencido além disso, a SM não é mais reprogramada.
+    Detalhes:
+    - as regras ficam em `doc_lib_erros_prazo_reprogramacao_sm`, chamada por `doc_lib_validar_sm` (tela e `doc_lib_salvar_sm`, dentro da
+      transação). O botão **Habilitar** faz a conferência do vencimento de imediato e mostra o aviso "Reprogramação não permitida" sem
+      habilitar os campos; o início no passado só pode ser conferido quando o início é digitado (ao salvar: as caixas de data e hora do
+      início ficam em vermelho, e no período vencido ficam as quatro);
+    - uma reprogramação **já salva não é conferida de novo**: o tempo passa, e a SM continua aceitando as demais gravações (conferências,
+      horários da liberação, executantes). `doc_lib_validar_sm(doc, doc)` (usada para gerar o documento) também não as aplica;
+    - a **Programação original** (2.1) não passa por estas regras, e a Prorrogação (SM Em Execução) segue as dela (decisão 19);
+    - o momento atual vem de `doc_lib_agora_sm()` (sem segundos, hora do computador); os testes a substituem por um relógio fixo
+      (fixture `relogio`, que começa em 24/10/2026 10:00).
 
 ## Banco de dados
 
@@ -328,6 +350,7 @@ xvfb-run -a python -m pytest tests  # Linux sem tela (o conftest também inicia 
 | `test_sm_avulsa_elaborador.py` | quem elabora não confere (Operação por login, Manutenção por nome), trigger, janela e o botão NOVA SM do GRID SM |
 | `test_sm_avulsa_pdf.py` | conteúdo, caixa alta, Indisponível, ausência de data/hora das manobras, paginação, quebra de texto, alinhamento, margens, reservada, cancelada, arquivamento |
 | `test_sm_avulsa_ajustes_click25.py` | ajuste de 01/11/2026: lista do 3.1 Local, de 1 a 5 equipamentos (dados, banco, referência e PDF com 3, 4 e 5 linhas), botão Adicionar Equipamento na janela, padrões Nenhuma/Nenhum das condições, 40 manobras (tela, dados, banco, PDF), migração do banco antigo (limites 3 e 30) e o termo SM_Avulsa |
+| `test_sm_avulsa_prazos_click25.py` | regras de tempo de 05/11/2026: Reprogramação sem início no passado, sem período vencido há mais de 6 h (limites exatos, meia-noite, Reprogramação-2 medida pela 1), reprogramação salva não reconferida, botão Habilitar e marcação dos campos; liberação entre 3 h antes e 3 h depois do início (limites, meia-noite, período em vigor, reprogramar com a liberação lançada, normalização sem limite) |
 | `test_regressao_doc_lib.py` | ATEIE, AI e MO (salvar, gerar, De acordo, reserva, MO-Referência, janelas, menu, GRID) e numerações independentes |
 
 ## Limites desta entrega

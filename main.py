@@ -1,4 +1,4 @@
-# Código atualizado em 02-11-26 - 1041 - Click_25: (SM_Avulsa: Adicionar Equipamento e 3.1 Local em lista, Condições de Segurança com Nenhuma/Nenhum, 40 manobras nos itens 6 e 8 e novo nome SM_Avulsa)
+# Código atualizado em 05-11-26 - 2134 - Click_25: (SM_Avulsa: Reprogramação sem início no passado e sem período vencido há mais de 6 horas; manobras de liberação até 3 horas depois do início programado)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -23128,6 +23128,44 @@ def doc_lib_periodo_vigente_sm(doc):
 # As manobras de liberação não podem ser lançadas com mais de 3 horas de antecedência em relação ao início programado
 # (o período em vigor): programado para 10/10/2026 14:00, a primeira manobra pode ser lançada a partir de 10/10/2026 11:00.
 DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM = timedelta(hours=3)
+# Nem com mais de 3 horas de atraso em relação ao início programado: para o mesmo exemplo, a última manobra pode ser lançada
+# até 10/10/2026 17:00. Passou disso, a SM precisa ser reprogramada antes.
+DOC_LIB_ATRASO_MAXIMO_LIBERACAO_SM = timedelta(hours=3)
+# Reprogramação (itens 2.2 a 2.4): não é aceita se o término programado do período em vigor venceu há mais de 6 horas.
+DOC_LIB_VENCIMENTO_MAXIMO_REPROGRAMACAO_SM = timedelta(hours=6)
+
+
+def doc_lib_agora_sm():
+    """Momento atual, sem segundos (as datas e horas da SM são em minutos). É o relógio das regras de tempo da Reprogramação:
+    os testes automatizados substituem esta função para fixar o momento."""
+    return datetime.now().replace(second=0, microsecond=0)
+
+
+def doc_lib_erros_prazo_reprogramacao_sm(prefixo, dados, agora=None):
+    """Regras de tempo de uma Reprogramação NOVA (prefixo 'p1' a 'p3'; as já salvas não são conferidas de novo, porque o tempo
+    passa). Devolve [(chaves_dos_campos, mensagem)], vazia se estiver tudo certo ou se os períodos ainda não forem válidos:
+      - o início não pode ser anterior ao momento atual (não se programa uma sequência de manobras para um período passado);
+      - não há reprogramação se o término programado do período em vigor (a Programação ou a Reprogramação anterior)
+        venceu há mais de 6 horas em relação ao momento atual (exatamente 6 horas ainda é aceito)."""
+    agora = agora or doc_lib_agora_sm()
+    indice = int(prefixo[1])
+    campos, nome = doc_lib_campos_periodo_sm(prefixo), DOC_LIB_PERIODOS_SM[indice][2]
+    anterior, nome_anterior = doc_lib_campos_periodo_sm(DOC_LIB_PERIODOS_SM[indice - 1][0]), DOC_LIB_PERIODOS_SM[indice - 1][2]
+    erros = []
+    termino_anterior = _doc_lib_data_hora(dados.get(anterior[2]), dados.get(anterior[3]))
+    if termino_anterior is not None and agora - termino_anterior > DOC_LIB_VENCIMENTO_MAXIMO_REPROGRAMACAO_SM:
+        limite = termino_anterior + DOC_LIB_VENCIMENTO_MAXIMO_REPROGRAMACAO_SM
+        erros.append((campos, f"{nome}: não é permitido reprogramar. O período em vigor ({nome_anterior}) terminou em "
+                              f"{termino_anterior.strftime('%d/%m/%Y %H:%M')}, há mais de 6 horas em relação ao momento atual "
+                              f"({agora.strftime('%d/%m/%Y %H:%M')}). A reprogramação só é aceita até 6 horas depois do término "
+                              f"programado (até {limite.strftime('%d/%m/%Y %H:%M')})."))
+    inicio = _doc_lib_data_hora(dados.get(campos[0]), dados.get(campos[1]))
+    if inicio is not None and inicio < agora:
+        erros.append(((campos[0], campos[1]),
+                      f"{nome}: o início ({inicio.strftime('%d/%m/%Y %H:%M')}) é anterior ao momento atual "
+                      f"({agora.strftime('%d/%m/%Y %H:%M')}). Não é permitido programar a sequência de manobras para um "
+                      f"período passado."))
+    return erros
 
 
 def doc_lib_inicio_vigente_sm(doc):
@@ -23274,14 +23312,16 @@ def doc_lib_conflitos_horarios_sm(linhas):
     return conflitos
 
 
-def doc_lib_validar_sm(dados, atual=None):
+def doc_lib_validar_sm(dados, atual=None, agora=None):
     """Valida a SM (antes de salvar, antes de gerar o documento e dentro de doc_lib_salvar_sm). 'dados' já normalizados por
     doc_lib_normalizar_sm; 'atual' é o documento como está gravado (None na SM nova). O que se valida depende do status:
     na edição geral (SM nova, Reservada ou Em análise) todos os campos obrigatórios; nos demais status, só o que ainda pode
-    mudar (reprogramações, data e hora das manobras, executantes e conferências).
+    mudar (reprogramações, data e hora das manobras, executantes e conferências). 'agora' é o momento usado nas regras de tempo
+    da Reprogramação (None = doc_lib_agora_sm()).
 
     Retorna uma lista de (chaves_dos_campos, mensagem); lista vazia = válido. Chaves das tabelas: 'equip:1:local',
     'lib:3:acao' (liberação), 'nor:2:numero' (normalização), 'conf:1:nome' (conferência)."""
+    agora = agora or doc_lib_agora_sm()
     erros = []
     status = (atual or {}).get("status")
     geral = status in (None, STATUS_ATEIE_RESERVADO, STATUS_ATEIE_EM_ANALISE)
@@ -23325,6 +23365,13 @@ def doc_lib_validar_sm(dados, atual=None):
                     erro((campos[2], campos[3]), f"{nome}: o término não pode ser anterior ao início.")
                     validos = False
             completo = validos
+            # regras de tempo (início no passado; período em vigor vencido há mais de 6 horas): só para a Reprogramação nova,
+            # isto é, a que difere da gravada. A já salva não é conferida de novo (o tempo passa) e nem é editada
+            # (doc_lib_diferencas_bloqueadas_sm). As regras não alteram "completo": o erro de tempo não gera outro na seguinte.
+            if validos and prefixo != "p0" and any(_doc_lib_txt(dados.get(campo)) != _doc_lib_txt((atual or {}).get(campo))
+                                                   for campo in campos):
+                for chaves, mensagem in doc_lib_erros_prazo_reprogramacao_sm(prefixo, dados, agora):
+                    erro(chaves, mensagem)
             if preenchidos and not anterior_completo:
                 erro(campos, f"{nome}: preencha antes o período anterior (as reprogramações seguem a ordem).")
         anterior_completo = completo
@@ -23418,11 +23465,12 @@ def doc_lib_validar_sm(dados, atual=None):
                  f"{titulo}, linha {posicao} (sequência {identificacoes[posicao - 1]}): a data e a hora não podem ser "
                  f"anteriores às da sequência {identificacoes[referencia - 1]} (linha {referencia}), que tem número "
                  f"arábico menor.")
-    # liberação: no máximo 3 horas antes do início programado (período em vigor). Vale enquanto as datas da liberação podem ser
-    # lançadas (SM Aprovada para Execução); depois de registrada a liberação ela fica bloqueada e não é conferida de novo
+    # liberação: de 3 horas antes a 3 horas depois do início programado (período em vigor). Vale enquanto as datas da liberação
+    # podem ser lançadas (SM Aprovada para Execução); depois de registrada a liberação ela fica bloqueada e não é conferida de novo
     inicio_vigente = doc_lib_inicio_vigente_sm(dados)
     if status == STATUS_ATEIE_APROVADO_EXECUCAO and inicio_vigente is not None and not dados.get("lib_emergencia"):
         minimo = inicio_vigente - DOC_LIB_ANTECEDENCIA_MAXIMA_LIBERACAO_SM
+        maximo = inicio_vigente + DOC_LIB_ATRASO_MAXIMO_LIBERACAO_SM
         linhas = dados.get("liberacao") or []
         identificacoes = doc_lib_identificar_sequencias_sm([linha["numero"] for linha in linhas])
         for posicao, linha in enumerate(linhas, start=1):
@@ -23432,6 +23480,12 @@ def doc_lib_validar_sm(dados, atual=None):
                      f"Manobras de Liberação, linha {posicao} (sequência {identificacoes[posicao - 1]}): a data e a hora não "
                      f"podem ser anteriores a 3 horas do início programado ({inicio_vigente.strftime('%d/%m/%Y %H:%M')}); "
                      f"o primeiro horário permitido é {minimo.strftime('%d/%m/%Y %H:%M')}.")
+            elif momento is not None and momento > maximo:
+                erro((f"lib:{posicao}:data", f"lib:{posicao}:hora"),
+                     f"Manobras de Liberação, linha {posicao} (sequência {identificacoes[posicao - 1]}): a data e a hora não "
+                     f"podem ser posteriores a 3 horas do início programado ({inicio_vigente.strftime('%d/%m/%Y %H:%M')}); "
+                     f"o último horário permitido é {maximo.strftime('%d/%m/%Y %H:%M')}. Se a liberação passou desse limite, "
+                     f"reprograme a SM antes de lançar o horário.")
     ultima_liberacao = max((m for m in map(_doc_lib_data_hora_manobra_sm, dados.get("liberacao") or []) if m), default=None)
     for posicao, linha in enumerate(dados.get("normalizacao") or [], start=1):
         momento = _doc_lib_data_hora_manobra_sm(linha)
@@ -26030,7 +26084,8 @@ class JanelaSMAvulsa:
             dados["botao"] = doc_lib_criar_botao(cabecalho, "Habilitar", lambda p=prefixo: self.habilitar_reprogramacao(p),
                                                  "aviso", fonte=(SGA_FONTE, 8, "bold"))
             dados["botao"].pack(side=RIGHT, padx=6, pady=3, ipadx=6)
-            DicaBotaoSM(dados["botao"], "Habilita o preenchimento desta reprogramação (as reprogramações seguem a ordem)")
+            DicaBotaoSM(dados["botao"], "Habilita o preenchimento desta reprogramação (as reprogramações seguem a ordem). "
+                                        "Não aceita início anterior ao momento atual nem período em vigor vencido há mais de 6 horas")
         # Prorrogar: fica no quadro do período em vigor, no lugar do Habilitar (a Programação não tem Habilitar); _aplicar_periodos
         # mostra um ou outro e _atualizar_prorrogar diz quando pode ser usado
         dados["botao_prorrogar"] = doc_lib_criar_botao(cabecalho, "Prorrogar", self.prorrogar, "agendar",
@@ -26248,6 +26303,12 @@ class JanelaSMAvulsa:
         permitindo; os dados dos períodos anteriores não são alterados."""
         numero = int(prefixo[1])
         if numero != self.reprogramacoes_habilitadas + 1 or "reprogramacao" not in self._grupos_editaveis():
+            return
+        # período em vigor (gravado) vencido há mais de 6 horas: não há reprogramação (o mesmo teste é refeito ao salvar)
+        vencido = doc_lib_erros_prazo_reprogramacao_sm(prefixo, self._doc_gravado or {})
+        if vencido:
+            messagebox.showwarning("Reprogramação não permitida", "\n\n".join(mensagem for _, mensagem in vencido),
+                                   parent=self.janela)
             return
         self.reprogramacoes_habilitadas = numero
         self._aplicar_periodos()
