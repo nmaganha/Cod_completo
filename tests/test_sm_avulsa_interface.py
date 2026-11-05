@@ -767,7 +767,7 @@ class TestFluxoCompletoPelaInterface:
         assert not travado(janela.ent_exec_lib_local) and travado(janela.ent_exec_nor_local)
         for indice, linha_lib in enumerate(janela.tab_lib.linhas):
             definir(app, linha_lib["data"], "25/10/2026")
-            definir(app, linha_lib["hora"], f"13:{indice * 10:02d}")
+            definir(app, linha_lib["hora"], f"09:{indice * 10:02d}")      # programação às 08:00: de 05:00 a 11:00 é aceito
         definir(app, janela.ent_exec_lib_local, "Fulano (campo)")
         janela.salvar()
         assert janela.status == EM_EXECUCAO
