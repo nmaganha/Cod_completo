@@ -1,4 +1,4 @@
-# Código atualizado em 05-11-26 - 2134 - Click_25: (SM_Avulsa: Reprogramação sem início no passado e sem período vencido há mais de 6 horas; manobras de liberação até 3 horas depois do início programado)
+# Código atualizado em 05-11-26 - 2350 - Executável .exe: banco, imagens e fontes na pasta do .exe e mensagem clara no login quando o banco não é o do sistema. Click_25: (SM_Avulsa: Reprogramação sem início no passado e sem período vencido há mais de 6 horas; manobras de liberação até 3 horas depois do início programado)
 import sqlite3
 from tkinter import *
 # from tkinter import ttk, messagebox
@@ -7,6 +7,7 @@ from tkcalendar import Calendar
 from datetime import datetime, timedelta
 from fpdf import FPDF, XPos, YPos
 import os
+import sys
 import platform
 import shutil #exclusivo para o click24
 import subprocess
@@ -40,6 +41,19 @@ except ImportError:
         PYMUPDF_DISPONIVEL = False
 from matplotlib.figure import Figure  # exclusivo para o click23
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # exclusivo para o click23
+
+# ===========================================================================================
+# PASTA DO APLICATIVO (versão em Python e versão executável .exe, gerada com auto-py-to-exe / PyInstaller)
+# ===========================================================================================
+# O banco (dados_turno.db), as imagens, as fontes e as pastas de dados (sga_anexos, doc_lib_arquivo...) são lidos e gravados
+# na pasta do aplicativo. Na versão .exe é a pasta onde está o .exe: nem a pasta temporária em que o PyInstaller descompacta o
+# programa (modo "um arquivo"), nem a pasta de onde o usuário o abriu. Por isso, no .exe, o diretório de trabalho passa a ser
+# essa pasta (os nomes relativos, como 'dados_turno.db' e 'cog3.png', continuam valendo). Na versão em Python nada muda.
+if getattr(sys, "frozen", False):
+    PASTA_APLICATIVO = os.path.dirname(os.path.abspath(sys.executable))
+    os.chdir(PASTA_APLICATIVO)
+else:
+    PASTA_APLICATIVO = os.path.dirname(os.path.abspath(__file__))
 
 # ===========================================================================================
 # TEMA VISUAL MODERNO - identidade única para TODAS as janelas do sistema
@@ -9904,8 +9918,8 @@ def cmd_click22():
     # QUESTIONÁRIO CLICK_23 - QUIZ COM BANCO DE QUESTÕES EM CSV
     # ---------------------------------------------------
 
-PASTA_BASE = os.path.dirname(os.path.abspath(__file__))
-QUESTOES_CSV = os.path.join(PASTA_BASE, "banco_questoes_click23.csv")
+PASTA_BASE = PASTA_APLICATIVO
+QUESTOES_CSV =os.path.join(PASTA_BASE, "banco_questoes_click23.csv")
 RESULTADOS_CSV = os.path.join(PASTA_BASE, "resultados_click23.csv")
 
 SEPARADOR_CSV_QUESTOES = ";"
@@ -10543,7 +10557,7 @@ def cmd_click23():
     # SGA - SISTEMA DE GESTÃO DE ATIVIDADES (CLICK_24)
     # ---------------------------------------------------
 
-PASTA_BASE = os.path.dirname(os.path.abspath(__file__))
+PASTA_BASE = PASTA_APLICATIVO
 # Mesmo banco de dados já usado no restante do aplicativo (login, demais módulos).
 BANCO_SGA = "dados_turno.db"
 PASTA_ANEXOS_SGA = os.path.join(PASTA_BASE, "sga_anexos")
@@ -27292,8 +27306,20 @@ def realizar_login():
     cursor = conexao.cursor()
 
     # Certifique-se de que a consulta retorna todos os campos
-    cursor.execute("SELECT id, usuario, senha, admin, primeiro_acesso FROM Usuarios WHERE usuario = ? AND senha = ?",
-                   (usuario, senha))
+    try:
+        cursor.execute("SELECT id, usuario, senha, admin, primeiro_acesso FROM Usuarios WHERE usuario = ? AND senha = ?",
+                       (usuario, senha))
+    except sqlite3.OperationalError as erro:
+        # Banco sem a tabela Usuarios: o programa abriu um dados_turno.db vazio (a tabela só existe no banco completo do
+        # sistema; o programa não a cria). Acontece quando o .exe é aberto sem o banco real na pasta dele.
+        conexao.close()
+        messagebox.showerror(
+            "Banco de dados não encontrado",
+            f"Não foi possível consultar os usuários ({erro}).\n\n"
+            f"Banco aberto pelo programa:\n{os.path.abspath('dados_turno.db')}\n\n"
+            "Esse banco está vazio ou não é o do sistema. Feche o programa, apague esse arquivo e copie o "
+            "dados_turno.db completo (o mesmo usado na versão em Python) para a pasta do programa; depois abra de novo.")
+        return
     resultado = cursor.fetchone()
 
     if resultado:
